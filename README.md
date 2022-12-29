@@ -11,3 +11,6 @@ Driver for the Wifi+bluetooth integrated circuit on the pico.
     
     * [`pico_cyw43_arch`](https://github.com/raspberrypi/pico-sdk/blob/master/src/rp2_common/pico_cyw43_arch): Architecture for integrating the CYW43 driver (for the wireless on Pico W) and lwIP (for TCP/IP stack) into the SDK. It is also necessary for accessing the on-board LED on Pico W.
         * [`pico_cyw43_arch/include/pico/cyw43_arch.h`](https://github.com/raspberrypi/pico-sdk/blob/master/src/rp2_common/pico_cyw43_arch/include/pico/cyw43_arch.h): Headers for the architecture driver. Has a **very complete comment** introducing the architecture library.
+
+### Go and TinyGo Ethernet/IP/TCP stack comparisons
+![stack comparison](stack_comparison.png)
