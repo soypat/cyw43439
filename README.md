@@ -2,6 +2,8 @@
 Driver for the Wifi+bluetooth integrated circuit on the pico.
 
 ## FYI
+* [RP2040 datasheet](https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf).
+
 * [CYW43439 datasheet](https://www.infineon.com/dgdl/Infineon-CYW43439-DataSheet-v03_00-EN.pdf?fileId=8ac78c8c8386267f0183c320336c029f)
 
 * [Pico SDK github repo](https://github.com/raspberrypi/pico-sdk)
