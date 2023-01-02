@@ -16,9 +16,9 @@ Driver for the Wifi+bluetooth integrated circuit on the pico.
 
 ### Peripheral side APIs
 Examples:
-* [APA102C](https://www.pololu.com/product/2554) addressable LED strip. 
+* [APA102](https://www.pololu.com/product/2554) addressable LED strip. 
     - Here is the [Go driver](https://github.com/tinygo-org/drivers/blob/release/apa102/apa102.go): well programmed and simple. Follows good practices like storing buffers in-struct as arrays (`buf` field) to avoid heap allocations and encouraging better CPU memory access patterns.
-    - I could not find a high quality C or C++ driver, there seems to be a different driver for each microcontroller. [Here's an ESP8266](https://github.com/leonyuhanov/esp8266apa102driver/blob/master/apa102LEDStrip.cpp) driver for the APA102C which seemed reasonably well programmed.
+    - I could not find a high quality C or C++ driver, there seems to be a different driver for each microcontroller. [Here's an ESP8266](https://github.com/leonyuhanov/esp8266apa102driver/blob/master/apa102LEDStrip.cpp) driver for the APA102 which seemed reasonably well programmed.
 * [Wifinina SPI driver](https://github.com/tinygo-org/drivers/tree/release/wifinina) for ESP32 wifi with TCP/IP.
 
 
