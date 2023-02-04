@@ -21,6 +21,7 @@ type bbSPI struct {
 func (s *bbSPI) Configure() {
 	s.SCK.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	s.SDO.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	s.SDO.Configure(machine.PinConfig{Mode: machine.PinInput})
 	s.SCK.Low()
 	s.SDO.Low()
 	if s.Delay == 0 {
