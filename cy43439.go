@@ -23,7 +23,7 @@ func PicoWSpi() (spi drivers.SPI, cs, wlRegOn, irq machine.Pin) {
 	CLK.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	// DATA_IN.Configure(machine.PinConfig{Mode: machine.PinInput})
 	DATA_OUT.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	spi = &bbSPI{
+	spi = &SPIbb{
 		SCK:   CLK,
 		SDI:   DATA_IN,
 		SDO:   DATA_OUT,

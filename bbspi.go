@@ -5,12 +5,12 @@ import (
 	"machine"
 )
 
-// bbSPI is a dumb bit-bang implementation of SPI protocol that is hardcoded
+// SPIbb is a dumb bit-bang implementation of SPI protocol that is hardcoded
 // to mode 0 and ignores trying to receive data. Just enough for the APA102.
 // Note: making this unexported for now because it is probable not suitable
 // most purposes other than the APA102 package. It might be desirable to make
 // this more generic and include it in the TinyGo "machine" package instead.
-type bbSPI struct {
+type SPIbb struct {
 	SCK   machine.Pin
 	SDI   machine.Pin
 	SDO   machine.Pin
@@ -18,7 +18,7 @@ type bbSPI struct {
 }
 
 // Configure sets up the SCK and SDO pins as outputs and sets them low
-func (s *bbSPI) Configure() {
+func (s *SPIbb) Configure() {
 	s.SCK.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	s.SDO.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	s.SDO.Configure(machine.PinConfig{Mode: machine.PinInput})
@@ -31,7 +31,7 @@ func (s *bbSPI) Configure() {
 
 // Tx matches signature of machine.SPI.Tx() and is used to send multiple bytes.
 // The r slice is ignored and no error will ever be returned.
-func (s *bbSPI) Tx(w []byte, r []byte) error {
+func (s *SPIbb) Tx(w []byte, r []byte) error {
 	s.Configure()
 	switch {
 	case len(r) == len(w):
@@ -53,7 +53,7 @@ func (s *bbSPI) Tx(w []byte, r []byte) error {
 }
 
 // delay represents a quarter of the clock cycle
-func (s *bbSPI) delay() {
+func (s *SPIbb) delay() {
 	for i := uint32(0); i < s.Delay; {
 		i++
 	}
@@ -61,7 +61,7 @@ func (s *bbSPI) delay() {
 
 // Transfer matches signature of machine.SPI.Transfer() and is used to send a
 // single byte. The received data is ignored and no error will ever be returned.
-func (s *bbSPI) Transfer(b byte) (out byte, _ error) {
+func (s *SPIbb) Transfer(b byte) (out byte, _ error) {
 	out |= b2u8(s.bitTransfer(b&(1<<7) != 0)) << 7
 	out |= b2u8(s.bitTransfer(b&(1<<6) != 0)) << 6
 	out |= b2u8(s.bitTransfer(b&(1<<5) != 0)) << 5
@@ -74,7 +74,7 @@ func (s *bbSPI) Transfer(b byte) (out byte, _ error) {
 }
 
 //go:inline
-func (s *bbSPI) bitTransfer(b bool) bool {
+func (s *SPIbb) bitTransfer(b bool) bool {
 	s.SDO.Set(b)
 	s.SCK.High()
 	b4 := s.SDI.Get()
