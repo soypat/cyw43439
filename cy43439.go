@@ -1,8 +1,8 @@
 package cyw43439
 
 import (
-	"encoding/binary"
 	"machine"
+	"time"
 
 	"tinygo.org/x/drivers"
 )
@@ -40,18 +40,73 @@ func (d *Dev) Init() error {
 	return nil
 }
 
-func (d *Dev) SPIExchange(w, r []byte) (int, error) {
-	d.cs.Low()
-	err := d.spi.Tx(w, nil)
-	if err != nil {
-		return 0, err
-	}
-}
+const (
+	responseDelay                 = 20 * time.Microsecond
+	backplaneFunction             = 0
+	whdBusSPIBackplaneReadPadding = 4
+)
 
 func (d *Dev) ReadReg(fn, reg uint32, size int) (uint32, error) {
-	var buf [4 * 2]byte
-	binary.BigEndian.PutUint32(buf[:4], make_cmd(false, true, fn, reg, 4))
+	var padding uint32
+	if fn == backplaneFunction {
+		padding = whdBusSPIBackplaneReadPadding
+	}
+	cmd := make_cmd(false, true, fn, reg, uint32(size)+padding)
+	var buf [4]byte
 
+}
+
+func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
+	d.cs.Low()
+	err := d.spiWrite(command, nil)
+	if err != nil {
+		return err
+	}
+	d.responseDelay()
+	err = d.spi.Tx(nil, r)
+	d.cs.High()
+	return err
+}
+
+func (d *Dev) SPIRead(command uint32, r []byte) error {
+	d.cs.Low()
+	err := d.spiWrite(command, nil)
+	d.cs.High()
+	if err != nil {
+		return err
+	}
+	d.cs.Low()
+	d.responseDelay()
+	err = d.spi.Tx(nil, r)
+	d.cs.High()
+	return err
+}
+
+func (d *Dev) SPIWrite(command uint32, w []byte) error {
+	d.cs.Low()
+	err := d.spiWrite(command, w)
+	d.cs.High()
+	return err
+}
+
+func (d *Dev) spiWrite(command uint32, w []byte) error {
+	d.spi.Transfer(byte(command >> (32 - 8)))
+	d.spi.Transfer(byte(command >> (32 - 16)))
+	d.spi.Transfer(byte(command >> (32 - 24)))
+	_, err := d.spi.Transfer(byte(command))
+	if len(w) == 0 || err != nil {
+		return err
+	}
+	err = d.spi.Tx(w, nil)
+	return err
+}
+
+func (d *Dev) responseDelay() {
+	// Wait for response.
+	waitStart := time.Now()
+	for time.Since(waitStart) < responseDelay {
+		d.spi.Transfer(0)
+	}
 }
 
 func make_cmd(write, inc bool, fn uint32, addr uint32, sz uint32) uint32 {

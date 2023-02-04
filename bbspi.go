@@ -1,6 +1,9 @@
 package cyw43439
 
-import "machine"
+import (
+	"errors"
+	"machine"
+)
 
 // bbSPI is a dumb bit-bang implementation of SPI protocol that is hardcoded
 // to mode 0 and ignores trying to receive data. Just enough for the APA102.
@@ -29,8 +32,21 @@ func (s *bbSPI) Configure() {
 // The r slice is ignored and no error will ever be returned.
 func (s *bbSPI) Tx(w []byte, r []byte) error {
 	s.Configure()
-	for _, b := range w {
-		s.Transfer(b)
+	switch {
+	case len(r) == len(w):
+		for i, b := range w {
+			r[i], _ = s.Transfer(b)
+		}
+	case len(w) != 0:
+		for _, b := range w {
+			s.Transfer(b)
+		}
+	case len(r) != 0:
+		for i := range r {
+			r[i], _ = s.Transfer(0)
+		}
+	default:
+		return errors.New("unhandled SPI buffer length mismatch case")
 	}
 	return nil
 }
@@ -44,29 +60,33 @@ func (s *bbSPI) delay() {
 
 // Transfer matches signature of machine.SPI.Transfer() and is used to send a
 // single byte. The received data is ignored and no error will ever be returned.
-func (s *bbSPI) Transfer(b byte) (byte, error) {
-	for i := uint8(0); i < 8; i++ {
+func (s *bbSPI) Transfer(b byte) (out byte, _ error) {
+	out |= b2u8(s.bitTransfer(b&(1<<7) != 0)) << 7
+	out |= b2u8(s.bitTransfer(b&(1<<6) != 0)) << 6
+	out |= b2u8(s.bitTransfer(b&(1<<5) != 0)) << 5
+	out |= b2u8(s.bitTransfer(b&(1<<4) != 0)) << 4
+	out |= b2u8(s.bitTransfer(b&(1<<3) != 0)) << 3
+	out |= b2u8(s.bitTransfer(b&(1<<2) != 0)) << 2
+	out |= b2u8(s.bitTransfer(b&(1<<1) != 0)) << 1
+	out |= b2u8(s.bitTransfer(b&1 != 0))
+	return out, nil
+}
 
-		// half clock cycle high to start
-		s.SCK.High()
-		s.delay()
+//go:inline
+func (s *bbSPI) bitTransfer(b bool) bool {
+	s.SDO.Set(b)
+	s.SCK.High()
+	b4 := s.SDI.Get()
+	s.delay()
+	s.SCK.Low()
+	s.delay()
+	return b4
+}
 
-		// write the value to SDO (MSB first)
-		s.SDO.Set(b&(1<<(7-i)) != 0)
-		// if  {
-		// 	s.SDO.Low()
-		// } else {
-		// 	s.SDO.High()
-		// }
-		s.delay()
-
-		// half clock cycle low
-		s.SCK.Low()
-		s.delay()
-
-		// for actual SPI would try to read the SDI value here
-		s.delay()
+//go:inline
+func b2u8(b bool) byte {
+	if b {
+		return 1
 	}
-
-	return 0, nil
+	return 0
 }
