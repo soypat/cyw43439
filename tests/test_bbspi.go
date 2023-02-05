@@ -8,6 +8,7 @@ import (
 )
 
 func TestMockCY43439(sdo, sdi, cs, clk machine.Pin) {
+	time.Sleep(time.Second)
 	print("starting TestBBSPI with SDO=")
 	print(sdo)
 	print(" SDI=")
@@ -23,7 +24,8 @@ func TestMockCY43439(sdo, sdi, cs, clk machine.Pin) {
 		SDO:   sdo,
 		Delay: 1,
 	}
-	dev := cyw43439.NewDev(spi, cs, machine.NoPin, machine.NoPin)
+	println("creating dev")
+	dev := cyw43439.NewDev(spi, cs, machine.GPIO5, machine.GPIO6)
 	dev.Init()
 	println("reading mock register 0x14")
 	time.Sleep(5 * time.Millisecond)
