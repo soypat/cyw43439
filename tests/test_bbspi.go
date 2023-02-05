@@ -22,10 +22,11 @@ func TestMockCY43439(sdo, sdi, cs, clk machine.Pin) {
 		SCK:   clk,
 		SDI:   sdi,
 		SDO:   sdo,
-		Delay: 1,
+		Delay: 20,
 	}
+	spi.Configure()
 	println("creating dev")
-	dev := cyw43439.NewDev(spi, cs, machine.GPIO5, machine.GPIO6)
+	dev := cyw43439.NewDev(spi, cs, machine.GPIO5, machine.GPIO6, sdi)
 	dev.Init()
 	println("reading mock register 0x14")
 	time.Sleep(5 * time.Millisecond)

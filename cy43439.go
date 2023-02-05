@@ -48,10 +48,10 @@ type Dev struct {
 type Config struct {
 }
 
-func NewDev(spi drivers.SPI, cs, wlRegOn, irq machine.Pin) *Dev {
+func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 	SD := machine.NoPin
-	if sharedDATA {
-		SD = machine.GPIO24 // Pico W special case.
+	if sharedDATA && sharedSD != machine.NoPin {
+		SD = sharedSD // Pico W special case.
 	}
 	return &Dev{
 		spi:      spi,
@@ -131,15 +131,12 @@ func (d *Dev) writeReg(fn, reg, val, size uint32) error {
 
 func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
 	d.cs.Low()
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	}
 	err := d.spiWrite(command, nil)
 	if err != nil {
 		return err
 	}
 	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInput})
+		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
 	d.responseDelay()
 	err = d.spi.Tx(nil, r)
@@ -149,16 +146,14 @@ func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
 
 func (d *Dev) SPIRead(command uint32, r []byte) error {
 	d.cs.Low()
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	}
+
 	err := d.spiWrite(command, nil)
 	d.cs.High()
 	if err != nil {
 		return err
 	}
 	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInput})
+		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
 	d.cs.Low()
 	d.responseDelay()
@@ -169,9 +164,6 @@ func (d *Dev) SPIRead(command uint32, r []byte) error {
 
 func (d *Dev) SPIWrite(command uint32, w []byte) error {
 	d.cs.Low()
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	}
 	err := d.spiWrite(command, w)
 	d.cs.High()
 	return err
@@ -179,6 +171,9 @@ func (d *Dev) SPIWrite(command uint32, w []byte) error {
 
 //go:inline
 func (d *Dev) spiWrite(command uint32, w []byte) error {
+	if sharedDATA {
+		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	}
 	d.spi.Transfer(byte(command >> (32 - 8)))
 	d.spi.Transfer(byte(command >> (32 - 16)))
 	d.spi.Transfer(byte(command >> (32 - 24)))

@@ -10,7 +10,7 @@ func TestCy43439RegistersOnPicoW() {
 	println("starting TestCy43439RegistersOnPicoW")
 	time.Sleep(time.Second)
 	spi, cs, wl, irq := cyw43439.PicoWSpi()
-	dev := cyw43439.NewDev(spi, cs, wl, irq)
+	dev := cyw43439.NewDev(spi, cs, wl, irq, irq)
 	err := dev.Init()
 	if err != nil {
 		panic(err)

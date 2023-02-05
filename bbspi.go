@@ -21,7 +21,10 @@ type SPIbb struct {
 func (s *SPIbb) Configure() {
 	s.SCK.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	s.SDO.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	s.SDO.Configure(machine.PinConfig{Mode: machine.PinInput})
+	if s.SDI != s.SDO {
+		s.SDI.Configure(machine.PinConfig{Mode: machine.PinInput})
+		s.SDI.Low()
+	}
 	s.SCK.Low()
 	s.SDO.Low()
 	if s.Delay == 0 {
