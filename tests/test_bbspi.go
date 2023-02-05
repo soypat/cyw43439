@@ -20,7 +20,7 @@ func TestMockCY43439(sdo, sdi, cs, clk machine.Pin) {
 	data := []byte{0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0xff}
 	spi := &cyw43439.SPIbb{
 		SCK:   clk,
-		SDI:   sdo,
+		SDI:   sdi,
 		SDO:   sdo,
 		Delay: 20,
 	}

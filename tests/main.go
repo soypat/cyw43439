@@ -9,6 +9,6 @@ func main() {
 		mockCS  = machine.GPIO2
 		mockCLK = machine.GPIO3
 	)
-	// TestMockCY43439(mockSDO, mockSDI, mockCS, mockCLK)
+	TestMockCY43439(mockSDO, mockSDO, mockCS, mockCLK)
 	TestCy43439RegistersOnPicoW()
 }

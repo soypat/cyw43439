@@ -203,6 +203,7 @@ func (d *Dev) Reset() {
 	// d.irq.Configure(machine.PinConfig{Mode: machine.PinInput})
 }
 
+//go:inline
 func (d *Dev) gpioSetup() {
 	d.wlRegOn.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	if sharedDATA {
@@ -213,11 +214,13 @@ func (d *Dev) gpioSetup() {
 	d.cs.High()
 }
 
+//go:inline
 func make_cmd(write, inc bool, fn uint32, addr uint32, sz uint32) uint32 {
-	return b2i(write)<<31 | b2i(inc)<<30 | fn<<28 | (addr&0x1ffff)<<11 | sz
+	return b2u32(write)<<31 | b2u32(inc)<<30 | fn<<28 | (addr&0x1ffff)<<11 | sz
 }
 
-func b2i(b bool) uint32 {
+//go:inline
+func b2u32(b bool) uint32 {
 	if b {
 		return 1
 	}

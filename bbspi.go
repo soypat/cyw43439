@@ -22,6 +22,7 @@ func (s *SPIbb) Configure() {
 	s.SCK.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	s.SDO.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	if s.SDI != s.SDO {
+		// Shared pin configurations.
 		s.SDI.Configure(machine.PinConfig{Mode: machine.PinInput})
 		s.SDI.Low()
 	}
@@ -38,15 +39,15 @@ func (s *SPIbb) Tx(w []byte, r []byte) error {
 	switch {
 	case len(r) == len(w):
 		for i, b := range w {
-			r[i], _ = s.Transfer(b)
+			r[i] = s.transfer(b)
 		}
 	case len(w) != 0:
 		for _, b := range w {
-			s.Transfer(b)
+			s.transfer(b)
 		}
 	case len(r) != 0:
 		for i := range r {
-			r[i], _ = s.Transfer(0)
+			r[i] = s.transfer(0)
 		}
 	default:
 		return errors.New("unhandled SPI buffer length mismatch case")
@@ -54,16 +55,14 @@ func (s *SPIbb) Tx(w []byte, r []byte) error {
 	return nil
 }
 
-// delay represents a quarter of the clock cycle
-func (s *SPIbb) delay() {
-	for i := uint32(0); i < s.Delay; {
-		i++
-	}
-}
-
 // Transfer matches signature of machine.SPI.Transfer() and is used to send a
 // single byte. The received data is ignored and no error will ever be returned.
 func (s *SPIbb) Transfer(b byte) (out byte, _ error) {
+	return s.transfer(b), nil
+}
+
+//go:inline
+func (s *SPIbb) transfer(b byte) (out byte) {
 	out |= b2u8(s.bitTransfer(b&(1<<7) != 0)) << 7
 	out |= b2u8(s.bitTransfer(b&(1<<6) != 0)) << 6
 	out |= b2u8(s.bitTransfer(b&(1<<5) != 0)) << 5
@@ -72,18 +71,27 @@ func (s *SPIbb) Transfer(b byte) (out byte, _ error) {
 	out |= b2u8(s.bitTransfer(b&(1<<2) != 0)) << 2
 	out |= b2u8(s.bitTransfer(b&(1<<1) != 0)) << 1
 	out |= b2u8(s.bitTransfer(b&1 != 0))
-	return out, nil
+	return out
 }
 
 //go:inline
 func (s *SPIbb) bitTransfer(b bool) bool {
 	s.SDO.Set(b)
 	s.SCK.High()
-	b4 := s.SDI.Get()
+	inputBit := s.SDI.Get()
 	s.delay()
 	s.SCK.Low()
 	s.delay()
-	return b4
+	return inputBit
+}
+
+// delay represents a quarter of the clock cycle
+//
+//go:inline
+func (s *SPIbb) delay() {
+	for i := uint32(0); i < s.Delay; {
+		i++
+	}
 }
 
 //go:inline
