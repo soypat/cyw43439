@@ -35,7 +35,6 @@ func (s *SPIbb) Configure() {
 // Tx matches signature of machine.SPI.Tx() and is used to send multiple bytes.
 // The r slice is ignored and no error will ever be returned.
 func (s *SPIbb) Tx(w []byte, r []byte) error {
-	s.Configure()
 	switch {
 	case len(r) == len(w):
 		for i, b := range w {

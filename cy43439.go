@@ -146,7 +146,6 @@ func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
 
 func (d *Dev) SPIRead(command uint32, r []byte) error {
 	d.cs.Low()
-
 	err := d.spiWrite(command, nil)
 	d.cs.High()
 	if err != nil {
