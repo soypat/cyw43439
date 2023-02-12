@@ -51,15 +51,20 @@ func PicoWSpi() (spi drivers.SPI, cs, wlRegOn, irq machine.Pin) {
 type Dev struct {
 	spi drivers.SPI
 	// Chip select pin. Driven LOW during SPI transaction.
-	lastSize               uint32
+
+	// SPI chip select. Low means SPI ready to send/receive.
+	cs machine.Pin
+	// WL_REG_ON pin enables wifi interface.
+	wlRegOn  machine.Pin
+	irq      machine.Pin
+	sharedSD machine.Pin
+	//	 These values are fix for device F1 buffer overflow problem:
+	lastSize               int
 	lastHeader             [2]uint32
 	currentBackplaneWindow uint32
 	lastBackplaneWindow    uint32
-	cs                     machine.Pin
-	wlRegOn                machine.Pin
-	irq                    machine.Pin
-	sharedSD               machine.Pin
-	buf                    [2000 / 4]uint32
+	// Max packet size is 2048 bytes.
+	// buf [2048]byte
 }
 
 type Config struct {
@@ -93,22 +98,27 @@ func (d *Dev) Init() (err error) {
 		interrupt and then take necessary actions.
 	*/
 	d.gpioSetup()
+
 	d.wlRegOn.High() //
 	// After power-up, the gSPI host needs to wait 50 ms for the device to be out of reset.
-	time.Sleep(60 * time.Millisecond) // it's actually slightly more than 50ms, including VDDC and POR startup.
+	// time.Sleep(60 * time.Millisecond) // it's actually slightly more than 50ms, including VDDC and POR startup.
 	// For this, the host needs to poll with a read command
 	// to F0 address 0x14. Address 0x14 contains a predefined bit pattern.
 	startPoll := time.Now()
 	var got uint32
 	// Little endian test address values.
 	const (
-		pollAddr   = 0x1400
-		pollExpect = 0xADBEEDFE // Little endian 0xFEEDBEAD
+		pollAddr   = 0b101
+		pollExpect = 0xFEEDBEAD // Little endian 0xFEEDBEAD
 	)
 	for got != pollExpect {
-		got, err = d.RegisterReadUint32(FuncAllSPIRegisters, pollAddr)
+		got, err = d.readReg32Swap(FuncBus, AddrTest)
+		// got, err = d.RegisterReadUint32(FuncBus, pollAddr)
 		if err != nil {
 			return err
+		}
+		if got != pollExpect {
+			println(got)
 		}
 		if got != pollExpect && time.Since(startPoll) > pollLimit {
 			print("poll failed with ")
@@ -125,7 +135,7 @@ func (d *Dev) Init() (err error) {
 		WakeUpPos       = 24
 	)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
-	err = d.RegisterWriteUint32(FuncAllSPIRegisters, 0x0, (1<<WakeUpPos)|
+	err = d.RegisterWriteUint32(FuncBus, 0x0, (1<<WakeUpPos)|
 		(1<<InterruptPolPos)|(0<<HiSpeedModePos)|(0<<EndianessPos)|(1<<WordLengthPos))
 	if err != nil {
 		return err
@@ -133,27 +143,12 @@ func (d *Dev) Init() (err error) {
 	return nil
 }
 
-type Function uint32
-
 const (
-	// All SPI-specific registers.
-	FuncAllSPIRegisters Function = 0b00
-	// Registers and memories belonging to other blocks in the chip (64 bytes max).
-	FuncExtraSPIRegisters Function = 0b01
-	// DMA channel 1. WLAN packets up to 2048 bytes.
-	FuncDMA1 Function = 0b10
-	// DMA channel 2 (optional). Packets up to 2048 bytes.
-	FuncDMA2 Function = 0b11
-)
-
-const (
-	TestRegisterAddr              uint32        = 0x14
-	TestRegisterExpectedValue     uint32        = 0xFEEDBEAD
 	responseDelay                 time.Duration = 0 //20 * time.Microsecond
 	backplaneFunction                           = 0
 	whdBusSPIBackplaneReadPadding               = 4
 	sharedDATA                                  = true
-	pollLimit                                   = 100 * time.Millisecond
+	pollLimit                                   = 60 * time.Millisecond
 )
 
 func (d *Dev) RegisterReadUint32(fn Function, reg uint32) (uint32, error) {
@@ -299,6 +294,13 @@ func (d *Dev) spiWrite32(command uint32, w []uint32) error {
 	return nil
 }
 
+func (d *Dev) readReg32Swap(fn Function, reg uint32) (uint32, error) {
+	cmd := swap32(make_cmd(false, true, fn, reg, 4))
+	var buf [4]byte
+	err := d.SPIRead(cmd, buf[:])
+	return swap32(binary.LittleEndian.Uint32(buf[:])), err
+}
+
 func (d *Dev) spiWrite16(command uint32, w []uint16) error {
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -375,4 +377,9 @@ func b2u32(b bool) uint32 {
 		return 1
 	}
 	return 0
+}
+
+// converts
+func swap32(b uint32) uint32 {
+	return (b >> 16) | (b << 16)
 }

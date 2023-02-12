@@ -8,7 +8,6 @@ import (
 )
 
 func TestMockCY43439(sdo, sdi, cs, clk machine.Pin) {
-	time.Sleep(time.Second)
 	print("starting TestBBSPI with SDO=")
 	print(sdo)
 	print(" SDI=")

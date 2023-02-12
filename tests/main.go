@@ -1,8 +1,13 @@
 package main
 
-import "machine"
+import (
+	"machine"
+	"time"
+)
 
 func main() {
+	// Give time for monitor to hook up to USB.
+	time.Sleep(time.Second)
 	const (
 		mockSDO = machine.GPIO0
 		mockSDI = machine.GPIO1
