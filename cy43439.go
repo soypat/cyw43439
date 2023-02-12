@@ -20,7 +20,6 @@ import (
 	"errors"
 	"machine"
 	"time"
-	"unsafe"
 
 	"tinygo.org/x/drivers"
 )
@@ -187,28 +186,38 @@ func (d *Dev) readReg(fn Function, reg uint32, size int) (uint32, error) {
 }
 
 func (d *Dev) RegisterWriteUint32(fn Function, reg, val uint32) error {
-	return d.writeReg(fn, reg, val, 4)
-}
-
-func (d *Dev) RegisterWriteUint16(fn Function, reg uint32, val uint16) error {
-	return d.writeReg(fn, reg, uint32(val), 2)
-}
-
-func (d *Dev) RegisterWriteUint8(fn Function, reg uint32, val uint8) error {
-	return d.writeReg(fn, reg, uint32(val), 1)
-}
-
-func (d *Dev) writeReg(fn Function, reg, val, size uint32) error {
-	var buf [4]byte
-	cmd := make_cmd(true, true, fn, reg, size)
-	binary.BigEndian.PutUint32(buf[:], val)
+	cmd := make_cmd(true, true, fn, reg, 4)
 	if fn == backplaneFunction {
 		d.lastSize = 8
 		d.lastHeader[0] = cmd
 		d.lastHeader[1] = val
 		d.lastBackplaneWindow = d.currentBackplaneWindow
 	}
-	return d.SPIWrite(cmd, buf[:size])
+	return d.SPIWrite32(cmd, []uint32{val})
+}
+
+func (d *Dev) RegisterWriteUint16(fn Function, reg uint32, val uint16) error {
+	cmd := make_cmd(true, true, fn, reg, 2)
+	if fn == backplaneFunction {
+		d.lastSize = 8
+		d.lastHeader[0] = cmd
+		d.lastHeader[1] = uint32(val)
+		d.lastBackplaneWindow = d.currentBackplaneWindow
+	}
+	// d.writeU32LittleEndian(cmd)
+
+	return d.SPIWrite32(cmd, []uint32{uint32(val)})
+}
+
+func (d *Dev) RegisterWriteUint8(fn Function, reg uint32, val uint8) error {
+	cmd := make_cmd(true, true, fn, reg, 1)
+	if fn == backplaneFunction {
+		d.lastSize = 8
+		d.lastHeader[0] = cmd
+		d.lastHeader[1] = uint32(val)
+		d.lastBackplaneWindow = d.currentBackplaneWindow
+	}
+	return d.SPIWrite32(cmd, []uint32{uint32(val)})
 }
 
 func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
@@ -255,23 +264,39 @@ func (d *Dev) SPIRead(command uint32, r []byte) error {
 	return err
 }
 
-// SPIWrite interprets w as a slice of 32bit words
-func (d *Dev) SPIWrite(command uint32, w []byte) error {
+// SPIWrite32 writes the entire w buffer to the SPI bus as little endian.
+// The bus must be configured for 32 bit transfer beforehand. Device initialization sets
+// bus to 32 bit transfer mode.
+func (d *Dev) SPIWrite32(command uint32, w []uint32) error {
 	d.cs.Low()
-	err := d.spiWrite32(command, unsafe.Slice((*uint32)(unsafe.Pointer(&w[0])), len(w)/4))
+	err := d.spiWrite32(command, w)
 	d.cs.High()
 	return err
 }
 
-// SPIWrite interprets w as a slice of 32bit words
-func (d *Dev) SPIWrite32(command uint32, w []uint32) error {
-	if len(w)%4 != 0 {
-		return errors.New("length of buffer must be multiple of 4")
-	}
+// SPIWrite16 writes the entire w buffer to the SPI bus as little endian.
+// The bus must be configured for 16 bit transfer beforehand.
+// By default device is initialized in 16 bit transfer mode.
+func (d *Dev) SPIWrite16(command uint32, w []uint16) error {
 	d.cs.Low()
-	err := d.spiWrite32(command, unsafe.Slice((*uint32)(unsafe.Pointer(&w[0])), len(w)/4))
+	err := d.spiWrite16(command, w)
 	d.cs.High()
 	return err
+}
+
+//go:inline
+func (d *Dev) spiWrite32(command uint32, w []uint32) error {
+	if sharedDATA {
+		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	}
+	err := d.writeU32LittleEndian(command)
+	if len(w) == 0 || err != nil {
+		return err
+	}
+	for _, v := range w {
+		d.writeU32LittleEndian(v)
+	}
+	return nil
 }
 
 func (d *Dev) spiWrite16(command uint32, w []uint16) error {
@@ -285,23 +310,6 @@ func (d *Dev) spiWrite16(command uint32, w []uint16) error {
 	}
 	for _, v := range w {
 		d.writeU16LittleEndian(v)
-	}
-	return nil
-}
-
-var shiftLittleEndian32 = [4]int{0, 8, 16, 24}
-
-//go:inline
-func (d *Dev) spiWrite32(command uint32, w []uint32) error {
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	}
-	err := d.writeU32LittleEndian(command)
-	if len(w) == 0 || err != nil {
-		return err
-	}
-	for _, v := range w {
-		d.writeU32LittleEndian(v)
 	}
 	return nil
 }
