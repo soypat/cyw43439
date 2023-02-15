@@ -97,7 +97,7 @@ func (d *Dev) Init() (err error) {
 		interrupt and/or status register to determine the cause of the
 		interrupt and then take necessary actions.
 	*/
-	d.gpioSetup()
+	d.GPIOSetup()
 
 	d.wlRegOn.High() //
 	// After power-up, the gSPI host needs to wait 50 ms for the device to be out of reset.
@@ -112,7 +112,7 @@ func (d *Dev) Init() (err error) {
 		pollExpect = 0xFEEDBEAD // Little endian 0xFEEDBEAD
 	)
 	for got != pollExpect {
-		got, err = d.readReg32Swap(FuncBus, AddrTest)
+		got, err = d.ReadReg32Swap(FuncBus, AddrTest)
 		// got, err = d.RegisterReadUint32(FuncBus, pollAddr)
 		if err != nil {
 			return err
@@ -294,7 +294,7 @@ func (d *Dev) spiWrite32(command uint32, w []uint32) error {
 	return nil
 }
 
-func (d *Dev) readReg32Swap(fn Function, reg uint32) (uint32, error) {
+func (d *Dev) ReadReg32Swap(fn Function, reg uint32) (uint32, error) {
 	cmd := swap32(make_cmd(false, true, fn, reg, 4))
 	var buf [4]byte
 	err := d.SPIRead(cmd, buf[:])
@@ -356,7 +356,7 @@ func (d *Dev) Reset() {
 }
 
 //go:inline
-func (d *Dev) gpioSetup() {
+func (d *Dev) GPIOSetup() {
 	d.wlRegOn.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})

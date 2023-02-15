@@ -1,6 +1,7 @@
 package cyw43439
 
 import (
+	"device"
 	"errors"
 	"machine"
 )
@@ -23,7 +24,7 @@ func (s *SPIbb) Configure() {
 	s.SDO.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	if s.SDI != s.SDO {
 		// Shared pin configurations.
-		s.SDI.Configure(machine.PinConfig{Mode: machine.PinInput})
+		s.SDI.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 		s.SDI.Low()
 	}
 	s.SCK.Low()
@@ -78,8 +79,8 @@ func (s *SPIbb) transfer(b byte) (out byte) {
 func (s *SPIbb) bitTransfer(b bool) bool {
 	s.SDO.Set(b)
 	s.SCK.High()
-	inputBit := s.SDI.Get()
 	s.delay()
+	inputBit := s.SDI.Get()
 	s.SCK.Low()
 	s.delay()
 	return inputBit
@@ -89,8 +90,8 @@ func (s *SPIbb) bitTransfer(b bool) bool {
 //
 //go:inline
 func (s *SPIbb) delay() {
-	for i := uint32(0); i < s.Delay; {
-		i++
+	for i := uint32(0); i < s.Delay; i++ {
+		device.Asm("nop")
 	}
 }
 

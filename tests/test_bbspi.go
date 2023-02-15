@@ -8,6 +8,7 @@ import (
 )
 
 func TestMockCY43439(sdo, sdi, cs, clk machine.Pin) {
+	const wlRegOn = machine.GPIO11
 	print("starting TestBBSPI with SDO=")
 	print(sdo)
 	print(" SDI=")
@@ -25,7 +26,16 @@ func TestMockCY43439(sdo, sdi, cs, clk machine.Pin) {
 	}
 	spi.Configure()
 	println("creating dev")
-	dev := cyw43439.NewDev(spi, cs, machine.GPIO5, sdo, sdo)
+	dev := cyw43439.NewDev(spi, cs, wlRegOn, sdo, sdo)
+	dev.GPIOSetup()
+	cs.Low()
+	spi.Tx(data, data)
+	cs.High()
+	dev.ReadReg32Swap(cyw43439.FuncBus, cyw43439.AddrTest)
+	dev.RegisterReadUint32(cyw43439.FuncBus, cyw43439.AddrTest)
+	dev.RegisterWriteUint32(cyw43439.FuncBus, cyw43439.AddrTest, 0xfeedbead)
+	println("done")
+	return
 	dev.Init()
 	println("reading mock register 0x14")
 	time.Sleep(1 * time.Millisecond)
