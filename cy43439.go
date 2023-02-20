@@ -128,15 +128,23 @@ func (d *Dev) Init() (err error) {
 	}
 	// Address 0x0000 registers (little-endian).
 	const (
-		WordLengthPos   = 31
-		EndianessPos    = 30
-		HiSpeedModePos  = 27
-		InterruptPolPos = 26
-		WakeUpPos       = 24
+		WordLengthPos   = 0 // 31
+		EndianessPos    = 1 // 30
+		HiSpeedModePos  = 4 // 27
+		InterruptPolPos = 5 // 26
+		WakeUpPos       = 7 // 24
+		StatusEnablePos = 0x2 + 0
+
+		responseDelay = 0x1
+		intrStatus    = 0x02
+		spienable     = 0x02
+		setupValue    = (1 << WakeUpPos) | (1 << InterruptPolPos) |
+			(0 << HiSpeedModePos) | (0 << EndianessPos) | (1 << WordLengthPos) |
+			(0x4 << (8 * responseDelay))
 	)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
-	err = d.RegisterWriteUint32(FuncBus, 0x0, (1<<WakeUpPos)|
-		(1<<InterruptPolPos)|(0<<HiSpeedModePos)|(0<<EndianessPos)|(1<<WordLengthPos))
+	err = d.WriteReg32Swap(FuncBus, 0x0, setupValue)
+	// err = d.RegisterWriteUint32(FuncBus, 0x0, setupValue)
 	if err != nil {
 		return err
 	}
@@ -231,10 +239,6 @@ func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
 }
 
 func (d *Dev) SPIRead(command uint32, r []byte) error {
-	// if len(r)%4 != 0 {
-	// 	return errors.New("read buffer length must be multiple of 4")
-	// }
-
 	d.cs.Low()
 	err := d.spiWrite32(command, nil)
 	d.cs.High()
@@ -246,14 +250,6 @@ func (d *Dev) SPIRead(command uint32, r []byte) error {
 	}
 	d.cs.Low()
 	d.responseDelay()
-	// n := len(r) / 4
-	// for i := 0; i < n; i++ {
-	// 	offset := i * 4
-	// 	r[offset], _ = d.spi.Transfer(0)
-	// 	r[offset+1], _ = d.spi.Transfer(0)
-	// 	r[offset+2], _ = d.spi.Transfer(0)
-	// 	r[offset+3], _ = d.spi.Transfer(0)
-	// }
 	err = d.spi.Tx(nil, r)
 	d.cs.High()
 	return err
@@ -294,11 +290,18 @@ func (d *Dev) spiWrite32(command uint32, w []uint32) error {
 	return nil
 }
 
+// ReadReg32Swap is used for the initial reads on boot which are in 16bit word format.
 func (d *Dev) ReadReg32Swap(fn Function, reg uint32) (uint32, error) {
 	cmd := swap32(make_cmd(false, true, fn, reg, 4))
 	var buf [4]byte
 	err := d.SPIRead(cmd, buf[:])
 	return swap32(binary.LittleEndian.Uint32(buf[:])), err
+}
+
+// WriteReg32Swap is only used to switch the word order on boot
+func (d *Dev) WriteReg32Swap(fn Function, reg, value uint32) error {
+	cmd := swap32(make_cmd(true, true, fn, reg, 4))
+	return d.SPIWrite32(cmd, []uint32{swap32(value)})
 }
 
 func (d *Dev) spiWrite16(command uint32, w []uint16) error {

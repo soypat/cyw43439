@@ -15,9 +15,9 @@ func TestShellmode() {
 	shell := Shell{
 		IO:             machine.USBCDC,
 		Loopback:       true,
-		WaitForCommand: 20 * time.Second,
+		WaitForCommand: 30 * time.Second,
 	}
-	spi, cs, wlreg, irq := cyw43439.PicoWSpi(10)
+	spi, cs, wlreg, irq := cyw43439.PicoWSpi(0)
 	dev := cyw43439.NewDev(spi, cs, wlreg, irq, irq)
 	dev.GPIOSetup()
 	var _commandBuf [128]byte
@@ -100,6 +100,23 @@ func TestShellmode() {
 			b := arg1 > 0
 			println("setting shell loopback mode", b)
 			shell.Loopback = b
+		case 'M':
+			// Switch to and from mock mode.
+			isMock := arg1 > 0
+			println("mocking mode set", isMock)
+			if isMock {
+				mockSpi := &cyw43439.SPIbb{
+					SCK:   mockSCK,
+					SDI:   mockSDI,
+					SDO:   mockSDO,
+					Delay: 10,
+				}
+				mockSpi.Configure()
+				dev = cyw43439.NewDev(mockSpi, mockCS, 0, 0, mockSDI)
+			} else {
+				dev = cyw43439.NewDev(spi, cs, wlreg, irq, irq)
+			}
+			dev.GPIOSetup()
 		default:
 			err = fmt.Errorf("unknown command %q", cmdByte)
 		}
