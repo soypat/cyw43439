@@ -24,7 +24,7 @@ import (
 	"tinygo.org/x/drivers"
 )
 
-func PicoWSpi() (spi drivers.SPI, cs, wlRegOn, irq machine.Pin) {
+func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
 	const (
 		WL_REG_ON = machine.GPIO23
@@ -43,7 +43,7 @@ func PicoWSpi() (spi drivers.SPI, cs, wlRegOn, irq machine.Pin) {
 		SCK:   CLK,
 		SDI:   DATA_IN,
 		SDO:   DATA_OUT,
-		Delay: 1 << 10,
+		Delay: delay,
 	}
 	return spi, CS, WL_REG_ON, IRQ
 }

@@ -8,7 +8,7 @@ import (
 
 func TestCy43439RegistersOnPicoW() {
 	println("starting TestCy43439RegistersOnPicoW")
-	spi, cs, wl, irq := cyw43439.PicoWSpi()
+	spi, cs, wl, irq := cyw43439.PicoWSpi(10)
 	dev := cyw43439.NewDev(spi, cs, wl, irq, irq)
 	err := dev.Init()
 	if err != nil {
