@@ -89,7 +89,6 @@ func TestShellmode() {
 		case 'I':
 			println("initializing device")
 			err = dev.Init()
-
 		case 'o':
 			b := arg1 > 0
 			println("setting WL_REG_ON", b)
@@ -97,6 +96,10 @@ func TestShellmode() {
 		case 'd':
 			println("setting SPI delay to", arg1)
 			spi.Delay = uint32(arg1)
+		case 'l':
+			b := arg1 > 0
+			println("setting shell loopback mode", b)
+			shell.Loopback = b
 		default:
 			err = fmt.Errorf("unknown command %q", cmdByte)
 		}
