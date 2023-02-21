@@ -93,6 +93,9 @@ func TestShellmode() {
 			b := arg1 > 0
 			println("setting WL_REG_ON", b)
 			wlreg.Set(b)
+		case 'D':
+			println("setting CY43439 response delay byte count to", uint8(arg1))
+			dev.ResponseDelayByteCount = uint8(arg1)
 		case 'd':
 			println("setting SPI delay to", arg1)
 			spi.Delay = uint32(arg1)
@@ -117,6 +120,21 @@ func TestShellmode() {
 				dev = cyw43439.NewDev(spi, cs, wlreg, irq, irq)
 			}
 			dev.GPIOSetup()
+		case 'X', 'x':
+			println("reading 16bit register", arg1)
+			var value uint16
+			if cmdByte == 'X' {
+				value, err = dev.ReadRegister16(devFn, uint32(arg1))
+			} else if cmdByte == 'x' {
+				value, err = dev.ReadRegister16Swap(devFn, uint32(arg1))
+			}
+			if err != nil {
+				break
+			}
+			command[0] = '0'
+			command[1] = 'x'
+			command = strconv.AppendUint(command[:2], uint64(value), 16)
+			shell.Write(command)
 		default:
 			err = fmt.Errorf("unknown command %q", cmdByte)
 		}

@@ -68,6 +68,7 @@ type Dev struct {
 	lastHeader             [2]uint32
 	currentBackplaneWindow uint32
 	lastBackplaneWindow    uint32
+	ResponseDelayByteCount uint8
 	// Max packet size is 2048 bytes.
 	// buf [2048]byte
 }
@@ -81,10 +82,11 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 		SD = sharedSD // Pico W special case.
 	}
 	return &Dev{
-		spi:      spi,
-		cs:       cs,
-		wlRegOn:  wlRegOn,
-		sharedSD: SD,
+		spi:                    spi,
+		cs:                     cs,
+		wlRegOn:                wlRegOn,
+		sharedSD:               SD,
+		ResponseDelayByteCount: 4,
 	}
 }
 
@@ -346,12 +348,9 @@ func (d *Dev) writeU16LittleEndian(v uint16) error {
 
 //go:inline
 func (d *Dev) responseDelay() {
-	if responseDelay != 0 {
-		// Wait for response.
-		waitStart := time.Now()
-		for time.Since(waitStart) < responseDelay {
-			d.spi.Transfer(0)
-		}
+	// Wait for response.
+	for i := uint8(0); i < d.ResponseDelayByteCount; i++ {
+		d.spi.Transfer(0)
 	}
 }
 
