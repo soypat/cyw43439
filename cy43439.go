@@ -21,7 +21,6 @@ When CY43439 boots it is in:
 package cyw43439
 
 import (
-	"encoding/binary"
 	"errors"
 	"machine"
 	"time"
@@ -112,43 +111,40 @@ func (d *Dev) Init() (err error) {
 	// For this, the host needs to poll with a read command
 	// to F0 address 0x14. Address 0x14 contains a predefined bit pattern.
 	startPoll := time.Now()
+	time.Sleep(50 * time.Millisecond)
 	var got uint32
 	// Little endian test address values.
-	const (
-		pollAddr   = 0b101
-		pollExpect = 0xFEEDBEAD // Little endian 0xFEEDBEAD
-	)
-	for got != pollExpect {
-		got, err := d.Read32S(FuncBus, AddrTest)
-		// got, err = d.RegisterReadUint32(FuncBus, pollAddr)
+	for got != TestPattern {
+		time.Sleep(time.Millisecond)
+		got, err = d.Read32S(FuncBus, AddrTest)
 		if err != nil {
 			return err
 		}
-		if got != pollExpect {
-			println(got)
-		}
-		if got != pollExpect && time.Since(startPoll) > pollLimit {
-			print("poll failed with ")
-			println(got)
-			return errors.New("poll failed")
-		}
+		println(got)
+	}
+	if got != TestPattern && time.Since(startPoll) > pollLimit {
+		print("poll failed with ")
+		println(got)
+		return errors.New("poll failed")
 	}
 	println("poll success")
-	// Address 0x0000 registers (little-endian).
+	// Address 0x0000 registers.
 	const (
-		WordLengthPos   = 0 // 31
-		EndianessPos    = 1 // 30
-		HiSpeedModePos  = 4 // 27
-		InterruptPolPos = 5 // 26
-		WakeUpPos       = 7 // 24
-		StatusEnablePos = 0x2 + 0
+		// 0=16bit word, 1=32bit word transactions.
+		WordLengthPos = 0
+		// Set to 1 for big endian words.
+		EndianessBigPos = 1 // 30
+		HiSpeedModePos  = 4
+		InterruptPolPos = 5
+		WakeUpPos       = 7
 
-		responseDelay = 0x1
-		intrStatus    = 0x02
-		spienable     = 0x02
-		setupValue    = (1 << WakeUpPos) | (1 << InterruptPolPos) |
-			(0 << HiSpeedModePos) | (0 << EndianessPos) | (1 << WordLengthPos) |
-			(0x4 << (8 * responseDelay))
+		ResponseDelayPos       = 0x1*8 + 0
+		StatusEnablePos        = 0x2*8 + 0
+		InterruptWithStatusPos = 0x2*8 + 1
+		// 132275 is Pico-sdk's default value.
+		setupValue = (1 << WordLengthPos) | (0 << EndianessBigPos) | (1 << HiSpeedModePos) |
+			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
+			(1 << StatusEnablePos) | (1 << InterruptWithStatusPos)
 	)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
 	err = d.Write32S(FuncBus, 0x0, setupValue)
@@ -167,202 +163,6 @@ const (
 	pollLimit                                   = 60 * time.Millisecond
 )
 
-func (d *Dev) CSHigh() {
-	d.cs.High()
-	machine.GPIO1.High()
-}
-func (d *Dev) CSLow() {
-	d.cs.Low()
-	machine.GPIO1.Low()
-}
-func (d *Dev) RegisterReadUint32(fn Function, reg uint32) (uint32, error) {
-	val, err := d.readReg(fn, reg, 4)
-	return uint32(val), err
-}
-
-func (d *Dev) RegisterReadUint16(fn Function, reg uint32) (uint16, error) {
-	val, err := d.readReg(fn, reg, 2)
-	return uint16(val), err
-}
-
-func (d *Dev) RegisterReadUint8(fn Function, reg uint32) (uint8, error) {
-	val, err := d.readReg(fn, reg, 1)
-	return uint8(val), err
-}
-
-func (d *Dev) readReg(fn Function, reg uint32, size int) (uint32, error) {
-	var padding uint32
-	if fn == backplaneFunction {
-		padding = whdBusSPIBackplaneReadPadding
-	}
-	cmd := make_cmd(false, true, fn, reg, uint32(size)+padding)
-	var buf [4 + whdBusSPIBackplaneReadPadding]byte
-	err := d.SPIRead(cmd, buf[:4+padding])
-	if err != nil {
-		return 0, err
-	}
-	return binary.LittleEndian.Uint32(buf[:4]), nil
-}
-
-func (d *Dev) RegisterWriteUint32(fn Function, reg, val uint32) error {
-	cmd := make_cmd(true, true, fn, reg, 4)
-	if fn == backplaneFunction {
-		d.lastSize = 8
-		d.lastHeader[0] = cmd
-		d.lastHeader[1] = val
-		d.lastBackplaneWindow = d.currentBackplaneWindow
-	}
-	return d.SPIWrite32(cmd, []uint32{val})
-}
-
-func (d *Dev) RegisterWriteUint16(fn Function, reg uint32, val uint16) error {
-	cmd := make_cmd(true, true, fn, reg, 2)
-	if fn == backplaneFunction {
-		d.lastSize = 8
-		d.lastHeader[0] = cmd
-		d.lastHeader[1] = uint32(val)
-		d.lastBackplaneWindow = d.currentBackplaneWindow
-	}
-	// d.writeU32LittleEndian(cmd)
-
-	return d.SPIWrite32(cmd, []uint32{uint32(val)})
-}
-
-func (d *Dev) RegisterWriteUint8(fn Function, reg uint32, val uint8) error {
-	cmd := make_cmd(true, true, fn, reg, 1)
-	if fn == backplaneFunction {
-		d.lastSize = 8
-		d.lastHeader[0] = cmd
-		d.lastHeader[1] = uint32(val)
-		d.lastBackplaneWindow = d.currentBackplaneWindow
-	}
-	return d.SPIWrite32(cmd, []uint32{uint32(val)})
-}
-
-func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
-	d.CSLow()
-	err := d.spiWrite32(command, nil)
-	if err != nil {
-		return err
-	}
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
-	}
-	d.responseDelay()
-	err = d.spi.Tx(nil, r)
-	d.CSHigh()
-	return err
-}
-
-func (d *Dev) SPIRead(command uint32, r []byte) error {
-	d.CSLow()
-	err := d.spiWrite32(command, nil)
-	d.CSHigh()
-	if err != nil {
-		return err
-	}
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
-	}
-	d.CSLow()
-	d.responseDelay()
-	err = d.spi.Tx(nil, r)
-	d.CSHigh()
-	return err
-}
-
-// SPIWrite32 writes the entire w buffer to the SPI bus as little endian.
-// The bus must be configured for 32 bit transfer beforehand. Device initialization sets
-// bus to 32 bit transfer mode.
-func (d *Dev) SPIWrite32(command uint32, w []uint32) error {
-	d.CSLow()
-	err := d.spiWrite32(command, w)
-	d.CSHigh()
-	return err
-}
-
-// SPIWrite16 writes the entire w buffer to the SPI bus as little endian.
-// The bus must be configured for 16 bit transfer beforehand.
-// By default device is initialized in 16 bit transfer mode.
-func (d *Dev) SPIWrite16(command uint32, w []uint16) error {
-	d.CSLow()
-	err := d.spiWrite16(command, w)
-	d.CSHigh()
-	return err
-}
-
-//go:inline
-func (d *Dev) spiWrite32(command uint32, w []uint32) error {
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	}
-	err := d.writeU32LittleEndian(command)
-	if len(w) == 0 || err != nil {
-		return err
-	}
-	for _, v := range w {
-		d.writeU32LittleEndian(v)
-	}
-	return nil
-}
-
-// ReadReg32Swap is used for the initial reads on boot which are in 16bit word format.
-func (d *Dev) ReadReg32Swap(fn Function, reg uint32) (uint32, error) {
-	cmd := swap32(make_cmd(false, true, fn, reg, 4))
-	var buf [4]byte
-	err := d.SPIRead(cmd, buf[:])
-	return swap32(binary.LittleEndian.Uint32(buf[:])), err
-}
-
-// WriteReg32Swap is only used to switch the word order on boot
-func (d *Dev) WriteReg32Swap(fn Function, reg, value uint32) error {
-	cmd := swap32(make_cmd(true, true, fn, reg, 4))
-	return d.SPIWrite32(cmd, []uint32{swap32(value)})
-}
-
-func (d *Dev) spiWrite16(command uint32, w []uint16) error {
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	}
-	d.writeU16LittleEndian(uint16(command))
-	err := d.writeU16LittleEndian(uint16(command >> 16))
-	if len(w) == 0 || err != nil {
-		return err
-	}
-	for _, v := range w {
-		d.writeU16LittleEndian(v)
-	}
-	return nil
-}
-
-// writeU32LittleEndian writes a 32bit integer over the SPI connection in 32bit, little-endian mode of operation.
-//
-//go:inline
-func (d *Dev) writeU32LittleEndian(v uint32) error {
-	d.spi.Transfer(byte(v))
-	d.spi.Transfer(byte(v >> 8))
-	d.spi.Transfer(byte(v >> 16))
-	d.spi.Transfer(byte(v >> 24))
-	return nil
-}
-
-// writeU32LittleEndian writes a 32bit integer over the SPI connection in 32bit, little-endian mode of operation.
-//
-//go:inline
-func (d *Dev) writeU16LittleEndian(v uint16) error {
-	d.spi.Transfer(byte(v))
-	d.spi.Transfer(byte(v >> 8))
-	return nil
-}
-
-//go:inline
-func (d *Dev) responseDelay() {
-	// Wait for response.
-	for i := uint8(0); i < d.ResponseDelayByteCount; i++ {
-		d.spi.Transfer(0)
-	}
-}
-
 func (d *Dev) Reset() {
 	d.wlRegOn.Low()
 	time.Sleep(20 * time.Millisecond)
@@ -380,23 +180,5 @@ func (d *Dev) GPIOSetup() {
 	}
 	d.cs.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	machine.GPIO1.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	d.CSHigh()
-}
-
-//go:inline
-func make_cmd(write, inc bool, fn Function, addr uint32, sz uint32) uint32 {
-	return b2u32(write)<<31 | b2u32(inc)<<30 | uint32(fn)<<28 | (addr&0x1ffff)<<11 | sz
-}
-
-//go:inline
-func b2u32(b bool) uint32 {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// swap32 swaps lowest 16 bits with highest 16 bits of a uint32.
-func swap32(b uint32) uint32 {
-	return (b >> 16) | (b << 16)
+	d.csHigh()
 }
