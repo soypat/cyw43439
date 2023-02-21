@@ -386,7 +386,7 @@ func b2u32(b bool) uint32 {
 	return 0
 }
 
-// converts
+// swap32 swaps lowest 16 bits with highest 16 bits of a uint32.
 func swap32(b uint32) uint32 {
 	return (b >> 16) | (b << 16)
 }

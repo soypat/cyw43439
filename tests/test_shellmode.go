@@ -124,9 +124,9 @@ func TestShellmode() {
 			println("reading 16bit register", arg1)
 			var value uint16
 			if cmdByte == 'X' {
-				value, err = dev.ReadRegister16(devFn, uint32(arg1))
+				value, err = dev.Read16(devFn, uint32(arg1))
 			} else if cmdByte == 'x' {
-				value, err = dev.ReadRegister16Swap(devFn, uint32(arg1))
+				value, err = dev.Read16S(devFn, uint32(arg1))
 			}
 			if err != nil {
 				break
@@ -134,6 +134,21 @@ func TestShellmode() {
 			command[0] = '0'
 			command[1] = 'x'
 			command = strconv.AppendUint(command[:2], uint64(value), 16)
+			shell.Write(command)
+		case 'Y', 'y':
+			println("reading 32bit register", arg1)
+			var value uint32
+			if cmdByte == 'Y' {
+				value, err = dev.Read32(devFn, uint32(arg1))
+			} else if cmdByte == 'y' {
+				value, err = dev.Read32S(devFn, uint32(arg1))
+			}
+			if err != nil {
+				break
+			}
+			command[0] = '0'
+			command[1] = 'x'
+			command = strconv.AppendUint(command[:2], uint64(value), 32)
 			shell.Write(command)
 		default:
 			err = fmt.Errorf("unknown command %q", cmdByte)
