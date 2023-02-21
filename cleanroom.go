@@ -24,7 +24,7 @@ func (d *Dev) Write32S(fn Function, addr, val uint32) error {
 
 //go:inline
 func (d *Dev) SPIWriteV2(cmd uint32, w []byte) error {
-	d.cs.Low()
+	d.CSLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
@@ -40,7 +40,7 @@ func (d *Dev) SPIWriteV2(cmd uint32, w []byte) error {
 	b1, _ := d.spi.Transfer(0)
 	b2, _ := d.spi.Transfer(0)
 	b3, _ := d.spi.Transfer(0)
-	d.cs.High()
+	d.CSHigh()
 	status := Status(b0)<<24 | Status(b1)<<16 | Status(b2)<<8 | Status(b3)
 	status = Status(swap32(uint32(status)))
 	if !status.IsDataAvailable() {
@@ -94,7 +94,7 @@ func (d *Dev) rrS(fn Function, addr, size uint32) (uint32, error) {
 }
 
 func (d *Dev) SPIReadV2(cmd uint32, r []byte) {
-	d.cs.Low()
+	d.CSLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
@@ -114,7 +114,7 @@ func (d *Dev) SPIReadV2(cmd uint32, r []byte) {
 	b1, _ := d.spi.Transfer(0)
 	b2, _ := d.spi.Transfer(0)
 	b3, _ := d.spi.Transfer(0)
-	d.cs.High()
+	d.CSHigh()
 	status := Status(swap32(uint32(b0)<<24 | uint32(b1)<<16 | uint32(b2)<<8 | uint32(b3)))
 	if !status.IsDataAvailable() {
 		println("got data unavailable status:", status)
@@ -123,9 +123,9 @@ func (d *Dev) SPIReadV2(cmd uint32, r []byte) {
 
 //go:inline
 func (d *Dev) csPeak() {
-	d.cs.High()
+	d.CSHigh()
 	for i := 0; i < 40; i++ {
 		device.Asm("nop")
 	}
-	d.cs.Low()
+	d.CSLow()
 }

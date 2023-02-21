@@ -18,6 +18,13 @@ func TestShellmode() {
 		WaitForCommand: 30 * time.Second,
 	}
 	spi, cs, wlreg, irq := cyw43439.PicoWSpi(0)
+	spi.MockTo = &cyw43439.SPIbb{
+		SCK:   mockSCK,
+		SDI:   mockSDI,
+		SDO:   mockSDO,
+		Delay: 10,
+	}
+	spi.Configure()
 	dev := cyw43439.NewDev(spi, cs, wlreg, irq, irq)
 	dev.GPIOSetup()
 	var _commandBuf [128]byte

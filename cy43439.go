@@ -167,6 +167,14 @@ const (
 	pollLimit                                   = 60 * time.Millisecond
 )
 
+func (d *Dev) CSHigh() {
+	d.cs.High()
+	machine.GPIO1.High()
+}
+func (d *Dev) CSLow() {
+	d.cs.Low()
+	machine.GPIO1.Low()
+}
 func (d *Dev) RegisterReadUint32(fn Function, reg uint32) (uint32, error) {
 	val, err := d.readReg(fn, reg, 4)
 	return uint32(val), err
@@ -232,7 +240,7 @@ func (d *Dev) RegisterWriteUint8(fn Function, reg uint32, val uint8) error {
 }
 
 func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
-	d.cs.Low()
+	d.CSLow()
 	err := d.spiWrite32(command, nil)
 	if err != nil {
 		return err
@@ -242,24 +250,24 @@ func (d *Dev) SPIWriteRead(command uint32, r []byte) error {
 	}
 	d.responseDelay()
 	err = d.spi.Tx(nil, r)
-	d.cs.High()
+	d.CSHigh()
 	return err
 }
 
 func (d *Dev) SPIRead(command uint32, r []byte) error {
-	d.cs.Low()
+	d.CSLow()
 	err := d.spiWrite32(command, nil)
-	d.cs.High()
+	d.CSHigh()
 	if err != nil {
 		return err
 	}
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
-	d.cs.Low()
+	d.CSLow()
 	d.responseDelay()
 	err = d.spi.Tx(nil, r)
-	d.cs.High()
+	d.CSHigh()
 	return err
 }
 
@@ -267,9 +275,9 @@ func (d *Dev) SPIRead(command uint32, r []byte) error {
 // The bus must be configured for 32 bit transfer beforehand. Device initialization sets
 // bus to 32 bit transfer mode.
 func (d *Dev) SPIWrite32(command uint32, w []uint32) error {
-	d.cs.Low()
+	d.CSLow()
 	err := d.spiWrite32(command, w)
-	d.cs.High()
+	d.CSHigh()
 	return err
 }
 
@@ -277,9 +285,9 @@ func (d *Dev) SPIWrite32(command uint32, w []uint32) error {
 // The bus must be configured for 16 bit transfer beforehand.
 // By default device is initialized in 16 bit transfer mode.
 func (d *Dev) SPIWrite16(command uint32, w []uint16) error {
-	d.cs.Low()
+	d.CSLow()
 	err := d.spiWrite16(command, w)
-	d.cs.High()
+	d.CSHigh()
 	return err
 }
 
@@ -371,7 +379,8 @@ func (d *Dev) GPIOSetup() {
 		d.sharedSD.Low()
 	}
 	d.cs.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	d.cs.High()
+	machine.GPIO1.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	d.CSHigh()
 }
 
 //go:inline
