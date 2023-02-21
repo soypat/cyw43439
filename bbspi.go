@@ -7,10 +7,7 @@ import (
 )
 
 // SPIbb is a dumb bit-bang implementation of SPI protocol that is hardcoded
-// to mode 0 and ignores trying to receive data. Just enough for the APA102.
-// Note: making this unexported for now because it is probable not suitable
-// most purposes other than the APA102 package. It might be desirable to make
-// this more generic and include it in the TinyGo "machine" package instead.
+// to mode 0.
 type SPIbb struct {
 	SCK   machine.Pin
 	SDI   machine.Pin
@@ -64,7 +61,7 @@ func (s *SPIbb) Transfer(b byte) (out byte, _ error) {
 
 //go:inline
 func (s *SPIbb) transfer(b byte) (out byte) {
-	out |= b2u8(s.bitTransfer(b&(1<<7) != 0)) << 7
+	out |= b2u8(s.firstBitTransfer(b&(1<<7) != 0)) << 7
 	out |= b2u8(s.bitTransfer(b&(1<<6) != 0)) << 6
 	out |= b2u8(s.bitTransfer(b&(1<<5) != 0)) << 5
 	out |= b2u8(s.bitTransfer(b&(1<<4) != 0)) << 4
@@ -77,10 +74,27 @@ func (s *SPIbb) transfer(b byte) (out byte) {
 
 //go:inline
 func (s *SPIbb) bitTransfer(b bool) bool {
-	s.SDO.Set(b)
+	s.SDO.Set(b) // The host
+	s.delay()
 	s.SCK.High()
 	s.delay()
 	inputBit := s.SDI.Get()
+	s.delay()
+	s.SCK.Low()
+	s.delay()
+	return inputBit
+}
+
+//go:inline
+func (s *SPIbb) firstBitTransfer(b bool) bool {
+	//The host puts the first bit of the data onto the bus half a clock-cycle
+	// before the first active edge following the CS going low. T
+	s.SDO.Set(b)
+	s.delay()
+	s.delay()
+	s.SCK.High()
+	inputBit := s.SDI.Get()
+	s.delay()
 	s.SCK.Low()
 	s.delay()
 	return inputBit

@@ -15,7 +15,6 @@ const (
 func main() {
 	// Give time for monitor to hook up to USB.
 	time.Sleep(time.Second)
-
 	TestShellmode()
 
 	// TestMockCY43439(mockSDO, mockSDO, mockCS, mockCLK)

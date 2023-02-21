@@ -12,6 +12,11 @@ Endianness may also be used to describe the order in which the bits are
 transmitted over a communication channel
 
   - big-endian in a communications channel transmits the most significant bits first
+
+When CY43439 boots it is in:
+  - Little-Endian byte order
+  - 16 bit word length mode
+  - Big-Endian bit order (most common in SPI and other protocols)
 */
 package cyw43439
 
