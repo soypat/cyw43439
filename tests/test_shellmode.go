@@ -57,7 +57,8 @@ func TestShellmode() {
 		case 'W', 'w':
 			println("writing register", arg1, "with value", writeVal)
 			if cmdByte == 'W' {
-				err = dev.RegisterWriteUint32(devFn, uint32(arg1), uint32(writeVal))
+				err = dev.Write32S(devFn, uint32(arg1), uint32(writeVal))
+				// err = dev.RegisterWriteUint32(devFn, uint32(arg1), uint32(writeVal))
 			} else {
 				err = dev.RegisterWriteUint16(devFn, uint32(arg1), uint16(writeVal))
 			}
@@ -148,7 +149,7 @@ func TestShellmode() {
 			}
 			command[0] = '0'
 			command[1] = 'x'
-			command = strconv.AppendUint(command[:2], uint64(value), 32)
+			command = strconv.AppendUint(command[:2], uint64(value), 16)
 			shell.Write(command)
 		default:
 			err = fmt.Errorf("unknown command %q", cmdByte)

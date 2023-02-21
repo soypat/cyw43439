@@ -86,7 +86,7 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 		cs:                     cs,
 		wlRegOn:                wlRegOn,
 		sharedSD:               SD,
-		ResponseDelayByteCount: 4,
+		ResponseDelayByteCount: 0,
 	}
 }
 
@@ -119,7 +119,7 @@ func (d *Dev) Init() (err error) {
 		pollExpect = 0xFEEDBEAD // Little endian 0xFEEDBEAD
 	)
 	for got != pollExpect {
-		got, err = d.ReadReg32Swap(FuncBus, AddrTest)
+		got, err := d.Read32S(FuncBus, AddrTest)
 		// got, err = d.RegisterReadUint32(FuncBus, pollAddr)
 		if err != nil {
 			return err
@@ -133,6 +133,7 @@ func (d *Dev) Init() (err error) {
 			return errors.New("poll failed")
 		}
 	}
+	println("poll success")
 	// Address 0x0000 registers (little-endian).
 	const (
 		WordLengthPos   = 0 // 31
@@ -150,7 +151,7 @@ func (d *Dev) Init() (err error) {
 			(0x4 << (8 * responseDelay))
 	)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
-	err = d.WriteReg32Swap(FuncBus, 0x0, setupValue)
+	err = d.Write32S(FuncBus, 0x0, setupValue)
 	// err = d.RegisterWriteUint32(FuncBus, 0x0, setupValue)
 	if err != nil {
 		return err

@@ -34,6 +34,11 @@ func (s *SPIbb) Configure() {
 // Tx matches signature of machine.SPI.Tx() and is used to send multiple bytes.
 // The r slice is ignored and no error will ever be returned.
 func (s *SPIbb) Tx(w []byte, r []byte) error {
+	if len(w) != 0 {
+		r[0] = s.firstTransfer(w[0])
+		w = w[1:]
+		r = r[1:]
+	}
 	switch {
 	case len(r) == len(w):
 		for i, b := range w {
@@ -61,7 +66,7 @@ func (s *SPIbb) Transfer(b byte) (out byte, _ error) {
 
 //go:inline
 func (s *SPIbb) transfer(b byte) (out byte) {
-	out |= b2u8(s.firstBitTransfer(b&(1<<7) != 0)) << 7
+	out |= b2u8(s.bitTransfer(b&(1<<7) != 0)) << 7
 	out |= b2u8(s.bitTransfer(b&(1<<6) != 0)) << 6
 	out |= b2u8(s.bitTransfer(b&(1<<5) != 0)) << 5
 	out |= b2u8(s.bitTransfer(b&(1<<4) != 0)) << 4
@@ -85,6 +90,21 @@ func (s *SPIbb) bitTransfer(b bool) bool {
 	return inputBit
 }
 
+// Only used for first write byte. Not for reads
+//
+//go:inline
+func (s *SPIbb) firstTransfer(b byte) (out byte) {
+	out |= b2u8(s.firstBitTransfer(b&(1<<7) != 0)) << 7
+	out |= b2u8(s.bitTransfer(b&(1<<6) != 0)) << 6
+	out |= b2u8(s.bitTransfer(b&(1<<5) != 0)) << 5
+	out |= b2u8(s.bitTransfer(b&(1<<4) != 0)) << 4
+	out |= b2u8(s.bitTransfer(b&(1<<3) != 0)) << 3
+	out |= b2u8(s.bitTransfer(b&(1<<2) != 0)) << 2
+	out |= b2u8(s.bitTransfer(b&(1<<1) != 0)) << 1
+	out |= b2u8(s.bitTransfer(b&1 != 0))
+	return out
+}
+
 //go:inline
 func (s *SPIbb) firstBitTransfer(b bool) bool {
 	//The host puts the first bit of the data onto the bus half a clock-cycle
@@ -93,8 +113,8 @@ func (s *SPIbb) firstBitTransfer(b bool) bool {
 	s.delay()
 	s.delay()
 	s.SCK.High()
-	inputBit := s.SDI.Get()
 	s.delay()
+	inputBit := s.SDI.Get()
 	s.SCK.Low()
 	s.delay()
 	return inputBit
