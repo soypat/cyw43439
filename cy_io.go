@@ -170,6 +170,11 @@ func (d *Dev) Read16(fn Function, addr uint32) (uint16, error) {
 	return uint16(v), err
 }
 
+func (d *Dev) Read8(fn Function, addr uint32) (uint8, error) {
+	v, err := d.rr(fn, addr, 1)
+	return uint8(v), err
+}
+
 // rrS reads register.
 func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	var padding uint32

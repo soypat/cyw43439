@@ -124,14 +124,10 @@ func (d *Dev) Init() (err error) {
 		if err != nil {
 			return err
 		}
-		println(got)
 	}
 	if got != TestPattern && time.Since(startPoll) > pollLimit {
-		print("poll failed with ")
-		println(got)
 		return errors.New("poll failed")
 	}
-	println("poll success")
 	// Address 0x0000 registers.
 	const (
 		// 0=16bit word, 1=32bit word transactions.
@@ -151,12 +147,54 @@ func (d *Dev) Init() (err error) {
 			(1 << StatusEnablePos) | (1 << InterruptWithStatusPos)
 	)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
-	err = d.Write32S(FuncBus, 0x0, setupValue)
+	err = d.Write32S(FuncBus, AddrBusControl, setupValue) // Last use of a swap writer/reader.
 	// err = d.RegisterWriteUint32(FuncBus, 0x0, setupValue)
 	if err != nil {
 		return err
 	}
+	const WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE = 4
+	err = d.Write8(FuncBus, AddrRespDelayF1, WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE)
+	if err != nil {
+		return err
+	}
+	// Make sure error interrupt bits are clear
+	const (
+		dataUnavailable = 0x1
+		commandError    = 0x8
+		dataError       = 0x10
+		f1Overflow      = 0x80
+		value           = dataUnavailable | commandError | dataError | f1Overflow
+	)
+	err = d.Write8(FuncBus, AddrInterrupt, value)
+	if err != nil {
+		return err
+	}
 	return nil
+	// TODO: For when we are ready to download firmware.
+	const (
+		SDIO_CHIP_CLOCK_CSR  = 0x1000e
+		SBSDIO_ALP_AVAIL_REQ = 0x8
+		SBSDIO_ALP_AVAIL     = 0x40
+	)
+	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_ALP_AVAIL_REQ)
+	for i := 0; i < 10; i++ {
+		reg, err := d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)
+		if err != nil {
+			return err
+		}
+		if reg&SBSDIO_ALP_AVAIL != 0 {
+			goto alpset
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return errors.New("timeout waiting for ALP to be set")
+
+alpset:
+	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, 0)
+
+	status, err := d.GetStatus()
+	println("init status on end:", status)
+	return err
 }
 
 func (d *Dev) GetStatus() (Status, error) {
