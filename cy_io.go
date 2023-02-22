@@ -7,7 +7,42 @@ import (
 	"machine"
 )
 
+// cy_io.go contains low level functions for reading and writing to the
+// CYW43439's gSPI interface. These map to functions readily found in the datasheet.
+
 var ErrDataNotAvailable = errors.New("requested data not available")
+
+// SPIWriteRead performs the gSPI Write-Read action.
+func (d *Dev) SPIWriteRead(cmd uint32, w, r []byte) error {
+	d.csLow()
+	if sharedDATA {
+		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	}
+	d.spi.Transfer(byte(cmd >> 24))
+	d.spi.Transfer(byte(cmd >> 16))
+	d.spi.Transfer(byte(cmd >> 8))
+	d.spi.Transfer(byte(cmd))
+	for _, v := range w {
+		d.spi.Transfer(v)
+	}
+	d.responseDelay()
+	for i := range r {
+		r[i], _ = d.spi.Transfer(0)
+	}
+	// Read Status.
+	b0, _ := d.spi.Transfer(0)
+	b1, _ := d.spi.Transfer(0)
+	b2, _ := d.spi.Transfer(0)
+	b3, _ := d.spi.Transfer(0)
+	d.csHigh()
+	status := Status(b0)<<24 | Status(b1)<<16 | Status(b2)<<8 | Status(b3)
+	status = Status(swap32(uint32(status)))
+	if !status.IsDataAvailable() {
+		println("got status:", status)
+		return ErrDataNotAvailable
+	}
+	return nil
+}
 
 func (d *Dev) Write32S(fn Function, addr, val uint32) error {
 	cmd := make_cmd(true, true, fn, addr, 4)
@@ -87,7 +122,7 @@ func (d *Dev) Write8(fn Function, addr uint32, val uint8) error {
 	return d.SPIWrite(cmd, buf[:])
 }
 
-//go:inline
+// SPIWrite performs the gSPI Write action.
 func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 	d.csLow()
 	if sharedDATA {
@@ -114,6 +149,7 @@ func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 	}
 	return nil
 }
+
 func (d *Dev) Read32S(fn Function, addr uint32) (uint32, error) {
 	v, err := d.rrS(fn, addr, 4)
 	return v, err
@@ -158,7 +194,8 @@ func (d *Dev) rrS(fn Function, addr, size uint32) (uint32, error) {
 	return swap32(binary.BigEndian.Uint32(buf[:4])), nil
 }
 
-func (d *Dev) SPIRead(cmd uint32, r []byte) {
+// SPIRead performs the gSPI Read action.
+func (d *Dev) SPIRead(cmd uint32, r []byte) error {
 	d.csLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -184,6 +221,7 @@ func (d *Dev) SPIRead(cmd uint32, r []byte) {
 	if !status.IsDataAvailable() {
 		println("got data unavailable status:", status)
 	}
+	return nil
 }
 
 //go:inline

@@ -69,7 +69,11 @@ type Dev struct {
 	lastBackplaneWindow    uint32
 	ResponseDelayByteCount uint8
 	// Max packet size is 2048 bytes.
-	// buf [2048]byte
+	sdpcmTxSequence       uint8
+	sdpcmLastBusCredit    uint8
+	wlanFlowCtl           uint8
+	sdpcmRequestedIoctlID uint16
+	buf                   [2048]byte
 }
 
 type Config struct {
@@ -155,13 +159,10 @@ func (d *Dev) Init() (err error) {
 	return nil
 }
 
-const (
-	responseDelay                 time.Duration = 0 //20 * time.Microsecond
-	backplaneFunction                           = 0
-	whdBusSPIBackplaneReadPadding               = 4
-	sharedDATA                                  = true
-	pollLimit                                   = 60 * time.Millisecond
-)
+func (d *Dev) GetStatus() (Status, error) {
+	busStatus, err := d.Read32(FuncBus, AddrStatus)
+	return Status(busStatus), err
+}
 
 func (d *Dev) Reset() {
 	d.wlRegOn.Low()

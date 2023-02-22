@@ -62,6 +62,11 @@ func TestShellmode() {
 		}
 
 		switch cmdByte {
+		case 'l':
+			active := arg1 > 0
+			println("set led", active)
+			err = dev.LED().Set(active)
+
 		case 'f':
 			println("device register func set to ", arg1)
 			devFn = cyw43439.Function(arg1) // Dangerous assignment.

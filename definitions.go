@@ -1,5 +1,15 @@
 package cyw43439
 
+import "time"
+
+// TODO: delete these auxiliary variables.
+const (
+	responseDelay                 time.Duration = 0 //20 * time.Microsecond
+	whdBusSPIBackplaneReadPadding               = 4
+	sharedDATA                                  = true
+	pollLimit                                   = 60 * time.Millisecond
+)
+
 // 32 bit register addresses on SPI.
 const (
 	AddrBusControl = 0x0000
@@ -39,6 +49,7 @@ const (
 	FuncBackplane Function = 0b01
 	// DMA channel 1. WLAN packets up to 2048 bytes.
 	FuncDMA1 Function = 0b10
+	FuncWLAN          = FuncDMA1
 	// DMA channel 2 (optional). Packets up to 2048 bytes.
 	FuncDMA2 Function = 0b11
 )
