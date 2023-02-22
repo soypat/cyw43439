@@ -223,7 +223,7 @@ func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 	if fn == FuncWLAN {
 		readyAttempts := 1000
 		for ; readyAttempts > 0; readyAttempts-- {
-			status, err := d.GetStatus()
+			status, err := d.GetStatus() // TODO: We're getting Status not ready here.
 			if err != nil {
 				return err
 			}
