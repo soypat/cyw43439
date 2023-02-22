@@ -170,6 +170,7 @@ func (d *Dev) Init() (err error) {
 		return err
 	}
 	return nil
+
 	// TODO: For when we are ready to download firmware.
 	const (
 		SDIO_CHIP_CLOCK_CSR  = 0x1000e

@@ -72,24 +72,24 @@ func TestShellmode() {
 			devFn = cyw43439.Function(arg1) // Dangerous assignment.
 
 		case 'U', 'u':
-			println("writing 8bit register", arg1, "with value", uint8(writeVal), "wordlen==16:", cmdByte > 'Z')
-			if cmdByte == 'U' {
+			println("writing 8bit register", arg1, "with value", uint8(writeVal), "wordlen==16:", cmdByte <= 'Z')
+			if cmdByte == 'u' {
 				err = dev.Write8(devFn, uint32(arg1), uint8(writeVal))
 			} else {
 				err = dev.Write8S(devFn, uint32(arg1), uint8(writeVal))
 			}
 
 		case 'V', 'v':
-			println("writing 16bit register", arg1, "with value", uint16(writeVal), "wordlen==16:", cmdByte > 'Z')
-			if cmdByte == 'V' {
+			println("writing 16bit register", arg1, "with value", uint16(writeVal), "wordlen==16:", cmdByte <= 'Z')
+			if cmdByte == 'v' {
 				err = dev.Write16(devFn, uint32(arg1), uint16(writeVal))
 			} else {
 				err = dev.Write16S(devFn, uint32(arg1), uint16(writeVal))
 			}
 
 		case 'W', 'w':
-			println("writing 32bit register", arg1, "with value", uint32(writeVal), "wordlen==16:", cmdByte > 'Z')
-			if cmdByte == 'W' {
+			println("writing 32bit register", arg1, "with value", uint32(writeVal), "wordlen==16:", cmdByte <= 'Z')
+			if cmdByte == 'w' {
 				err = dev.Write32(devFn, uint32(arg1), uint32(writeVal))
 			} else {
 				err = dev.Write32S(devFn, uint32(arg1), uint32(writeVal))
@@ -99,10 +99,21 @@ func TestShellmode() {
 			println("write value set to", arg1)
 			writeVal = arg1
 
+		case 'y':
+			println("reading 8bit register", arg1)
+			value, err := dev.Read8(devFn, uint32(arg1))
+			if err != nil {
+				break
+			}
+			command[0] = '0'
+			command[1] = 'x'
+			command = strconv.AppendUint(command[:2], uint64(value), 16)
+			shell.Write(command)
+
 		case 'X', 'x':
-			println("reading 16bit register", arg1, "wordlen==16:", cmdByte > 'Z')
+			println("reading 16bit register", arg1, "wordlen==16:", cmdByte <= 'Z')
 			var value uint16
-			if cmdByte == 'X' {
+			if cmdByte == 'x' {
 				value, err = dev.Read16(devFn, uint32(arg1))
 			} else {
 				value, err = dev.Read16S(devFn, uint32(arg1))
@@ -116,9 +127,9 @@ func TestShellmode() {
 			shell.Write(command)
 
 		case 'R', 'r':
-			println("reading 32bit register", arg1, "wordlen==16:", cmdByte > 'Z')
+			println("reading 32bit register", arg1, "wordlen==16:", cmdByte <= 'Z')
 			var value uint32
-			if cmdByte == 'R' {
+			if cmdByte == 'r' {
 				value, err = dev.Read32(devFn, uint32(arg1))
 			} else {
 				value, err = dev.Read32S(devFn, uint32(arg1))
