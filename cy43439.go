@@ -62,6 +62,7 @@ type Dev struct {
 	wlRegOn  machine.Pin
 	irq      machine.Pin
 	sharedSD machine.Pin
+	busIsUp  bool
 	//	 These values are fix for device F1 buffer overflow problem:
 	lastSize               int
 	lastHeader             [2]uint32
@@ -74,9 +75,6 @@ type Dev struct {
 	wlanFlowCtl           uint8
 	sdpcmRequestedIoctlID uint16
 	buf                   [2048]byte
-}
-
-type Config struct {
 }
 
 func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
@@ -191,12 +189,123 @@ func (d *Dev) Init() (err error) {
 	return errors.New("timeout waiting for ALP to be set")
 
 alpset:
+	// Clear request for ALP
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, 0)
 
-	status, err := d.GetStatus()
-	println("init status on end:", status)
+	// Begin preparing for Firmware download.
+	err = d.disableDeviceCore(CORE_WLAN_ARM, false)
+	if err != nil {
+		return err
+	}
+	err = d.disableDeviceCore(CORE_SOCRAM, false)
+	if err != nil {
+		return err
+	}
+	err = d.resetDeviceCore(CORE_SOCRAM, false)
+	if err != nil {
+		return err
+	}
+	// 4343x specific stuff: disable remap for SRAM_3
+	d.writeBackplane(SOCSRAM_BANKX_INDEX, 4, 0x3)
+	d.writeBackplane(SOCSRAM_BANKX_PDA, 4, 0)
+
+	err = d.downloadResource(0x0, wifiFW[:wifiFWLen])
+	if err != nil {
+		return err
+	}
+	const RamSize = (512 * 1024)
+	wifinvramLen := align32(uint32(len(nvram43439)), 64)
+	err = d.downloadResource(RamSize-4-wifinvramLen, []byte(nvram43439))
+	if err != nil {
+		return err
+	}
+	sz := (^(wifinvramLen/4)&0xffff)<<16 | (wifinvramLen / 4)
+	err = d.writeBackplane(RamSize-4, 4, sz)
+	if err != nil {
+		return err
+	}
+	d.resetDeviceCore(CORE_WLAN_ARM, false)
+	if !d.CoreIsActive(CORE_WLAN_ARM) {
+		return errors.New("CORE_WLAN_ARM is not active after reset")
+	}
+
+	// Wait until HT clock is available.
+	for i := 0; i < 1000; i++ {
+		reg, _ := d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)
+		if reg&SBSDIO_HT_AVAIL != 0 {
+			goto htready
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return errors.New("HT not ready")
+
+htready:
+	err = d.writeBackplane(SDIO_INT_HOST_MASK, 4, I_HMB_SW_MASK)
+	if err != nil {
+		return err
+	}
+
+	// Lower F2 Watermark to avoid DMA Hang in F2 when SD Clock is stopped.
+	err = d.Write8(FuncBackplane, SDIO_FUNCTION2_WATERMARK, SPI_F2_WATERMARK)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < 1000; i++ {
+		status, _ := d.GetStatus()
+		if status.F2PacketAvailable() {
+			goto f2ready
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return errors.New("F2 not ready")
+
+f2ready:
+	// Use of KSO:
+	reg8, err := d.Read8(FuncBackplane, SDIO_WAKEUP_CTRL)
+	if err != nil {
+		return err
+	}
+	d.Write8(FuncBackplane, SDIO_WAKEUP_CTRL, reg8)
+	d.Write8(FuncBus, SDIOD_CCCR_BRCM_CARDCAP, SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC)
+	d.Write8(FuncBus, SDIO_CHIP_CLOCK_CSR, SBSDIO_FORCE_HT)
+	reg8, err = d.Read8(FuncBackplane, SDIO_SLEEP_CSR)
+	if err != nil {
+		return err
+	}
+	if reg8&SBSDIO_SLPCSR_KEEP_SDIO_ON == 0 {
+		reg8 |= SBSDIO_SLPCSR_KEEP_SDIO_ON
+		d.Write8(FuncBackplane, SDIO_SLEEP_CSR, reg8)
+	}
+	// Put interface back to sleep.
+	d.Write8(FuncBackplane, SDIO_PULL_UP, 0xf)
+
+	// Clear pad pulls
+	err = d.Write8(FuncBackplane, SDIO_PULL_UP, 0)
+	if err != nil {
+		return err
+	}
+	_, err = d.Read8(FuncBackplane, SDIO_PULL_UP)
+	if err != nil {
+		return err
+	}
+	// Clear data unavailable error if there is any.
+	spiIntStatus, err := d.Read16(FuncBus, AddrInterrupt)
+	if spiIntStatus&dataUnavailable != 0 {
+		d.Write16(FuncBus, AddrInterrupt, spiIntStatus)
+	}
+
+	err = d.busSleep(false)
+	if err != nil {
+		return err
+	}
+
+	// Load CLM data. It's right after main firmware
+
 	return err
 }
+
+//go:inline
+func align32(val, align uint32) uint32 { return (val + align - 1) &^ (align - 1) }
 
 func (d *Dev) GetStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, AddrStatus)

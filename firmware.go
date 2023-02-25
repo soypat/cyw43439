@@ -1,4 +1,4 @@
-//go:build ignore
+//go:build cy43firmware
 
 package cyw43439
 

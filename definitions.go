@@ -100,3 +100,47 @@ func (s Status) F3PacketLength() uint16 {
 	const mask = 1<<11 - 1
 	return uint16(s>>21) & mask
 }
+
+// SDIO bus specifics
+const (
+	SDIOD_CCCR_IOEN          = 0x02
+	SDIOD_CCCR_IORDY         = 0x03
+	SDIOD_CCCR_INTEN         = 0x04
+	SDIOD_CCCR_BICTRL        = 0x07
+	SDIOD_CCCR_BLKSIZE_0     = 0x10
+	SDIOD_CCCR_SPEED_CONTROL = 0x13
+	SDIOD_CCCR_BRCM_CARDCAP  = 0xf0
+	SDIOD_SEP_INT_CTL        = 0xf2
+	SDIOD_CCCR_F1BLKSIZE_0   = 0x110
+	SDIOD_CCCR_F2BLKSIZE_0   = 0x210
+	SDIOD_CCCR_F2BLKSIZE_1   = 0x211
+	INTR_CTL_MASTER_EN       = 0x01
+	INTR_CTL_FUNC1_EN        = 0x02
+	INTR_CTL_FUNC2_EN        = 0x04
+	SDIO_FUNC_ENABLE_1       = 0x02
+	SDIO_FUNC_ENABLE_2       = 0x04
+	SDIO_FUNC_READY_1        = 0x02
+	SDIO_FUNC_READY_2        = 0x04
+	SDIO_64B_BLOCK           = 64
+	SDIO_CHIP_CLOCK_CSR      = 0x1000e
+	SDIO_PULL_UP             = 0x1000f
+)
+
+// SDIOD_CCCR_BRCM_CARDCAP bits
+const (
+	SDIOD_CCCR_BRCM_CARDCAP_CMD14_SUPPORT = 0x02 // Supports CMD14
+	SDIOD_CCCR_BRCM_CARDCAP_CMD14_EXT     = 0x04 // CMD14 is allowed in FSM command state
+	SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC     = 0x08 // sdiod_aos does not decode any command
+)
+
+// SDIO_SLEEP_CSR bits
+const (
+	SBSDIO_SLPCSR_KEEP_SDIO_ON = 1 << 0 // KeepSdioOn bit
+	SBSDIO_SLPCSR_DEVICE_ON    = 1 << 1 // DeviceOn bit
+)
+
+// IOCTL kinds.
+const (
+	SDPCM_GET = 0
+	SDPCM_SET = 2
+)
