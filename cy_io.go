@@ -12,41 +12,6 @@ import (
 
 var ErrDataNotAvailable = errors.New("requested data not available")
 
-// SPIWriteRead performs the gSPI Write-Read action.
-func (d *Dev) SPIWriteRead(cmd uint32, w, r []byte) error {
-	d.csLow()
-	if sharedDATA {
-		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	}
-	d.spi.Transfer(byte(cmd >> 24))
-	d.spi.Transfer(byte(cmd >> 16))
-	d.spi.Transfer(byte(cmd >> 8))
-	d.spi.Transfer(byte(cmd))
-	for _, v := range w {
-		d.spi.Transfer(v)
-	}
-	d.responseDelay()
-	for i := range r {
-		r[i], _ = d.spi.Transfer(0)
-	}
-	if !d.enableStatusWord {
-		return nil
-	}
-	// Read Status.
-	b0, _ := d.spi.Transfer(0)
-	b1, _ := d.spi.Transfer(0)
-	b2, _ := d.spi.Transfer(0)
-	b3, _ := d.spi.Transfer(0)
-	d.csHigh()
-	status := Status(b0)<<24 | Status(b1)<<16 | Status(b2)<<8 | Status(b3)
-	status = Status(swap32(uint32(status)))
-	if !status.IsDataAvailable() {
-		println("got status:", status)
-		return ErrDataNotAvailable
-	}
-	return nil
-}
-
 func (d *Dev) Write32S(fn Function, addr, val uint32) error {
 	cmd := make_cmd(true, true, fn, addr, 4)
 	if fn == FuncBackplane {
@@ -109,11 +74,11 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 	}
 	switch size {
 	case 4:
-		binary.BigEndian.PutUint32(buf[:], val)
+		binary.BigEndian.PutUint32(buf[:], val) // !LE
 	case 2:
-		binary.BigEndian.PutUint16(buf[2:], uint16(val))
+		binary.BigEndian.PutUint16(buf[2:], uint16(val)) // !LE
 	case 1:
-		buf[3] = byte(val)
+		buf[3] = byte(val) // !LE
 	default:
 		panic("misuse of general write register.")
 	}
@@ -152,28 +117,26 @@ func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 
 // SPIWrite performs the gSPI Write action.
 func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
+	var buf [4]byte
 	d.csLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
-	d.spi.Transfer(byte(cmd >> 24))
-	d.spi.Transfer(byte(cmd >> 16))
-	d.spi.Transfer(byte(cmd >> 8))
-	d.spi.Transfer(byte(cmd))
-	for _, v := range w {
-		d.spi.Transfer(v)
+	binary.BigEndian.PutUint32(buf[:], cmd) // !LE
+	err := d.spi.Tx(buf[:], nil)
+	if err != nil {
+		return err
 	}
-	if !d.enableStatusWord {
-		return nil
+	err = d.spi.Tx(w, nil)
+	if err != nil || !d.enableStatusWord {
+		return err
 	}
 	// Read Status.
-	b0, _ := d.spi.Transfer(0)
-	b1, _ := d.spi.Transfer(0)
-	b2, _ := d.spi.Transfer(0)
-	b3, _ := d.spi.Transfer(0)
+	buf = [4]byte{}
+	d.spi.Tx(buf[:], buf[:])
 	d.csHigh()
-	status := Status(b0)<<24 | Status(b1)<<16 | Status(b2)<<8 | Status(b3)
-	status = Status(swap32(uint32(status)))
+
+	status := Status(swap32(binary.BigEndian.Uint32(buf[:]))) // !LE
 	if !status.IsDataAvailable() {
 		println("got status:", status)
 		return ErrDataNotAvailable
@@ -215,18 +178,18 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	cmd := make_cmd(false, true, fn, addr, size+padding)
 	var buf [4 + whdBusSPIBackplaneReadPadding]byte
 	err := d.SPIRead(cmd, buf[:4+padding])
-	return binary.BigEndian.Uint32(buf[:4]), err
+	result := binary.BigEndian.Uint32(buf[padding : padding+4]) // !LE
+	return result, err
 }
 
-// rrS reads register and swaps
+// rrS reads register and swaps 16bit word length.
 func (d *Dev) rrS(fn Function, addr, size uint32) (uint32, error) {
-	var padding uint32
 	if fn == FuncBackplane {
-		padding = whdBusSPIBackplaneReadPadding
+		panic("backplane not implemented for rrS")
 	}
-	cmd := make_cmd(false, true, fn, addr, size+padding)
-	var buf [4 + whdBusSPIBackplaneReadPadding]byte
-	d.SPIRead(swap32(cmd), buf[:4+padding])
+	cmd := make_cmd(false, true, fn, addr, size)
+	var buf [4]byte
+	d.SPIRead(swap32(cmd), buf[:4])
 	return swap32(binary.BigEndian.Uint32(buf[:4])), nil
 }
 
@@ -257,14 +220,13 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 
 // SPIRead performs the gSPI Read action.
 func (d *Dev) SPIRead(cmd uint32, r []byte) error {
+	var buf [4]byte
 	d.csLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
-	d.spi.Transfer(byte(cmd >> 24))
-	d.spi.Transfer(byte(cmd >> 16))
-	d.spi.Transfer(byte(cmd >> 8))
-	d.spi.Transfer(byte(cmd))
+	binary.BigEndian.PutUint32(buf[:], cmd) // !LE
+	d.spi.Tx(buf[:], nil)
 
 	d.csPeak()
 	if sharedDATA {
@@ -272,16 +234,14 @@ func (d *Dev) SPIRead(cmd uint32, r []byte) error {
 	}
 	d.responseDelay()
 	err := d.spi.Tx(nil, r)
-	if !d.enableStatusWord {
+	if err != nil || !d.enableStatusWord {
 		return err
 	}
 	// Read Status.
-	b0, _ := d.spi.Transfer(0)
-	b1, _ := d.spi.Transfer(0)
-	b2, _ := d.spi.Transfer(0)
-	b3, _ := d.spi.Transfer(0)
+	buf = [4]byte{} // zero out buffer.
+	d.spi.Tx(buf[:], buf[:])
 	d.csHigh()
-	status := Status(swap32(uint32(b0)<<24 | uint32(b1)<<16 | uint32(b2)<<8 | uint32(b3)))
+	status := Status(binary.BigEndian.Uint32(buf[:])) // !LE
 	if !status.IsDataAvailable() {
 		println("got data unavailable status:", status)
 	}

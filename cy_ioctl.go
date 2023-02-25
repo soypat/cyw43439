@@ -279,6 +279,7 @@ func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 		return nil
 	}
 	// TODO
+	println("core not in reset:", reg)
 	return errors.New("core not in reset")
 }
 
@@ -321,6 +322,8 @@ func coreaddress(coreID uint8) (v uint32) {
 		v = WLAN_ARMCM3_BASE_ADDRESS + WRAPPER_REGISTER_OFFSET
 	case CORE_SOCRAM:
 		v = SOCSRAM_BASE_ADDRESS + WRAPPER_REGISTER_OFFSET
+	default:
+		panic("bad core address")
 	}
 	return v
 }

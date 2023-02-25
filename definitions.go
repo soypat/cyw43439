@@ -1,6 +1,8 @@
 package cyw43439
 
-import "time"
+import (
+	"time"
+)
 
 // TODO: delete these auxiliary variables.
 const (
@@ -152,3 +154,37 @@ func GetCLM(firmware []byte) []byte {
 	}
 	return firmware[clmAddr : clmAddr+clmLen]
 }
+
+// SPIWriteRead performs the gSPI Write-Read action.
+// Not used!
+// func (d *Dev) SPIWriteRead(cmd uint32, w, r []byte) error {
+// 	var buf [4]byte
+// 	d.csLow()
+// 	if sharedDATA {
+// 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
+// 	}
+// 	binary.BigEndian.PutUint32(buf[:], cmd) // !LE
+// 	d.spi.Tx(buf[:], nil)
+
+// 	err := d.spi.Tx(w, nil)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	d.responseDelay()
+// 	err = d.spi.Tx(nil, r)
+// 	if err != nil || !d.enableStatusWord {
+// 		return err
+// 	}
+
+// 	// Read Status.
+// 	buf = [4]byte{}
+// 	d.spi.Tx(buf[:], buf[:])
+// 	d.csHigh()
+// 	status := Status(binary.BigEndian.Uint32(buf[:])) // !LE
+// 	status = Status(swap32(uint32(status)))
+// 	if !status.IsDataAvailable() {
+// 		println("got status:", status)
+// 		return ErrDataNotAvailable
+// 	}
+// 	return nil
+// }

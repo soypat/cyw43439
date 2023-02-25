@@ -43,6 +43,9 @@ func (s *SPIbb) Configure() {
 func (s *SPIbb) Tx(w []byte, r []byte) error {
 	mocking := s.MockTo != nil
 	if len(w) != 0 {
+		if len(r) == 0 {
+			r = []byte{0}
+		}
 		r[0] = s.firstTransfer(w[0], mocking)
 		w = w[1:]
 		r = r[1:]

@@ -90,6 +90,7 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 		wlRegOn:                wlRegOn,
 		sharedSD:               SD,
 		ResponseDelayByteCount: 0,
+		enableStatusWord:       true,
 	}
 }
 
@@ -137,7 +138,7 @@ func (d *Dev) Init(cfg Config) (err error) {
 	time.Sleep(50 * time.Millisecond)
 	var got uint32
 	// Little endian test address values.
-	for got != TestPattern && time.Since(startPoll) > pollLimit {
+	for got != TestPattern && time.Since(startPoll) < pollLimit {
 		time.Sleep(time.Millisecond)
 		got, err = d.Read32S(FuncBus, AddrTest)
 	}
@@ -160,7 +161,7 @@ func (d *Dev) Init(cfg Config) (err error) {
 		StatusEnablePos        = 0x2*8 + 0
 		InterruptWithStatusPos = 0x2*8 + 1
 		// 132275 is Pico-sdk's default value.
-		setupValue = (1 << WordLengthPos) | (1 << EndianessBigPos) | (1 << HiSpeedModePos) | // This line OK.
+		setupValue = (1 << WordLengthPos) | (0 << EndianessBigPos) | (1 << HiSpeedModePos) | // This line OK.
 			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
 			(1 << InterruptWithStatusPos) // | (1 << StatusEnablePos)
 	)
@@ -171,6 +172,7 @@ func (d *Dev) Init(cfg Config) (err error) {
 	if err != nil {
 		return err
 	}
+	d.enableStatusWord = true
 	const WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE = 4
 	err = d.Write8(FuncBus, AddrRespDelayF1, WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE)
 	if err != nil {
