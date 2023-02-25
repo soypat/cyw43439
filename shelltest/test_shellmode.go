@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"machine"
 	"strconv"
 	"time"
+	"unsafe"
 
 	cyw43439 "github.com/soypat/cy43439"
 )
@@ -144,10 +146,38 @@ func TestShellmode() {
 		case 'Z':
 			println("reset device")
 			dev.Reset()
+		case '~':
+			var b = [8]byte{0xfe, 0xed, 0xbe, 0xad, 0xde, 0xad, 0xbe, 0xef}
+			words := (*[2]uint32)(unsafe.Pointer(&b))
+			for i := range words {
+				shell.IO.WriteByte('\n')
+				command[0] = '0'
+				command[1] = 'x'
+				command = strconv.AppendUint(command[:2], uint64(words[0]), 16)
+				shell.Write(command)
+				command[0] = ' '
+				command = strconv.AppendUint(command[:2], uint64(binary.BigEndian.Uint32(b[i*4:])), 16)
+				shell.Write(command)
+				command = strconv.AppendUint(command[:2], uint64(binary.LittleEndian.Uint32(b[i*4:])), 16)
+				shell.Write(command)
+			}
+
+		case '!':
+			var b = [2]uint32{0xfeedbead, 0xdeadbeef}
+			bs := (*[8]byte)(unsafe.Pointer(&b))
+			for i := range bs {
+				if i%4 == 0 {
+					shell.IO.WriteByte('\n')
+				}
+				command[0] = '0'
+				command[1] = 'x'
+				command = strconv.AppendUint(command[:2], uint64(bs[i]), 16)
+				shell.Write(command)
+			}
 
 		case 'I':
 			println("initializing device")
-			err = dev.Init()
+			err = dev.Init(cyw43439.DefaultConfig())
 		case 'o':
 			b := arg1 > 0
 			println("setting WL_REG_ON", b)

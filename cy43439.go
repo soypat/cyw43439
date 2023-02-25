@@ -23,6 +23,7 @@ package cyw43439
 import (
 	"errors"
 	"machine"
+	"net"
 	"time"
 
 	"tinygo.org/x/drivers"
@@ -69,6 +70,7 @@ type Dev struct {
 	currentBackplaneWindow uint32
 	lastBackplaneWindow    uint32
 	ResponseDelayByteCount uint8
+	enableStatusWord       bool
 	// Max packet size is 2048 bytes.
 	sdpcmTxSequence       uint8
 	sdpcmLastBusCredit    uint8
@@ -91,7 +93,26 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 	}
 }
 
-func (d *Dev) Init() (err error) {
+type Config struct {
+	Firmware []byte
+	CLM      []byte
+	MAC      net.HardwareAddr
+}
+
+func DefaultConfig() Config {
+	fw := wifiFW[:wifiFWLen]
+	return Config{
+		Firmware: fw,
+		CLM:      GetCLM(fw),
+		MAC:      []byte{0xfe, 0xed, 0xde, 0xad, 0xbe, 0xef},
+	}
+}
+
+func (d *Dev) Init(cfg Config) (err error) {
+	if cfg.MAC != nil && len(cfg.MAC) != 6 {
+		return errors.New("bad MAC address")
+	}
+	var reg8 uint8
 	/*
 		To initiate communication through the gSPI after power-up, the host
 		needs to bring up the WLAN chip by writing to the wake-up WLAN
@@ -116,14 +137,13 @@ func (d *Dev) Init() (err error) {
 	time.Sleep(50 * time.Millisecond)
 	var got uint32
 	// Little endian test address values.
-	for got != TestPattern {
+	for got != TestPattern && time.Since(startPoll) > pollLimit {
 		time.Sleep(time.Millisecond)
 		got, err = d.Read32S(FuncBus, AddrTest)
-		if err != nil {
-			return err
-		}
 	}
-	if got != TestPattern && time.Since(startPoll) > pollLimit {
+	if err != nil {
+		return err
+	} else if got != TestPattern {
 		return errors.New("poll failed")
 	}
 	// Address 0x0000 registers.
@@ -140,11 +160,12 @@ func (d *Dev) Init() (err error) {
 		StatusEnablePos        = 0x2*8 + 0
 		InterruptWithStatusPos = 0x2*8 + 1
 		// 132275 is Pico-sdk's default value.
-		setupValue = (1 << WordLengthPos) | (0 << EndianessBigPos) | (1 << HiSpeedModePos) |
+		setupValue = (1 << WordLengthPos) | (1 << EndianessBigPos) | (1 << HiSpeedModePos) | // This line OK.
 			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
-			(1 << StatusEnablePos) | (1 << InterruptWithStatusPos)
+			(1 << InterruptWithStatusPos) // | (1 << StatusEnablePos)
 	)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
+	println("writing", setupValue)
 	err = d.Write32S(FuncBus, AddrBusControl, setupValue) // Last use of a swap writer/reader.
 	// err = d.RegisterWriteUint32(FuncBus, 0x0, setupValue)
 	if err != nil {
@@ -167,7 +188,8 @@ func (d *Dev) Init() (err error) {
 	if err != nil {
 		return err
 	}
-	return nil
+
+	// Backplane is ready by now.
 
 	// TODO: For when we are ready to download firmware.
 	const (
@@ -177,20 +199,27 @@ func (d *Dev) Init() (err error) {
 	)
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_ALP_AVAIL_REQ)
 	for i := 0; i < 10; i++ {
-		reg, err := d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)
+		reg8, err = d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)
 		if err != nil {
 			return err
 		}
-		if reg&SBSDIO_ALP_AVAIL != 0 {
+		if reg8&SBSDIO_ALP_AVAIL != 0 {
 			goto alpset
 		}
 		time.Sleep(time.Millisecond)
 	}
+	println("ALP not set: ", int(reg8))
 	return errors.New("timeout waiting for ALP to be set")
 
 alpset:
 	// Clear request for ALP
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, 0)
+
+	if cfg.Firmware == nil {
+		return nil
+	} else if cfg.CLM == nil {
+		return errors.New("CLM is nil but firmware not nil")
+	}
 
 	// Begin preparing for Firmware download.
 	err = d.disableDeviceCore(CORE_WLAN_ARM, false)
@@ -206,10 +235,18 @@ alpset:
 		return err
 	}
 	// 4343x specific stuff: disable remap for SRAM_3
-	d.writeBackplane(SOCSRAM_BANKX_INDEX, 4, 0x3)
-	d.writeBackplane(SOCSRAM_BANKX_PDA, 4, 0)
+	err = d.writeBackplane(SOCSRAM_BANKX_INDEX, 4, 0x3)
+	if err != nil {
+		return err
+	}
+	err = d.writeBackplane(SOCSRAM_BANKX_PDA, 4, 0)
+	if err != nil {
+		return err
+	}
+	// d.WriteBytes(FuncBackplane, 0)
 
-	err = d.downloadResource(0x0, wifiFW[:wifiFWLen])
+	return nil
+	err = d.downloadResource(0x0, cfg.Firmware)
 	if err != nil {
 		return err
 	}
@@ -261,7 +298,7 @@ htready:
 
 f2ready:
 	// Use of KSO:
-	reg8, err := d.Read8(FuncBackplane, SDIO_WAKEUP_CTRL)
+	reg8, err = d.Read8(FuncBackplane, SDIO_WAKEUP_CTRL)
 	if err != nil {
 		return err
 	}
@@ -300,7 +337,24 @@ f2ready:
 	}
 
 	// Load CLM data. It's right after main firmware
-
+	err = d.clmLoad(cfg.CLM)
+	if err != nil {
+		return err
+	}
+	err = d.WriteIOVar("bus:txglom", wwd_STA_INTERFACE, 0)
+	if err != nil {
+		return err
+	}
+	err = d.WriteIOVar("apsta", wwd_STA_INTERFACE, 1)
+	if err != nil {
+		return err
+	}
+	// var defaultMAC = [6]byte{0x00, 0xA0, 0x50, 0xb5, 0x59, 0x5e}
+	if cfg.MAC == nil {
+		// Do not check if MAC address is set in OTP.
+		return nil
+	}
+	err = d.WriteIOVarN("cur_etheraddr", wwd_STA_INTERFACE, cfg.MAC)
 	return err
 }
 

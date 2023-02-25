@@ -29,6 +29,9 @@ func (d *Dev) SPIWriteRead(cmd uint32, w, r []byte) error {
 	for i := range r {
 		r[i], _ = d.spi.Transfer(0)
 	}
+	if !d.enableStatusWord {
+		return nil
+	}
 	// Read Status.
 	b0, _ := d.spi.Transfer(0)
 	b1, _ := d.spi.Transfer(0)
@@ -160,6 +163,9 @@ func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 	for _, v := range w {
 		d.spi.Transfer(v)
 	}
+	if !d.enableStatusWord {
+		return nil
+	}
 	// Read Status.
 	b0, _ := d.spi.Transfer(0)
 	b1, _ := d.spi.Transfer(0)
@@ -265,7 +271,10 @@ func (d *Dev) SPIRead(cmd uint32, r []byte) error {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
 	d.responseDelay()
-	d.spi.Tx(nil, r)
+	err := d.spi.Tx(nil, r)
+	if !d.enableStatusWord {
+		return err
+	}
 	// Read Status.
 	b0, _ := d.spi.Transfer(0)
 	b1, _ := d.spi.Transfer(0)
@@ -276,7 +285,7 @@ func (d *Dev) SPIRead(cmd uint32, r []byte) error {
 	if !status.IsDataAvailable() {
 		println("got data unavailable status:", status)
 	}
-	return nil
+	return err
 }
 
 //go:inline

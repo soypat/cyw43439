@@ -128,21 +128,42 @@ func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	}
 	val := uint32(1 << wlGPIO)
 	if value {
-		err = d.Write2IOVar("gpioout", wwd_STA_INTERFACE, val, val)
+		err = d.WriteIOVar2("gpioout", wwd_STA_INTERFACE, val, val)
 	} else {
-		err = d.Write2IOVar("gpioout", wwd_STA_INTERFACE, val, 0)
+		err = d.WriteIOVar2("gpioout", wwd_STA_INTERFACE, val, 0)
 	}
 	return err
 }
 
-func (d *Dev) Write2IOVar(VAR string, iface ioctlInterface, val0, val1 uint32) error {
-	println("write2iovar")
+func (d *Dev) WriteIOVar(VAR string, iface ioctlInterface, val uint32) error {
 	buf := d.buf[1024:]
 	length := copy(buf, VAR)
+	buf[length] = 0 // Null terminate the string
+	length++
+	binary.BigEndian.PutUint32(buf[length:], val)
+	return d.doIoctl(SDPCM_SET, iface, wlc_SET_VAR, buf[:length+4])
+}
 
+func (d *Dev) WriteIOVar2(VAR string, iface ioctlInterface, val0, val1 uint32) error {
+	buf := d.buf[1024:]
+	length := copy(buf, VAR)
+	buf[length] = 0 // Null terminate the string
+	length++
 	binary.BigEndian.PutUint32(buf[length:], val0)
 	binary.BigEndian.PutUint32(buf[length+4:], val1)
-	return d.doIoctl(2, iface, wlc_SET_VAR, buf[:length+8])
+	return d.doIoctl(SDPCM_SET, iface, wlc_SET_VAR, buf[:length+8])
+}
+
+func (d *Dev) WriteIOVarN(VAR string, iface ioctlInterface, src []byte) error {
+	iobuf := d.buf[1024:]
+	if len(VAR)+len(src)+1 > len(iobuf) {
+		return errors.New("buffer too short for IOVarN call")
+	}
+	length := copy(iobuf, VAR)
+	iobuf[length] = 0 // Null terminate the string
+	length++
+	length += copy(iobuf[length:], src)
+	return d.doIoctl(SDPCM_SET, iface, wlc_SET_VAR, iobuf[:length])
 }
 
 func (d *Dev) DoIoctl32(kind uint32, iface ioctlInterface, cmd sdpcmCmd, val uint32) error {
@@ -535,4 +556,20 @@ func (d *Dev) clmLoad(clm []byte) error {
 		return errors.New("CLM load failed due to bad status return")
 	}
 	return nil
+}
+
+// putMAC gets current MAC address from CYW43439.
+func (d *Dev) putMAC(dst []byte) error {
+	if len(dst) < 6 {
+		panic("dst too short to put MAC")
+	}
+	const sdpcmHeaderLen = unsafe.Sizeof(sdpcmHeader{})
+	buf := d.buf[sdpcmHeaderLen+16:]
+	const varMAC = "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00"
+	copy(buf[:len(varMAC)], varMAC)
+	err := d.doIoctl(SDPCM_GET, wwd_STA_INTERFACE, wlc_GET_VAR, buf[:len(varMAC)])
+	if err == nil {
+		copy(dst[:6], buf)
+	}
+	return err
 }

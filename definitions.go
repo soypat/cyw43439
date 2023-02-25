@@ -144,3 +144,11 @@ const (
 	SDPCM_GET = 0
 	SDPCM_SET = 2
 )
+
+func GetCLM(firmware []byte) []byte {
+	clmAddr := align32(uint32(len(firmware)), 512)
+	if uint32(cap(firmware)) < clmAddr+clmLen {
+		panic("firmware slice too small for CLM")
+	}
+	return firmware[clmAddr : clmAddr+clmLen]
+}
