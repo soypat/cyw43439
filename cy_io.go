@@ -84,42 +84,67 @@ func (d *Dev) Write8S(fn Function, addr uint32, val uint8) error {
 }
 
 func (d *Dev) Write32(fn Function, addr, val uint32) error {
-	cmd := make_cmd(true, true, fn, addr, 4)
-	if fn == FuncBackplane {
-		d.lastSize = 8
-		d.lastHeader[0] = cmd
-		d.lastHeader[1] = val
-		d.lastBackplaneWindow = d.currentBackplaneWindow
-	}
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], val)
-	return d.SPIWrite(cmd, buf[:])
+	return d.wr(fn, addr, 4, uint32(val))
 }
 
 func (d *Dev) Write16(fn Function, addr uint32, val uint16) error {
-	cmd := make_cmd(true, true, fn, addr, 2)
-	if fn == FuncBackplane {
-		d.lastSize = 8
-		d.lastHeader[0] = cmd
-		d.lastHeader[1] = uint32(val)
-		d.lastBackplaneWindow = d.currentBackplaneWindow
-	}
-	var buf [4]byte
-	binary.BigEndian.PutUint16(buf[2:], val)
-	return d.SPIWrite(cmd, buf[:])
+	return d.wr(fn, addr, 2, uint32(val))
 }
 
 func (d *Dev) Write8(fn Function, addr uint32, val uint8) error {
-	cmd := make_cmd(true, true, fn, addr, 1)
+	return d.wr(fn, addr, 1, uint32(val))
+}
+
+func (d *Dev) wr(fn Function, addr, size, val uint32) error {
+	var buf [4]byte
+	cmd := make_cmd(true, true, fn, addr, size)
 	if fn == FuncBackplane {
 		d.lastSize = 8
 		d.lastHeader[0] = cmd
 		d.lastHeader[1] = uint32(val)
 		d.lastBackplaneWindow = d.currentBackplaneWindow
 	}
-	var buf [4]byte
-	buf[3] = val
+	switch size {
+	case 4:
+		binary.BigEndian.PutUint32(buf[:], val)
+	case 2:
+		binary.BigEndian.PutUint16(buf[2:], uint16(val))
+	case 1:
+		buf[3] = byte(val)
+	default:
+		panic("misuse of general write register.")
+	}
 	return d.SPIWrite(cmd, buf[:])
+}
+
+// WriteBytes is cyw43_write_bytes
+func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
+	println("writeBytes")
+	length := uint32(len(src))
+	alignedLength := (length + 3) &^ 3
+	if length != alignedLength {
+		return errors.New("buffer length must be length multiple of 4")
+	}
+	if fn == FuncBackplane || !(length <= 64 && (addr+length) <= 0x8000) {
+		panic("bad argument to WriteBytes")
+	}
+	if fn == FuncWLAN {
+		readyAttempts := 1000
+		for ; readyAttempts > 0; readyAttempts-- {
+			status, err := d.GetStatus() // TODO: We're getting Status not ready here.
+			if err != nil {
+				return err
+			}
+			if status.F2RxReady() {
+				break
+			}
+		}
+		if readyAttempts <= 0 {
+			return errors.New("F2 not ready")
+		}
+	}
+	cmd := make_cmd(true, true, fn, addr, length)
+	return d.SPIWrite(cmd, src)
 }
 
 // SPIWrite performs the gSPI Write action.
@@ -175,7 +200,7 @@ func (d *Dev) Read8(fn Function, addr uint32) (uint8, error) {
 	return uint8(v), err
 }
 
-// rrS reads register.
+// rr reads a register and returns the result and an error if there was one.
 func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	var padding uint32
 	if fn == FuncBackplane {
@@ -183,8 +208,8 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	}
 	cmd := make_cmd(false, true, fn, addr, size+padding)
 	var buf [4 + whdBusSPIBackplaneReadPadding]byte
-	d.SPIRead(cmd, buf[:4+padding])
-	return binary.BigEndian.Uint32(buf[:4]), nil
+	err := d.SPIRead(cmd, buf[:4+padding])
+	return binary.BigEndian.Uint32(buf[:4]), err
 }
 
 // rrS reads register and swaps
@@ -197,6 +222,31 @@ func (d *Dev) rrS(fn Function, addr, size uint32) (uint32, error) {
 	var buf [4 + whdBusSPIBackplaneReadPadding]byte
 	d.SPIRead(swap32(cmd), buf[:4+padding])
 	return swap32(binary.BigEndian.Uint32(buf[:4])), nil
+}
+
+func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
+	const maxReadPacket = 2040
+	length := uint32(len(src))
+	alignedLength := (length + 3) &^ 3
+	if length != alignedLength {
+		return errors.New("buffer length must be length multiple of 4")
+	}
+	assert := fn == FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)
+	assert = assert && alignedLength > 0 && alignedLength < maxReadPacket
+	if !assert {
+		panic("bad argument to WriteBytes")
+	}
+	padding := uint32(0)
+	if fn == FuncBackplane {
+		padding = 4
+		if cap(src) < len(src)+4 {
+			return errors.New("ReadBytes src arg requires more capacity for byte padding")
+		}
+		src = src[:len(src)+4]
+	}
+	// TODO: Use DelayResponse to simulate padding effect.
+	cmd := make_cmd(false, true, fn, addr, length+padding)
+	return d.SPIRead(cmd, src)
 }
 
 // SPIRead performs the gSPI Read action.

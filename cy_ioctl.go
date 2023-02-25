@@ -209,57 +209,97 @@ func (d *Dev) sendSDPCMCommon(kind, cmd uint32, w []byte) error {
 	return d.WriteBytes(FuncWLAN, 0, w)
 }
 
-// WriteBytes is cyw43_write_bytes
-func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
-	println("writeBytes")
-	length := uint32(len(src))
-	alignedLength := (length + 3) &^ 3
-	if length != alignedLength {
-		return errors.New("buffer length must be length multiple of 4")
-	}
-	if fn == FuncBackplane || !(length <= 64 && (addr+length) <= 0x8000) {
-		panic("bad argument to WriteBytes")
-	}
-	if fn == FuncWLAN {
-		readyAttempts := 1000
-		for ; readyAttempts > 0; readyAttempts-- {
-			status, err := d.GetStatus() // TODO: We're getting Status not ready here.
-			if err != nil {
-				return err
-			}
-			if status.F2RxReady() {
-				break
-			}
-		}
-		if readyAttempts <= 0 {
-			return errors.New("F2 not ready")
-		}
-	}
-	cmd := make_cmd(true, true, fn, addr, length)
-	return d.SPIWrite(cmd, src)
+const (
+	CORE_WLAN_ARM              = 1
+	WLAN_ARMCM3_BASE_ADDRESS   = 0x18003000
+	WRAPPER_REGISTER_OFFSET    = 0x100000
+	CORE_SOCRAM                = 2
+	SOCSRAM_BASE_ADDRESS       = 0x18004000
+	SBSDIO_SB_ACCESS_2_4B_FLAG = 0x08000
+	CHIPCOMMON_BASE_ADDRESS    = 0x18000000
+	backplaneAddrMask          = 0x7fff
+)
+
+func (d *Dev) DisableDeviceCore(coreID uint8, coreHalt bool) error {
+	// base := coreaddress(coreID)
+	// d.read
+	return nil
 }
 
-func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
-	const maxReadPacket = 2040
-	length := uint32(len(src))
-	alignedLength := (length + 3) &^ 3
-	if length != alignedLength {
-		return errors.New("buffer length must be length multiple of 4")
+func coreaddress(coreID uint8) (v uint32) {
+	switch coreID {
+	case CORE_WLAN_ARM:
+		v = WLAN_ARMCM3_BASE_ADDRESS + WRAPPER_REGISTER_OFFSET
+	case CORE_SOCRAM:
+		v = SOCSRAM_BASE_ADDRESS + WRAPPER_REGISTER_OFFSET
 	}
-	assert := fn == FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)
-	assert = assert && alignedLength > 0 && alignedLength < maxReadPacket
-	if !assert {
-		panic("bad argument to WriteBytes")
+	return v
+}
+
+func (d *Dev) readBackplane(addr uint32, size uint32) (uint32, error) {
+	err := d.setBackplaneWindow(addr)
+	if err != nil {
+		return 0, err
 	}
-	padding := uint32(0)
-	if fn == FuncBackplane {
-		padding = 4
-		if cap(src) < len(src)+4 {
-			return errors.New("ReadBytes src arg requires more capacity for byte padding")
-		}
-		src = src[:len(src)+4]
+	addr &= backplaneAddrMask
+	if size == 4 {
+		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
-	// TODO: Use DelayResponse to simulate padding effect.
-	cmd := make_cmd(false, true, fn, addr, length+padding)
-	return d.SPIRead(cmd, src)
+	reg, err := d.rr(FuncBackplane, addr, size)
+	if err != nil {
+		return 0, err
+	}
+	err = d.setBackplaneWindow(CHIPCOMMON_BASE_ADDRESS)
+	return reg, err
+}
+
+func (d *Dev) writeBackplane(addr, size, value uint32) error {
+	err := d.setBackplaneWindow(addr)
+	if err != nil {
+		return err
+	}
+	addr &= backplaneAddrMask
+	if size == 4 {
+		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
+	}
+	err = d.wr(FuncBackplane, addr, size, value)
+	if err != nil {
+		return err
+	}
+
+	return d.setBackplaneWindow(CHIPCOMMON_BASE_ADDRESS)
+}
+
+func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
+	const (
+		SDIO_BACKPLANE_ADDRESS_HIGH = 0x1000c
+		SDIO_BACKPLANE_ADDRESS_MID  = 0x1000b
+		SDIO_BACKPLANE_ADDRESS_LOW  = 0x1000a
+	)
+	addr = addr &^ backplaneAddrMask
+	currentWindow := d.currentBackplaneWindow
+	// TODO(soypat): maybe these should be calls to rr so that they are inlined?
+	if (addr & 0xff000000) != currentWindow&0xff000000 {
+		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_HIGH, uint8(addr>>24))
+	}
+	if err != nil && (addr&0x00ff0000) != currentWindow&0x00ff0000 {
+		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_MID, uint8(addr>>16))
+	}
+	if err != nil && (addr&0x0000ff00) != currentWindow&0x0000ff00 {
+		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_LOW, uint8(addr>>8))
+	}
+	if err != nil {
+		return err
+	}
+	d.currentBackplaneWindow = addr
+	return err
+}
+
+func (d *Dev) downloadResource(addr uint32, rawLen int) error {
+	// round up length to simplify download.
+	// rlen := (rawLen + 255) &^ 255
+	// const maxBlockSize uint32 = 64
+	// blockSize := maxBlockSize
+
+	return nil
 }
