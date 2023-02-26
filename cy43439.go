@@ -21,6 +21,7 @@ When CY43439 boots it is in:
 package cyw43439
 
 import (
+	"encoding/binary"
 	"errors"
 	"machine"
 	"net"
@@ -145,6 +146,7 @@ func (d *Dev) Init(cfg Config) (err error) {
 	if err != nil {
 		return err
 	} else if got != TestPattern {
+		println("poll got", got)
 		return errors.New("poll failed")
 	}
 	// Address 0x0000 registers.
@@ -165,13 +167,15 @@ func (d *Dev) Init(cfg Config) (err error) {
 			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
 			(1 << InterruptWithStatusPos) // | (1 << StatusEnablePos)
 	)
+	b := setupValue | (b2u32(endian == binary.LittleEndian) << EndianessBigPos)
+	println("reg 0 set", b)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
-	println("writing", setupValue)
-	err = d.Write32S(FuncBus, AddrBusControl, setupValue) // Last use of a swap writer/reader.
+	err = d.Write32S(FuncBus, AddrBusControl, b) // Last use of a swap writer/reader.
 	// err = d.RegisterWriteUint32(FuncBus, 0x0, setupValue)
 	if err != nil {
 		return err
 	}
+	return nil
 	d.enableStatusWord = true
 	const WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE = 4
 	err = d.Write8(FuncBus, AddrRespDelayF1, WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE)

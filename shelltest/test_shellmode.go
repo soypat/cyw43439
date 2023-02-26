@@ -73,24 +73,16 @@ func TestShellmode() {
 			println("device register func set to ", arg1)
 			devFn = cyw43439.Function(arg1) // Dangerous assignment.
 
-		case 'U', 'u':
-			println("writing 8bit register", arg1, "with value", uint8(writeVal), "wordlen==16:", cmdByte <= 'Z')
-			if cmdByte == 'u' {
-				err = dev.Write8(devFn, uint32(arg1), uint8(writeVal))
-			} else {
-				err = dev.Write8S(devFn, uint32(arg1), uint8(writeVal))
-			}
+		case 'u':
+			println("writing 8bit register", arg1, "with value", uint8(writeVal))
+			err = dev.Write8(devFn, uint32(arg1), uint8(writeVal))
 
-		case 'V', 'v':
-			println("writing 16bit register", arg1, "with value", uint16(writeVal), "wordlen==16:", cmdByte <= 'Z')
-			if cmdByte == 'v' {
-				err = dev.Write16(devFn, uint32(arg1), uint16(writeVal))
-			} else {
-				err = dev.Write16S(devFn, uint32(arg1), uint16(writeVal))
-			}
+		case 'v':
+			println("writing 16bit register", arg1, "with value", uint16(writeVal))
+			err = dev.Write16(devFn, uint32(arg1), uint16(writeVal))
 
 		case 'W', 'w':
-			println("writing 32bit register", arg1, "with value", uint32(writeVal), "wordlen==16:", cmdByte <= 'Z')
+			println("writing 32bit register", arg1, "with value", uint32(writeVal), " wordlen==16:", cmdByte <= 'Z')
 			if cmdByte == 'w' {
 				err = dev.Write32(devFn, uint32(arg1), uint32(writeVal))
 			} else {
@@ -112,14 +104,10 @@ func TestShellmode() {
 			command = strconv.AppendUint(command[:2], uint64(value), 16)
 			shell.Write(command)
 
-		case 'X', 'x':
-			println("reading 16bit register", arg1, "wordlen==16:", cmdByte <= 'Z')
+		case 'x':
+			println("reading 16bit register", arg1, " wordlen==16:")
 			var value uint16
-			if cmdByte == 'x' {
-				value, err = dev.Read16(devFn, uint32(arg1))
-			} else {
-				value, err = dev.Read16S(devFn, uint32(arg1))
-			}
+			value, err = dev.Read16(devFn, uint32(arg1))
 			if err != nil {
 				break
 			}
@@ -129,7 +117,7 @@ func TestShellmode() {
 			shell.Write(command)
 
 		case 'R', 'r':
-			println("reading 32bit register", arg1, "wordlen==16:", cmdByte <= 'Z')
+			println("reading 32bit register", arg1, " wordlen==16:", cmdByte <= 'Z')
 			var value uint32
 			if cmdByte == 'r' {
 				value, err = dev.Read32(devFn, uint32(arg1))
@@ -178,6 +166,9 @@ func TestShellmode() {
 		case 'I':
 			println("initializing device")
 			err = dev.Init(cyw43439.DefaultConfig())
+			if err == nil {
+				println("init success")
+			}
 		case 'o':
 			b := arg1 > 0
 			println("setting WL_REG_ON", b)

@@ -7,49 +7,13 @@ import (
 	"machine"
 )
 
+// gSPI transaction endianess.
+var endian binary.ByteOrder = binary.LittleEndian
+
 // cy_io.go contains low level functions for reading and writing to the
 // CYW43439's gSPI interface. These map to functions readily found in the datasheet.
 
 var ErrDataNotAvailable = errors.New("requested data not available")
-
-func (d *Dev) Write32S(fn Function, addr, val uint32) error {
-	cmd := make_cmd(true, true, fn, addr, 4)
-	if fn == FuncBackplane {
-		d.lastSize = 8
-		d.lastHeader[0] = cmd
-		d.lastHeader[1] = val
-		d.lastBackplaneWindow = d.currentBackplaneWindow
-	}
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], swap32(val))
-	return d.SPIWrite(swap32(cmd), buf[:])
-}
-
-func (d *Dev) Write16S(fn Function, addr uint32, val uint16) error {
-	cmd := make_cmd(true, true, fn, addr, 2)
-	if fn == FuncBackplane {
-		d.lastSize = 8
-		d.lastHeader[0] = cmd
-		d.lastHeader[1] = uint32(val)
-		d.lastBackplaneWindow = d.currentBackplaneWindow
-	}
-	var buf [2]byte
-	binary.BigEndian.PutUint16(buf[:], val)
-	return d.SPIWrite(swap32(cmd), buf[:])
-}
-
-func (d *Dev) Write8S(fn Function, addr uint32, val uint8) error {
-	cmd := make_cmd(true, true, fn, addr, 1)
-	if fn == FuncBackplane {
-		d.lastSize = 8
-		d.lastHeader[0] = cmd
-		d.lastHeader[1] = uint32(val)
-		d.lastBackplaneWindow = d.currentBackplaneWindow
-	}
-	var buf [2]byte
-	buf[1] = val
-	return d.SPIWrite(swap32(cmd), buf[:])
-}
 
 func (d *Dev) Write32(fn Function, addr, val uint32) error {
 	return d.wr(fn, addr, 4, uint32(val))
@@ -74,15 +38,15 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 	}
 	switch size {
 	case 4:
-		binary.BigEndian.PutUint32(buf[:], val) // !LE
+		endian.PutUint32(buf[:], val)
 	case 2:
-		binary.BigEndian.PutUint16(buf[2:], uint16(val)) // !LE
+		endian.PutUint16(buf[:2], uint16(val)) // !LE
 	case 1:
-		buf[3] = byte(val) // !LE
+		buf[0] = byte(val) // !LE
 	default:
-		panic("misuse of general write register.")
+		panic("misuse of general write register")
 	}
-	return d.SPIWrite(cmd, buf[:])
+	return d.SPIWrite(cmd, buf[:size])
 }
 
 // WriteBytes is cyw43_write_bytes
@@ -122,7 +86,7 @@ func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
-	binary.BigEndian.PutUint32(buf[:], cmd) // !LE
+	endian.PutUint32(buf[:], cmd) // !LE
 	err := d.spi.Tx(buf[:], nil)
 	if err != nil {
 		return err
@@ -135,8 +99,7 @@ func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 	buf = [4]byte{}
 	d.spi.Tx(buf[:], buf[:])
 	d.csHigh()
-
-	status := Status(swap32(binary.BigEndian.Uint32(buf[:]))) // !LE
+	status := Status(swap32(endian.Uint32(buf[:]))) // !LE
 	if !status.IsDataAvailable() {
 		println("got status:", status)
 		return ErrDataNotAvailable
@@ -144,19 +107,9 @@ func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 	return nil
 }
 
-func (d *Dev) Read32S(fn Function, addr uint32) (uint32, error) {
-	v, err := d.rrS(fn, addr, 4)
-	return v, err
-}
-
 func (d *Dev) Read32(fn Function, addr uint32) (uint32, error) {
 	v, err := d.rr(fn, addr, 4)
 	return v, err
-}
-
-func (d *Dev) Read16S(fn Function, addr uint32) (uint16, error) {
-	v, err := d.rrS(fn, addr, 2)
-	return uint16(v), err
 }
 
 func (d *Dev) Read16(fn Function, addr uint32) (uint16, error) {
@@ -178,19 +131,8 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	cmd := make_cmd(false, true, fn, addr, size+padding)
 	var buf [4 + whdBusSPIBackplaneReadPadding]byte
 	err := d.SPIRead(cmd, buf[:4+padding])
-	result := binary.BigEndian.Uint32(buf[padding : padding+4]) // !LE
+	result := endian.Uint32(buf[padding : padding+4]) // !LE
 	return result, err
-}
-
-// rrS reads register and swaps 16bit word length.
-func (d *Dev) rrS(fn Function, addr, size uint32) (uint32, error) {
-	if fn == FuncBackplane {
-		panic("backplane not implemented for rrS")
-	}
-	cmd := make_cmd(false, true, fn, addr, size)
-	var buf [4]byte
-	d.SPIRead(swap32(cmd), buf[:4])
-	return swap32(binary.BigEndian.Uint32(buf[:4])), nil
 }
 
 func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
@@ -225,7 +167,7 @@ func (d *Dev) SPIRead(cmd uint32, r []byte) error {
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
-	binary.BigEndian.PutUint32(buf[:], cmd) // !LE
+	endian.PutUint32(buf[:], cmd) // !LE
 	d.spi.Tx(buf[:], nil)
 
 	d.csPeak()
@@ -239,10 +181,11 @@ func (d *Dev) SPIRead(cmd uint32, r []byte) error {
 	}
 	// Read Status.
 	buf = [4]byte{} // zero out buffer.
-	d.spi.Tx(buf[:], buf[:])
+	err = d.spi.Tx(buf[:], buf[:])
 	d.csHigh()
-	status := Status(binary.BigEndian.Uint32(buf[:])) // !LE
-	if !status.IsDataAvailable() {
+	status := Status(endian.Uint32(buf[:])) // !LE
+	if err == nil && !status.IsDataAvailable() {
+		err = ErrDataNotAvailable
 		println("got data unavailable status:", status)
 	}
 	return err
@@ -278,8 +221,8 @@ func (d *Dev) csPeak() {
 }
 
 //go:inline
-func make_cmd(write, inc bool, fn Function, addr uint32, sz uint32) uint32 {
-	return b2u32(write)<<31 | b2u32(inc)<<30 | uint32(fn)<<28 | (addr&0x1ffff)<<11 | sz
+func make_cmd(write, autoInc bool, fn Function, addr uint32, sz uint32) uint32 {
+	return b2u32(write)<<31 | b2u32(autoInc)<<30 | uint32(fn)<<28 | (addr&0x1ffff)<<11 | sz
 }
 
 //go:inline
@@ -293,4 +236,69 @@ func b2u32(b bool) uint32 {
 // swap32 swaps lowest 16 bits with highest 16 bits of a uint32.
 func swap32(b uint32) uint32 {
 	return (b >> 16) | (b << 16)
+}
+
+// Write32S writes register and swaps big-endian 16bit word length. Used only at initialization.
+func (d *Dev) Write32S(fn Function, addr, val uint32) error {
+	cmd := make_cmd(true, true, fn, addr, 4)
+	var buf [4]byte
+	d.csLow()
+	if sharedDATA {
+		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	}
+	binary.BigEndian.PutUint32(buf[:], swap32(cmd))
+	err := d.spi.Tx(buf[:], nil)
+	if err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint32(buf[:], swap32(val))
+	err = d.spi.Tx(buf[:], nil)
+	if err != nil || !d.enableStatusWord {
+		return err
+	}
+	// Read Status.
+	buf = [4]byte{}
+	d.spi.Tx(buf[:], buf[:])
+	d.csHigh()
+	status := Status(swap32(binary.BigEndian.Uint32(buf[:])))
+	if !status.IsDataAvailable() {
+		println("got status:", status)
+		err = ErrDataNotAvailable
+	}
+	return err
+}
+
+// Read32S reads register and swaps big-endian 16bit word length. Used only at initialization.
+func (d *Dev) Read32S(fn Function, addr uint32) (uint32, error) {
+	if fn == FuncBackplane {
+		panic("backplane not implemented for rrS")
+	}
+	cmd := make_cmd(false, true, fn, addr, 4)
+	var buf [4]byte
+	d.csLow()
+	if sharedDATA {
+		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	}
+	binary.BigEndian.PutUint32(buf[:], swap32(cmd))
+	d.spi.Tx(buf[:], nil)
+	d.csPeak()
+	if sharedDATA {
+		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
+	}
+	d.responseDelay()
+	err := d.spi.Tx(nil, buf[:])
+	result := swap32(binary.BigEndian.Uint32(buf[:]))
+	if err != nil || !d.enableStatusWord {
+		return result, err
+	}
+	// Read Status.
+	buf = [4]byte{} // zero out buffer.
+	d.spi.Tx(buf[:], buf[:])
+	d.csHigh()
+	status := Status(swap32(binary.BigEndian.Uint32(buf[:])))
+	if !status.IsDataAvailable() {
+		err = ErrDataNotAvailable
+		println("got data unavailable status:", status)
+	}
+	return result, err
 }
