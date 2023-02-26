@@ -70,8 +70,9 @@ func TestShellmode() {
 			err = dev.LED().Set(active)
 
 		case 'f':
-			println("device register func set to ", arg1)
-			devFn = cyw43439.Function(arg1) // Dangerous assignment.
+			// Dangerous assignment.
+			devFn = cyw43439.Function(arg1)
+			println("device register func set to ", devFn.String())
 
 		case 'u':
 			println("writing 8bit register", arg1, "with value", uint8(writeVal))

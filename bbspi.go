@@ -40,11 +40,12 @@ func (s *SPIbb) Configure() {
 
 // Tx matches signature of machine.SPI.Tx() and is used to send multiple bytes.
 // The r slice is ignored and no error will ever be returned.
-func (s *SPIbb) Tx(w []byte, r []byte) error {
+func (s *SPIbb) Tx(w []byte, r []byte) (err error) {
+	var aux [1]byte
 	mocking := s.MockTo != nil
 	if len(w) != 0 {
 		if len(r) == 0 {
-			r = []byte{0}
+			r = aux[:]
 		}
 		r[0] = s.firstTransfer(w[0], mocking)
 		w = w[1:]
@@ -64,9 +65,9 @@ func (s *SPIbb) Tx(w []byte, r []byte) error {
 			r[i] = s.transfer(0, mocking)
 		}
 	default:
-		return errors.New("unhandled SPI buffer length mismatch case")
+		err = errors.New("unhandled SPI buffer length mismatch case")
 	}
-	return nil
+	return err
 }
 
 // Transfer matches signature of machine.SPI.Transfer() and is used to send a

@@ -25,10 +25,13 @@ import (
 	"errors"
 	"machine"
 	"net"
+	"strconv"
 	"time"
 
 	"tinygo.org/x/drivers"
 )
+
+const verbose_debug = true
 
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
@@ -96,9 +99,10 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 }
 
 type Config struct {
-	Firmware []byte
-	CLM      []byte
-	MAC      net.HardwareAddr
+	Firmware        []byte
+	CLM             []byte
+	MAC             net.HardwareAddr
+	EnableBluetooth bool
 }
 
 func DefaultConfig() Config {
@@ -135,20 +139,22 @@ func (d *Dev) Init(cfg Config) (err error) {
 	// time.Sleep(60 * time.Millisecond) // it's actually slightly more than 50ms, including VDDC and POR startup.
 	// For this, the host needs to poll with a read command
 	// to F0 address 0x14. Address 0x14 contains a predefined bit pattern.
-	startPoll := time.Now()
 	time.Sleep(50 * time.Millisecond)
 	var got uint32
 	// Little endian test address values.
-	for got != TestPattern && time.Since(startPoll) < pollLimit {
+	for i := 0; i < 10; i++ {
 		time.Sleep(time.Millisecond)
 		got, err = d.Read32S(FuncBus, AddrTest)
+		if err != nil {
+			return err
+		}
+		if got == TestPattern {
+			goto chipup
+		}
 	}
-	if err != nil {
-		return err
-	} else if got != TestPattern {
-		println("poll got", got)
-		return errors.New("poll failed")
-	}
+	return errors.New("poll failed")
+
+chipup:
 	// Address 0x0000 registers.
 	const (
 		// 0=16bit word, 1=32bit word transactions.
@@ -163,24 +169,26 @@ func (d *Dev) Init(cfg Config) (err error) {
 		StatusEnablePos        = 0x2*8 + 0
 		InterruptWithStatusPos = 0x2*8 + 1
 		// 132275 is Pico-sdk's default value.
-		setupValue = (1 << WordLengthPos) | (0 << EndianessBigPos) | (1 << HiSpeedModePos) | // This line OK.
+		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | // This line OK.
 			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
 			(1 << InterruptWithStatusPos) // | (1 << StatusEnablePos)
 	)
 	b := setupValue | (b2u32(endian == binary.LittleEndian) << EndianessBigPos)
-	println("reg 0 set", b)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
 	err = d.Write32S(FuncBus, AddrBusControl, b) // Last use of a swap writer/reader.
-	// err = d.RegisterWriteUint32(FuncBus, 0x0, setupValue)
 	if err != nil {
 		return err
 	}
-	return nil
-	d.enableStatusWord = true
+	if verbose_debug {
+		d.Read32(FuncBus, AddrBusControl) // print out data on register contents
+	}
 	const WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE = 4
 	err = d.Write8(FuncBus, AddrRespDelayF1, WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE)
 	if err != nil {
 		return err
+	}
+	if verbose_debug {
+		d.Read8(FuncBus, AddrRespDelayF1)
 	}
 	// Make sure error interrupt bits are clear
 	const (
@@ -194,17 +202,31 @@ func (d *Dev) Init(cfg Config) (err error) {
 	if err != nil {
 		return err
 	}
-
-	// Backplane is ready by now.
-
+	if verbose_debug {
+		d.Read8(FuncBus, AddrInterrupt)
+	}
+	// Enable selection of interrupts:
+	var intr uint16 = F2_F3_FIFO_RD_UNDERFLOW | F2_F3_FIFO_WR_OVERFLOW |
+		COMMAND_ERROR | DATA_ERROR | F2_PACKET_AVAILABLE | f1Overflow
+	if cfg.EnableBluetooth {
+		intr |= F1_INTR
+	}
+	err = d.Write16(FuncBus, AddrInterruptEnable, intr)
+	if err != nil {
+		return err
+	}
+	debug("backplane is ready")
+	d.enableStatusWord = false
 	// TODO: For when we are ready to download firmware.
 	const (
 		SDIO_CHIP_CLOCK_CSR  = 0x1000e
 		SBSDIO_ALP_AVAIL_REQ = 0x8
 		SBSDIO_ALP_AVAIL     = 0x40
 	)
+
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_ALP_AVAIL_REQ)
 	for i := 0; i < 10; i++ {
+		time.Sleep(time.Millisecond)
 		reg8, err = d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)
 		if err != nil {
 			return err
@@ -212,9 +234,8 @@ func (d *Dev) Init(cfg Config) (err error) {
 		if reg8&SBSDIO_ALP_AVAIL != 0 {
 			goto alpset
 		}
-		time.Sleep(time.Millisecond)
 	}
-	println("ALP not set: ", int(reg8))
+	debug("ALP not set: ", reg8)
 	return errors.New("timeout waiting for ALP to be set")
 
 alpset:
@@ -241,15 +262,14 @@ alpset:
 		return err
 	}
 	// 4343x specific stuff: disable remap for SRAM_3
-	err = d.writeBackplane(SOCSRAM_BANKX_INDEX, 4, 0x3)
+	err = d.WriteBackplane(SOCSRAM_BANKX_INDEX, 4, 0x3)
 	if err != nil {
 		return err
 	}
-	err = d.writeBackplane(SOCSRAM_BANKX_PDA, 4, 0)
+	err = d.WriteBackplane(SOCSRAM_BANKX_PDA, 4, 0)
 	if err != nil {
 		return err
 	}
-	// d.WriteBytes(FuncBackplane, 0)
 
 	return nil
 	err = d.downloadResource(0x0, cfg.Firmware)
@@ -263,7 +283,7 @@ alpset:
 		return err
 	}
 	sz := (^(wifinvramLen/4)&0xffff)<<16 | (wifinvramLen / 4)
-	err = d.writeBackplane(RamSize-4, 4, sz)
+	err = d.WriteBackplane(RamSize-4, 4, sz)
 	if err != nil {
 		return err
 	}
@@ -283,7 +303,7 @@ alpset:
 	return errors.New("HT not ready")
 
 htready:
-	err = d.writeBackplane(SDIO_INT_HOST_MASK, 4, I_HMB_SW_MASK)
+	err = d.WriteBackplane(SDIO_INT_HOST_MASK, 4, I_HMB_SW_MASK)
 	if err != nil {
 		return err
 	}
@@ -369,6 +389,7 @@ func align32(val, align uint32) uint32 { return (val + align - 1) &^ (align - 1)
 
 func (d *Dev) GetStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, AddrStatus)
+	debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
 }
 
@@ -390,4 +411,56 @@ func (d *Dev) GPIOSetup() {
 	d.cs.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	machine.GPIO1.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	d.csHigh()
+}
+
+var debugBuf [128]byte
+
+func debug(a ...any) {
+	if verbose_debug {
+		for _, v := range a {
+			printUi := false
+			var ui uint64
+			switch c := v.(type) {
+			case string:
+				print(c)
+			case int:
+				if c < 0 {
+					print(c)
+				} else {
+					printUi = true
+					ui = uint64(c)
+				}
+			case uint8:
+				printUi = true
+				ui = uint64(c)
+			case uint16:
+				printUi = true
+				ui = uint64(c)
+			case uint32:
+				printUi = true
+				ui = uint64(c)
+			case error:
+				if c == nil {
+					print("err=<nil>")
+				} else {
+					print("err=\"")
+					print(c.Error())
+					print("\"")
+				}
+			case nil:
+				// probably an error type.
+				continue
+			default:
+				print("<unknown type>")
+			}
+			if printUi {
+				debugBuf[0] = '0'
+				debugBuf[1] = 'x'
+				n := len(strconv.AppendUint(debugBuf[2:2], ui, 16))
+				print(string(debugBuf[:2+n]))
+			}
+			print(" ")
+		}
+		print("\n")
+	}
 }

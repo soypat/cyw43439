@@ -56,6 +56,22 @@ const (
 	FuncDMA2 Function = 0b11
 )
 
+func (f Function) String() (s string) {
+	switch f {
+	case FuncBus:
+		s = "bus"
+	case FuncBackplane:
+		s = "backplane"
+	case FuncWLAN: // same as FuncDMA1
+		s = "wlan"
+	case FuncDMA2:
+		s = "dma2"
+	default:
+		s = "unknown"
+	}
+	return s
+}
+
 // Status supports status notification to the host after a read/write
 // transaction over gSPI. This status notification provides information
 // about packet errors, protocol errors, available packets in the RX queue, etc.
@@ -64,8 +80,33 @@ const (
 // without any timing overhead.
 type Status uint32
 
-// IsDataAvailable returns true if requested read data is available.
-func (s Status) IsDataAvailable() bool { return s&1 == 0 }
+func (s Status) String() (str string) {
+	if s == 0 {
+		return "no status"
+	}
+	if s.HostCommandDataError() {
+		str += "hostcmderr "
+	}
+	if s.DataUnavailable() {
+		str += "dataunavailable "
+	}
+	if s.IsOverflow() {
+		str += "overflow "
+	}
+	if s.IsUnderflow() {
+		str += "underflow "
+	}
+	if s.F2PacketAvailable() || s.F3PacketAvailable() {
+		str += "packetavail "
+	}
+	if s.F2RxReady() || s.F3RxReady() {
+		str += "rxready "
+	}
+	return str
+}
+
+// DataUnavailable returns true if requested read data is unavailable.
+func (s Status) DataUnavailable() bool { return s&1 != 0 }
 
 // IsUnderflow returns true if FIFO underflow occurred due to current (F2, F3) read command.
 func (s Status) IsUnderflow() bool { return s&(1<<1) != 0 }
@@ -102,6 +143,26 @@ func (s Status) F3PacketLength() uint16 {
 	const mask = 1<<11 - 1
 	return uint16(s>>21) & mask
 }
+
+// Interrupt registers on SPI.
+const (
+	DATA_UNAVAILABLE        = 0x0001 // Requested data not available; Clear by writing a "1"
+	F2_F3_FIFO_RD_UNDERFLOW = 0x0002
+	F2_F3_FIFO_WR_OVERFLOW  = 0x0004
+	COMMAND_ERROR           = 0x0008 // Cleared by writing 1
+	DATA_ERROR              = 0x0010 // Cleared by writing 1
+	F2_PACKET_AVAILABLE     = 0x0020
+	F3_PACKET_AVAILABLE     = 0x0040
+	F1_OVERFLOW             = 0x0080 // Due to last write. Bkplane has pending write requests
+	GSPI_PACKET_AVAILABLE   = 0x0100
+	MISC_INTR1              = 0x0200
+	MISC_INTR2              = 0x0400
+	MISC_INTR3              = 0x0800
+	MISC_INTR4              = 0x1000
+	F1_INTR                 = 0x2000
+	F2_INTR                 = 0x4000
+	F3_INTR                 = 0x8000
+)
 
 // SDIO bus specifics
 const (

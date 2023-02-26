@@ -270,8 +270,8 @@ const (
 
 func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	base := coreaddress(coreID)
-	d.readBackplane(base+AI_RESETCTRL_OFFSET, 1)
-	reg, err := d.readBackplane(base+AI_RESETCTRL_OFFSET, 1)
+	d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
+	reg, err := d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
 	if err != nil {
 		return err
 	}
@@ -293,12 +293,12 @@ func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 		cpuhaltFlag = SICF_CPUHALT
 	}
 	base := coreaddress(coreID)
-	d.writeBackplane(base+AI_IOCTRL_OFFSET, 1, SICF_FGC|SICF_CLOCK_EN|cpuhaltFlag)
-	d.readBackplane(base+AI_IOCTRL_OFFSET, 1)
-	d.writeBackplane(base+AI_RESETCTRL_OFFSET, 1, 0)
+	d.WriteBackplane(base+AI_IOCTRL_OFFSET, 1, SICF_FGC|SICF_CLOCK_EN|cpuhaltFlag)
+	d.ReadBackplane(base+AI_IOCTRL_OFFSET, 1)
+	d.WriteBackplane(base+AI_RESETCTRL_OFFSET, 1, 0)
 	time.Sleep(time.Millisecond)
-	d.writeBackplane(base+AI_IOCTRL_OFFSET, 1, SICF_CLOCK_EN|cpuhaltFlag)
-	d.readBackplane(base+AI_IOCTRL_OFFSET, 1)
+	d.WriteBackplane(base+AI_IOCTRL_OFFSET, 1, SICF_CLOCK_EN|cpuhaltFlag)
+	d.ReadBackplane(base+AI_IOCTRL_OFFSET, 1)
 	time.Sleep(time.Millisecond)
 	return nil
 }
@@ -308,11 +308,11 @@ func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 // It returns true if communications are down (WL_REG_ON at low).
 func (d *Dev) CoreIsActive(coreID uint8) bool {
 	base := coreaddress(coreID)
-	reg, _ := d.readBackplane(base+AI_IOCTRL_OFFSET, 1)
+	reg, _ := d.ReadBackplane(base+AI_IOCTRL_OFFSET, 1)
 	if reg&(SICF_FGC|SICF_CLOCK_EN) != SICF_CLOCK_EN {
 		return false
 	}
-	reg, _ = d.readBackplane(base+AI_RESETCTRL_OFFSET, 1)
+	reg, _ = d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
 	return reg&AIRC_RESET == 0
 }
 
@@ -328,7 +328,7 @@ func coreaddress(coreID uint8) (v uint32) {
 	return v
 }
 
-func (d *Dev) readBackplane(addr uint32, size uint32) (uint32, error) {
+func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
 		return 0, err
@@ -338,6 +338,7 @@ func (d *Dev) readBackplane(addr uint32, size uint32) (uint32, error) {
 		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
 	reg, err := d.rr(FuncBackplane, addr, size)
+	debug("read backplane", addr, "=", reg, err)
 	if err != nil {
 		return 0, err
 	}
@@ -345,7 +346,7 @@ func (d *Dev) readBackplane(addr uint32, size uint32) (uint32, error) {
 	return reg, err
 }
 
-func (d *Dev) writeBackplane(addr, size, value uint32) error {
+func (d *Dev) WriteBackplane(addr, size, value uint32) error {
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
 		return err
@@ -355,6 +356,7 @@ func (d *Dev) writeBackplane(addr, size, value uint32) error {
 		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
 	err = d.wr(FuncBackplane, addr, size, value)
+	debug("write backplane", addr, "=", value, err)
 	if err != nil {
 		return err
 	}
