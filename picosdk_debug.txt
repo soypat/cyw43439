@@ -1,0 +1,299 @@
+\0\0\0\0\0\0Version: 7.95.49 (2271bb6 CY) CRC: b7a28ef3 Date: Mon 2021-11-29 22:50:27 PST Ucode Ver: 1043.2162 FWID 01-c51d9400
+cyw43 loaded ok, mac 28:cd:c1:01:01:4a
+\0\0setting SPI_BUS_CONTROL 0x204b3
+write_reg_u32_swap 0 0x0=0x204b3
+cyw43_read_reg_u32 0 0x0=0x200b3
+read SPI_BUS_CONTROL 0x200b3
+cyw43_write_reg_u8 0 0x1d=0x4
+cyw43_write_reg_u8 0 0x4=0x99
+cyw43_write_reg_u16 0 0x6=0xbe
+
+backplane is ready
+
+cyw43_write_reg_u8 1 0x1000e=0x8
+cyw43_read_reg_u8 1 0x1000e=0x48
+
+ALP is set
+
+cyw43_write_reg_u8 1 0x1000e=0x0
+cyw43_write_reg_u8 1 0x1000c=0x18
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x3800=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x3800=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x4800=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x4800=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x4800=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x4800=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_write_reg_u8 1 0x4408=0x3
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x4408=0x3
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_write_reg_u8 1 0x4800=0x0
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_write_reg_u8 1 0x4408=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x4408=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u32 1 0xc010=0x3
+cyw43_write_reg_u32 1 0xc044=0x0
+
+writing 224256 bytes to 0x0
+
+cyw43_write_reg_u8 1 0x1000c=0x0
+cyw43_write_reg_u8 1 0x1000a=0x80
+cyw43_write_reg_u8 1 0x1000b=0x1
+cyw43_write_reg_u8 1 0x1000a=0x100
+cyw43_write_reg_u8 1 0x1000a=0x180
+cyw43_write_reg_u8 1 0x1000b=0x2
+cyw43_write_reg_u8 1 0x1000a=0x200
+cyw43_write_reg_u8 1 0x1000a=0x280
+cyw43_write_reg_u8 1 0x1000b=0x3
+cyw43_write_reg_u8 1 0x1000a=0x300
+
+writing 768 bytes to 0x7fcfc
+
+cyw43_write_reg_u8 1 0x1000b=0x7
+cyw43_write_reg_u8 1 0x1000a=0x780
+cyw43_write_reg_u32 1 0xfffc=0xff3f00c0
+cyw43_write_reg_u8 1 0x1000c=0x18
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000a=0x180000
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x3800=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x3800=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_write_reg_u8 1 0x3408=0x3
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x3408=0x3
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_write_reg_u8 1 0x3800=0x0
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_write_reg_u8 1 0x3408=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x3408=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x3408=0x1
+cyw43_write_reg_u8 1 0x1000b=0x1800
+cyw43_write_reg_u8 1 0x1000b=0x1810
+cyw43_read_reg_u8 1 0x3800=0x0
+cyw43_write_reg_u8 1 0x1000b=0x1800
+
+core 1 IS up
+
+cyw43_read_reg_u8 1 0x1000e=0x800000c0
+cyw43_write_reg_u32 1 0xa024=0xf0
+cyw43_write_reg_u8 1 0x10008=0x20
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x0
+cyw43_read_reg_u32 0 0x8=0x20108
+cyw43_read_reg_u32 0 0x8=0x20108
+cyw43_read_reg_u32 0 0x8=0x20108
+cyw43_read_reg_u32 0 0x8=0x20108
+cyw43_read_reg_u32 0 0x8=0x20108
+cyw43_read_reg_u32 0 0x8=0x20108
+cyw43_read_reg_u32 0 0x8=0x20108
+cyw43_read_reg_u32 0 0x8=0x20108
+cyw43_read_reg_u32 0 0x8=0x20128
+cyw43_read_reg_u8 1 0x1001e=0x300
+cyw43_write_reg_u8 1 0x1001e=0x2
+cyw43_write_reg_u8 0 0xf0=0x8
+cyw43_write_reg_u8 1 0x1000e=0x2
+cyw43_read_reg_u8 1 0x1001f=0x3
+cyw43_write_reg_u8 1 0x1000f=0xf
+cyw43_write_reg_u8 1 0x1000f=0x0
+cyw43_read_reg_u8 1 0x1000f=0x1800000
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_read_reg_u32 1 0x8508=0x1f8
+
+wake bus
+
+cyw43_write_reg_u8 1 0x1001f=0x1
+cyw43_write_reg_u8 1 0x1001f=0x1
+cyw43_read_reg_u8 1 0x1001f=0x3
+
+cyw43_clm_load start
+clm data send 984/984
+Sending cmd \xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 (263) len 1008 flags 65538 status 0
+\xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 clmload
+
+cyw43_read_reg_u32 0 0x8=0x20128
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20128
+bus_gspi_status 0x20128 0x100
+wrong payload type 0x16 0x6a
+cyw43_read_reg_u32 0 0x8=0x20128
+bus_gspi_status 0x20128 0x100
+wrong payload type 0x16 0x6a
+cyw43_read_reg_u32 0 0x8=0x81928
+bus_gspi_status 0x81928 0x40c
+
+got ioctl response id=0x1 len=1008
+clm data send done
+Sending cmd  (262) len 19 flags 131072 status 0
+ clmload_status
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20728
+bus_gspi_status 0x20728 0x103
+got ioctl response id=0x2 len=19
+clm data load ok
+cyw43_clm_load done
+Sending cmd \xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 (263) len 15 flags 196610 status 0
+\xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 bus:txglom
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20728
+bus_gspi_status 0x20728 0x103
+got ioctl response id=0x3 len=15
+Sending cmd \xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 (263) len 10 flags 262146 status 0
+\xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 apsta
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20528
+bus_gspi_status 0x20528 0x102
+got ioctl response id=0x4 len=10
+Sending cmd  (262) len 20 flags 327680 status 0
+ cur_etheraddr
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20128
+bus_gspi_status 0x20128 0x100
+got ioctl response id=0x5 len=20
+Sending cmd  (262) len 20 flags 393216 status 0
+ cur_etheraddr
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20128
+bus_gspi_status 0x20128 0x100
+got ioctl response id=0x6 len=20
+cyw43_set_gpio 0=1
+Sending cmd \xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 (263) len 16 flags 458754 status 0
+\xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 gpioout
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20128
+bus_gspi_status 0x20128 0x100
+got ioctl response id=0x7 len=16
+cyw43_set_gpio 0=0
+Sending cmd \xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 (263) len 16 flags 524290 status 0
+\xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 gpioout
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20128
+bus_gspi_status 0x20128 0x100
+got ioctl response id=0x8 len=16
+cyw43_set_gpio 0=1
+Sending cmd \xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 (263) len 16 flags 589826 status 0
+\xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 gpioout
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20128
+bus_gspi_status 0x20128 0x100
+got ioctl response id=0x9 len=16
+cyw43_set_gpio 0=0
+Sending cmd \xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 (263) len 16 flags 655362 status 0
+\xF0H\xF8wI@"\xCAf
+gJg\x8AguOuN\x0F\xCF\xB0B\x07\xD1Y@@\x18\x04\xD1\x10?8`\x82\xF3\x08\x88\x98G\x02\xF0\xCE\xF9 \xBF!m\x89\x08\xFB\xD3`e@\xBFn\x1C0GfLkO\x04!9a\xA1m!mI\x08\xFB\xD2
+\xA5 gpioout
+cyw43_read_reg_u32 0 0x8=0x28
+cyw43_read_reg_u32 0 0x8=0x28
+bus_gspi_status 0x28 0x0
+No packet
+cyw43_read_reg_u16 0 0x4=0xbe2020
+cyw43_write_reg_u16 0 0x4=0x2020
+cyw43_read_reg_u32 0 0x8=0x20128
+bus_gspi_status 0x20128 0x100
+got ioctl response id=0xa len=16
+cyw43_set_gpio 0=1

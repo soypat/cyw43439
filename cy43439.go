@@ -133,13 +133,12 @@ func (d *Dev) Init(cfg Config) (err error) {
 		interrupt and then take necessary actions.
 	*/
 	d.GPIOSetup()
-
-	d.wlRegOn.High() //
 	// After power-up, the gSPI host needs to wait 50 ms for the device to be out of reset.
 	// time.Sleep(60 * time.Millisecond) // it's actually slightly more than 50ms, including VDDC and POR startup.
 	// For this, the host needs to poll with a read command
 	// to F0 address 0x14. Address 0x14 contains a predefined bit pattern.
-	time.Sleep(50 * time.Millisecond)
+	d.Reset()
+
 	var got uint32
 	// Little endian test address values.
 	for i := 0; i < 10; i++ {
@@ -216,14 +215,18 @@ chipup:
 		return err
 	}
 	debug("backplane is ready")
-	d.enableStatusWord = false
+	//d.enableStatusWord = false
 	// TODO: For when we are ready to download firmware.
 	const (
 		SDIO_CHIP_CLOCK_CSR  = 0x1000e
 		SBSDIO_ALP_AVAIL_REQ = 0x8
 		SBSDIO_ALP_AVAIL     = 0x40
 	)
-
+	// Clear data unavailable error if there is any.
+	// err = d.ClearInterrupts()
+	// if err != nil {
+	// 	return err
+	// }
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_ALP_AVAIL_REQ)
 	for i := 0; i < 10; i++ {
 		time.Sleep(time.Millisecond)
@@ -352,9 +355,9 @@ f2ready:
 		return err
 	}
 	// Clear data unavailable error if there is any.
-	spiIntStatus, err := d.Read16(FuncBus, AddrInterrupt)
-	if spiIntStatus&dataUnavailable != 0 {
-		d.Write16(FuncBus, AddrInterrupt, spiIntStatus)
+	err = d.ClearInterrupts()
+	if err != nil {
+		return err
 	}
 
 	err = d.busSleep(false)
@@ -391,6 +394,30 @@ func (d *Dev) GetStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, AddrStatus)
 	debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
+}
+
+func (d *Dev) ClearStatus() (Status, error) {
+	busStatus, err := d.Read32(FuncBus, AddrStatus)
+	d.Write32(FuncBus, AddrStatus, 0)
+	debug("read SPI Bus status:", Status(busStatus).String())
+	return Status(busStatus), err
+}
+
+func (d *Dev) ClearInterrupts() error {
+	const dataUnavail = 0x1
+	spiIntStatus, err := d.Read16(FuncBus, AddrInterrupt)
+	if err != nil || spiIntStatus&dataUnavail == 0 {
+		return err // no flags to clear or error.
+	}
+	err = d.Write16(FuncBus, AddrInterrupt, dataUnavail)
+	if err != nil {
+		return err
+	}
+	spiIntStatus, err = d.Read16(FuncBus, AddrInterrupt)
+	if err == nil && spiIntStatus&dataUnavail != 0 {
+		err = errors.New("interrupt raised after clear or clear failed")
+	}
+	return err
 }
 
 func (d *Dev) Reset() {

@@ -52,7 +52,7 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 	default:
 		panic("misuse of general write register")
 	}
-	err := d.SPIWrite(cmd, buf[:size])
+	err := d.SPIWrite(cmd, buf[:4])
 	return err
 }
 
