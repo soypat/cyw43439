@@ -1,7 +1,6 @@
 package cyw43439
 
 import (
-	"device"
 	"encoding/binary"
 	"errors"
 	"machine"
@@ -52,7 +51,9 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 	default:
 		panic("misuse of general write register")
 	}
+	d.csLow()
 	err := d.SPIWrite(cmd, buf[:4])
+	d.csHigh()
 	return err
 }
 
@@ -89,7 +90,6 @@ func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 // SPIWrite performs the gSPI Write action.
 func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 	var buf [4]byte
-	d.csLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
@@ -105,7 +105,6 @@ func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 	// Read Status.
 	buf = [4]byte{}
 	d.spi.Tx(buf[:], buf[:])
-	d.csHigh()
 	status := Status(swap32(endian.Uint32(buf[:]))) // !LE
 	if status.DataUnavailable() {
 		println("got status:", status)
@@ -140,7 +139,9 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	}
 	cmd := make_cmd(false, true, fn, addr, size+padding)
 	var buf [4 + whdBusSPIBackplaneReadPadding]byte
+	d.csLow()
 	err := d.SPIRead(cmd, buf[:4+padding])
+	d.csHigh()
 	result := endian.Uint32(buf[padding : padding+4]) // !LE
 	return result, err
 }
@@ -173,14 +174,11 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 // SPIRead performs the gSPI Read action.
 func (d *Dev) SPIRead(cmd uint32, r []byte) error {
 	var buf [4]byte
-	d.csLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
 	endian.PutUint32(buf[:], cmd) // !LE
 	d.spi.Tx(buf[:], nil)
-
-	d.csPeak()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
@@ -192,7 +190,6 @@ func (d *Dev) SPIRead(cmd uint32, r []byte) error {
 	// Read Status.
 	buf = [4]byte{} // zero out buffer.
 	err = d.spi.Tx(buf[:], buf[:])
-	d.csHigh()
 	status := Status(endian.Uint32(buf[:])) // !LE
 	if err == nil && status.DataUnavailable() {
 		err = ErrDataNotAvailable
@@ -223,16 +220,20 @@ func (d *Dev) responseDelay() {
 
 //go:inline
 func (d *Dev) csPeak() {
-	d.csHigh()
-	for i := 0; i < 40; i++ {
-		device.Asm("nop")
-	}
-	d.csLow()
+	// d.csHigh()
+	// for i := 0; i < 40; i++ {
+	// 	device.Asm("nop")
+	// }
+	// d.csLow()
 }
 
 //go:inline
 func make_cmd(write, autoInc bool, fn Function, addr uint32, sz uint32) uint32 {
 	return b2u32(write)<<31 | b2u32(autoInc)<<30 | uint32(fn)<<28 | (addr&0x1ffff)<<11 | sz
+}
+
+func funcFromCmd(cmd uint32) Function {
+	return Function(cmd>>28) & 0b11
 }
 
 //go:inline
@@ -259,12 +260,14 @@ func (d *Dev) Write32S(fn Function, addr, val uint32) error {
 	binary.BigEndian.PutUint32(buf[:], swap32(cmd))
 	err := d.spi.Tx(buf[:], nil)
 	if err != nil {
+		d.csHigh()
 		return err
 	}
 	binary.BigEndian.PutUint32(buf[:], swap32(val))
 	err = d.spi.Tx(buf[:], nil)
 	debug("cyw43_write_reg_u32_swap", fn.String(), addr, "=", val, err)
 	if err != nil || !d.enableStatusWord {
+		d.csHigh()
 		return err
 	}
 	// Read Status.
@@ -301,6 +304,7 @@ func (d *Dev) Read32S(fn Function, addr uint32) (uint32, error) {
 	result := swap32(binary.BigEndian.Uint32(buf[:]))
 	debug("cyw43_read_reg_u32_swap", fn.String(), addr, "=", result, err)
 	if err != nil || !d.enableStatusWord {
+		d.csHigh()
 		return result, err
 	}
 	// Read Status.

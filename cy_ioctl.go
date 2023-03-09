@@ -270,6 +270,7 @@ const (
 
 func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	base := coreaddress(coreID)
+	debug("disable core", coreID, coreHalt)
 	d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
 	reg, err := d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
 	if err != nil {
@@ -278,8 +279,9 @@ func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	if reg&AIRC_RESET != 0 {
 		return nil
 	}
+	debug("core not in reset", reg)
 	// TODO
-	println("core not in reset:", reg)
+	// println("core not in reset:", reg)
 	return errors.New("core not in reset")
 }
 

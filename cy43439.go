@@ -23,6 +23,7 @@ package cyw43439
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"machine"
 	"net"
 	"strconv"
@@ -31,7 +32,10 @@ import (
 	"tinygo.org/x/drivers"
 )
 
-const verbose_debug = true
+const (
+	verbose_debug = true
+	initReadback  = false
+)
 
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
@@ -94,7 +98,7 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 		wlRegOn:                wlRegOn,
 		sharedSD:               SD,
 		ResponseDelayByteCount: 0,
-		enableStatusWord:       true,
+		enableStatusWord:       false,
 	}
 }
 
@@ -178,15 +182,19 @@ chipup:
 	if err != nil {
 		return err
 	}
-	if verbose_debug {
-		d.Read32(FuncBus, AddrBusControl) // print out data on register contents
+	got, err = d.Read32(FuncBus, AddrBusControl) // print out data on register contents
+	if err != nil {
+		return err
+	}
+	if got != b&^(1<<10) {
+		return fmt.Errorf("register write-readback failed on bus control. beware erratic behavior. got=%#x, expect:%#x", got, b&^(1<<10))
 	}
 	const WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE = 4
 	err = d.Write8(FuncBus, AddrRespDelayF1, WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE)
 	if err != nil {
 		return err
 	}
-	if verbose_debug {
+	if initReadback {
 		d.Read8(FuncBus, AddrRespDelayF1)
 	}
 	// Make sure error interrupt bits are clear
@@ -201,12 +209,13 @@ chipup:
 	if err != nil {
 		return err
 	}
-	if verbose_debug {
+	if initReadback {
 		d.Read8(FuncBus, AddrInterrupt)
 	}
 	// Enable selection of interrupts:
-	var intr uint16 = F2_F3_FIFO_RD_UNDERFLOW | F2_F3_FIFO_WR_OVERFLOW |
+	const wifiIntr = F2_F3_FIFO_RD_UNDERFLOW | F2_F3_FIFO_WR_OVERFLOW |
 		COMMAND_ERROR | DATA_ERROR | F2_PACKET_AVAILABLE | f1Overflow
+	var intr uint16 = wifiIntr
 	if cfg.EnableBluetooth {
 		intr |= F1_INTR
 	}
@@ -223,10 +232,10 @@ chipup:
 		SBSDIO_ALP_AVAIL     = 0x40
 	)
 	// Clear data unavailable error if there is any.
-	// err = d.ClearInterrupts()
-	// if err != nil {
-	// 	return err
-	// }
+	err = d.ClearInterrupts()
+	if err != nil {
+		return err
+	}
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_ALP_AVAIL_REQ)
 	for i := 0; i < 10; i++ {
 		time.Sleep(time.Millisecond)
