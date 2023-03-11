@@ -1,3 +1,5 @@
+//go:build tinygo
+
 package cyw43439
 
 import (
@@ -16,19 +18,19 @@ var ErrDataNotAvailable = errors.New("requested data not available")
 
 func (d *Dev) Write32(fn Function, addr, val uint32) error {
 	err := d.wr(fn, addr, 4, uint32(val))
-	debug("cyw43_write_reg_u32", fn.String(), addr, "=", val, err)
+	Debug("cyw43_write_reg_u32", fn.String(), addr, "=", val, err)
 	return err
 }
 
 func (d *Dev) Write16(fn Function, addr uint32, val uint16) error {
 	err := d.wr(fn, addr, 2, uint32(val))
-	debug("cyw43_write_reg_u16", fn.String(), addr, "=", val, err)
+	Debug("cyw43_write_reg_u16", fn.String(), addr, "=", val, err)
 	return err
 }
 
 func (d *Dev) Write8(fn Function, addr uint32, val uint8) error {
 	err := d.wr(fn, addr, 1, uint32(val))
-	debug("cyw43_write_reg_u8", fn.String(), addr, "=", val, err)
+	Debug("cyw43_write_reg_u8", fn.String(), addr, "=", val, err)
 	return err
 }
 
@@ -115,19 +117,19 @@ func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
 
 func (d *Dev) Read32(fn Function, addr uint32) (uint32, error) {
 	v, err := d.rr(fn, addr, 4)
-	debug("cyw43_read_reg_u32", fn.String(), addr, "=", uint32(v), err)
+	Debug("cyw43_read_reg_u32", fn.String(), addr, "=", uint32(v), err)
 	return v, err
 }
 
 func (d *Dev) Read16(fn Function, addr uint32) (uint16, error) {
 	v, err := d.rr(fn, addr, 2)
-	debug("cyw43_read_reg_u16", fn.String(), addr, "=", uint16(v), err)
+	Debug("cyw43_read_reg_u16", fn.String(), addr, "=", uint16(v), err)
 	return uint16(v), err
 }
 
 func (d *Dev) Read8(fn Function, addr uint32) (uint8, error) {
 	v, err := d.rr(fn, addr, 1)
-	debug("cyw43_read_reg_u8", fn.String(), addr, "=", uint8(v), err)
+	Debug("cyw43_read_reg_u8", fn.String(), addr, "=", uint8(v), err)
 	return uint8(v), err
 }
 
@@ -265,7 +267,7 @@ func (d *Dev) Write32S(fn Function, addr, val uint32) error {
 	}
 	binary.BigEndian.PutUint32(buf[:], swap32(val))
 	err = d.spi.Tx(buf[:], nil)
-	debug("cyw43_write_reg_u32_swap", fn.String(), addr, "=", val, err)
+	Debug("cyw43_write_reg_u32_swap", fn.String(), addr, "=", val, err)
 	if err != nil || !d.enableStatusWord {
 		d.csHigh()
 		return err
@@ -302,7 +304,7 @@ func (d *Dev) Read32S(fn Function, addr uint32) (uint32, error) {
 	d.responseDelay()
 	err := d.spi.Tx(nil, buf[:])
 	result := swap32(binary.BigEndian.Uint32(buf[:]))
-	debug("cyw43_read_reg_u32_swap", fn.String(), addr, "=", result, err)
+	Debug("cyw43_read_reg_u32_swap", fn.String(), addr, "=", result, err)
 	if err != nil || !d.enableStatusWord {
 		d.csHigh()
 		return result, err

@@ -1,8 +1,39 @@
 package cyw43439
 
 import (
+	"bytes"
+	"errors"
+	"net"
+	"strconv"
 	"time"
 )
+
+const (
+	verbose_debug = true
+	initReadback  = false
+)
+
+type Config struct {
+	Firmware        []byte
+	CLM             []byte
+	MAC             net.HardwareAddr
+	EnableBluetooth bool
+}
+
+func DefaultConfig(enableBT bool) Config {
+	var fw []byte
+	if enableBT {
+		// fw = wifibtFW[:wifibtFWLen]
+	} else {
+		fw = wifiFW[:wifiFWLen]
+	}
+	return Config{
+		Firmware:        fw,
+		CLM:             GetCLM(fw),
+		MAC:             []byte{0xfe, 0xed, 0xde, 0xad, 0xbe, 0xef},
+		EnableBluetooth: enableBT,
+	}
+}
 
 // TODO: delete these auxiliary variables.
 const (
@@ -216,6 +247,9 @@ func GetCLM(firmware []byte) []byte {
 	return firmware[clmAddr : clmAddr+clmLen]
 }
 
+//go:inline
+func align32(val, align uint32) uint32 { return (val + align - 1) &^ (align - 1) }
+
 // SPIWriteRead performs the gSPI Write-Read action.
 // Not used!
 // func (d *Dev) SPIWriteRead(cmd uint32, w, r []byte) error {
@@ -249,3 +283,123 @@ func GetCLM(firmware []byte) []byte {
 // 	}
 // 	return nil
 // }
+
+const (
+	CORE_WLAN_ARM              = 1
+	WLAN_ARMCM3_BASE_ADDRESS   = 0x18003000
+	WRAPPER_REGISTER_OFFSET    = 0x100_000
+	CORE_SOCRAM                = 2
+	SOCSRAM_BASE_ADDRESS       = 0x18004000
+	SBSDIO_SB_ACCESS_2_4B_FLAG = 0x08000
+	CHIPCOMMON_BASE_ADDRESS    = 0x18000000
+	backplaneAddrMask          = 0x7fff
+	AI_RESETCTRL_OFFSET        = 0x800
+	AIRC_RESET                 = 1
+	AI_IOCTRL_OFFSET           = 0x408
+	SICF_FGC                   = 2
+	SICF_CLOCK_EN              = 1
+	SICF_CPUHALT               = 0x20
+	SOCSRAM_BANKX_INDEX        = (0x18004000) + 0x10
+
+	SOCSRAM_BANKX_PDA        = (SOCSRAM_BASE_ADDRESS + 0x44)
+	SBSDIO_HT_AVAIL          = 0x80
+	SDIO_BASE_ADDRESS        = 0x18002000
+	SDIO_INT_HOST_MASK       = SDIO_BASE_ADDRESS + 0x24
+	I_HMB_SW_MASK            = 0x000000f0
+	SDIO_FUNCTION2_WATERMARK = 0x10008
+	SPI_F2_WATERMARK         = 32
+
+	SDIO_WAKEUP_CTRL = 0x1001e
+	SDIO_SLEEP_CSR   = 0x1001f
+	SBSDIO_FORCE_ALP = 0x01
+	SBSDIO_FORCE_HT  = 0x02
+)
+
+var errFirmwareValidationFailed = errors.New("firmware validation failed")
+
+var debugBuf [128]byte
+
+func Debug(a ...any) {
+	if verbose_debug {
+		for _, v := range a {
+			printUi := false
+			var ui uint64
+			switch c := v.(type) {
+			case string:
+				print(c)
+			case int:
+				if c < 0 {
+					print(c)
+				} else {
+					printUi = true
+					ui = uint64(c)
+				}
+			case uint8:
+				printUi = true
+				ui = uint64(c)
+			case uint16:
+				printUi = true
+				ui = uint64(c)
+			case uint32:
+				printUi = true
+				ui = uint64(c)
+			case error:
+				if c == nil {
+					print("err=<nil>")
+				} else {
+					print("err=\"")
+					print(c.Error())
+					print("\"")
+				}
+			case nil:
+				// probably an error type.
+				continue
+			default:
+				print("<unknown type>")
+			}
+			if printUi {
+				debugBuf[0] = '0'
+				debugBuf[1] = 'x'
+				n := len(strconv.AppendUint(debugBuf[2:2], ui, 16))
+				print(string(debugBuf[:2+n]))
+			}
+			print(" ")
+		}
+		print("\n")
+	}
+}
+
+func validateFirmware(src []byte) error {
+	fwEnd := 800 // get last 800 bytes
+	if fwEnd > len(src) {
+		return errors.New("bad firmware size: too small")
+	}
+
+	// First we validate the firmware by looking for the Version string:
+	b := src[len(src)-fwEnd:]
+	// get length of trailer.
+	fwEnd -= 16 // skip DVID trailer.
+	trailLen := uint32(b[fwEnd-2]) | uint32(b[fwEnd-1])<<8
+	found := -1
+	if trailLen < 500 && b[fwEnd-3] == 0 {
+		var cmpString = []byte("Version: ")
+		for i := 80; i < int(trailLen); i++ {
+			ptr := fwEnd - 3 - i
+			if bytes.Equal(b[ptr:ptr+9], cmpString) {
+				found = i
+				break
+			}
+		}
+	}
+	if found == -1 {
+		return errors.New("could not find valid firmware")
+	}
+	if verbose_debug {
+		i := 0
+		ptrstart := fwEnd - 3 - found
+		for ; b[ptrstart+i] != 0; i++ {
+		}
+		Debug("got version", string(b[ptrstart:ptrstart+i-1]))
+	}
+	return nil
+}

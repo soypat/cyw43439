@@ -166,7 +166,7 @@ func TestShellmode() {
 
 		case 'I':
 			println("initializing device")
-			err = dev.Init(cyw43439.DefaultConfig())
+			err = dev.Init(cyw43439.DefaultConfig(false))
 			if err == nil {
 				println("init success")
 			}

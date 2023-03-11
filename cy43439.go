@@ -1,3 +1,5 @@
+//go:build tinygo
+
 /*
 # Notes on Endianness.
 
@@ -25,16 +27,9 @@ import (
 	"errors"
 	"fmt"
 	"machine"
-	"net"
-	"strconv"
 	"time"
 
 	"tinygo.org/x/drivers"
-)
-
-const (
-	verbose_debug = true
-	initReadback  = false
 )
 
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
@@ -99,28 +94,17 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 		sharedSD:               SD,
 		ResponseDelayByteCount: 0,
 		enableStatusWord:       false,
-	}
-}
-
-type Config struct {
-	Firmware        []byte
-	CLM             []byte
-	MAC             net.HardwareAddr
-	EnableBluetooth bool
-}
-
-func DefaultConfig() Config {
-	fw := wifiFW[:wifiFWLen]
-	return Config{
-		Firmware: fw,
-		CLM:      GetCLM(fw),
-		MAC:      []byte{0xfe, 0xed, 0xde, 0xad, 0xbe, 0xef},
+		currentBackplaneWindow: 0,
 	}
 }
 
 func (d *Dev) Init(cfg Config) (err error) {
 	if cfg.MAC != nil && len(cfg.MAC) != 6 {
 		return errors.New("bad MAC address")
+	}
+	err = validateFirmware(cfg.Firmware)
+	if err != nil {
+		return err
 	}
 	var reg8 uint8
 	/*
@@ -223,7 +207,7 @@ chipup:
 	if err != nil {
 		return err
 	}
-	debug("backplane is ready")
+	Debug("backplane is ready")
 	//d.enableStatusWord = false
 	// TODO: For when we are ready to download firmware.
 	const (
@@ -232,10 +216,10 @@ chipup:
 		SBSDIO_ALP_AVAIL     = 0x40
 	)
 	// Clear data unavailable error if there is any.
-	err = d.ClearInterrupts()
-	if err != nil {
-		return err
-	}
+	// err = d.ClearInterrupts()
+	// if err != nil {
+	// 	return err
+	// }
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_ALP_AVAIL_REQ)
 	for i := 0; i < 10; i++ {
 		time.Sleep(time.Millisecond)
@@ -247,10 +231,11 @@ chipup:
 			goto alpset
 		}
 	}
-	debug("ALP not set: ", reg8)
+	Debug("ALP not set: ", reg8)
 	return errors.New("timeout waiting for ALP to be set")
 
 alpset:
+	Debug("ALP Set")
 	// Clear request for ALP
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, 0)
 
@@ -259,7 +244,7 @@ alpset:
 	} else if cfg.CLM == nil {
 		return errors.New("CLM is nil but firmware not nil")
 	}
-
+	Debug("begin disabling cores")
 	// Begin preparing for Firmware download.
 	err = d.disableDeviceCore(CORE_WLAN_ARM, false)
 	if err != nil {
@@ -282,14 +267,15 @@ alpset:
 	if err != nil {
 		return err
 	}
+	Debug("Cores ready, start firmware download")
 
-	return nil
 	err = d.downloadResource(0x0, cfg.Firmware)
 	if err != nil {
 		return err
 	}
 	const RamSize = (512 * 1024)
 	wifinvramLen := align32(uint32(len(nvram43439)), 64)
+	Debug("start nvram download")
 	err = d.downloadResource(RamSize-4-wifinvramLen, []byte(nvram43439))
 	if err != nil {
 		return err
@@ -315,6 +301,7 @@ alpset:
 	return errors.New("HT not ready")
 
 htready:
+	Debug("HT Ready")
 	err = d.WriteBackplane(SDIO_INT_HOST_MASK, 4, I_HMB_SW_MASK)
 	if err != nil {
 		return err
@@ -396,19 +383,16 @@ f2ready:
 	return err
 }
 
-//go:inline
-func align32(val, align uint32) uint32 { return (val + align - 1) &^ (align - 1) }
-
 func (d *Dev) GetStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, AddrStatus)
-	debug("read SPI Bus status:", Status(busStatus).String())
+	Debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
 }
 
 func (d *Dev) ClearStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, AddrStatus)
 	d.Write32(FuncBus, AddrStatus, 0)
-	debug("read SPI Bus status:", Status(busStatus).String())
+	Debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
 }
 
@@ -447,56 +431,4 @@ func (d *Dev) GPIOSetup() {
 	d.cs.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	machine.GPIO1.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	d.csHigh()
-}
-
-var debugBuf [128]byte
-
-func debug(a ...any) {
-	if verbose_debug {
-		for _, v := range a {
-			printUi := false
-			var ui uint64
-			switch c := v.(type) {
-			case string:
-				print(c)
-			case int:
-				if c < 0 {
-					print(c)
-				} else {
-					printUi = true
-					ui = uint64(c)
-				}
-			case uint8:
-				printUi = true
-				ui = uint64(c)
-			case uint16:
-				printUi = true
-				ui = uint64(c)
-			case uint32:
-				printUi = true
-				ui = uint64(c)
-			case error:
-				if c == nil {
-					print("err=<nil>")
-				} else {
-					print("err=\"")
-					print(c.Error())
-					print("\"")
-				}
-			case nil:
-				// probably an error type.
-				continue
-			default:
-				print("<unknown type>")
-			}
-			if printUi {
-				debugBuf[0] = '0'
-				debugBuf[1] = 'x'
-				n := len(strconv.AppendUint(debugBuf[2:2], ui, 16))
-				print(string(debugBuf[:2+n]))
-			}
-			print(" ")
-		}
-		print("\n")
-	}
 }

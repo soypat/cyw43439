@@ -1,9 +1,12 @@
+//go:build tinygo
+
 package cyw43439
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 	"unsafe"
@@ -237,40 +240,9 @@ func (d *Dev) sendSDPCMCommon(kind uint32, cmd sdpcmCmd, w []byte) error {
 	return d.WriteBytes(FuncWLAN, 0, w)
 }
 
-const (
-	CORE_WLAN_ARM              = 1
-	WLAN_ARMCM3_BASE_ADDRESS   = 0x18003000
-	WRAPPER_REGISTER_OFFSET    = 0x100000
-	CORE_SOCRAM                = 2
-	SOCSRAM_BASE_ADDRESS       = 0x18004000
-	SBSDIO_SB_ACCESS_2_4B_FLAG = 0x08000
-	CHIPCOMMON_BASE_ADDRESS    = 0x18000000
-	backplaneAddrMask          = 0x7fff
-	AI_RESETCTRL_OFFSET        = 0x800
-	AIRC_RESET                 = 1
-	AI_IOCTRL_OFFSET           = 0x408
-	SICF_FGC                   = 2
-	SICF_CLOCK_EN              = 1
-	SICF_CPUHALT               = 0x20
-	SOCSRAM_BANKX_INDEX        = (0x18004000) + 0x10
-
-	SOCSRAM_BANKX_PDA        = (SOCSRAM_BASE_ADDRESS + 0x44)
-	SBSDIO_HT_AVAIL          = 0x80
-	SDIO_BASE_ADDRESS        = 0x18002000
-	SDIO_INT_HOST_MASK       = SDIO_BASE_ADDRESS + 0x24
-	I_HMB_SW_MASK            = 0x000000f0
-	SDIO_FUNCTION2_WATERMARK = 0x10008
-	SPI_F2_WATERMARK         = 32
-
-	SDIO_WAKEUP_CTRL = 0x1001e
-	SDIO_SLEEP_CSR   = 0x1001f
-	SBSDIO_FORCE_ALP = 0x01
-	SBSDIO_FORCE_HT  = 0x02
-)
-
 func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	base := coreaddress(coreID)
-	debug("disable core", coreID, coreHalt)
+	Debug("disable core", coreID, base)
 	d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
 	reg, err := d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
 	if err != nil {
@@ -279,7 +251,7 @@ func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	if reg&AIRC_RESET != 0 {
 		return nil
 	}
-	debug("core not in reset", reg)
+	Debug("core not in reset", reg)
 	// TODO
 	// println("core not in reset:", reg)
 	return errors.New("core not in reset")
@@ -321,9 +293,9 @@ func (d *Dev) CoreIsActive(coreID uint8) bool {
 func coreaddress(coreID uint8) (v uint32) {
 	switch coreID {
 	case CORE_WLAN_ARM:
-		v = WLAN_ARMCM3_BASE_ADDRESS + WRAPPER_REGISTER_OFFSET
+		v = WRAPPER_REGISTER_OFFSET + WLAN_ARMCM3_BASE_ADDRESS
 	case CORE_SOCRAM:
-		v = SOCSRAM_BASE_ADDRESS + WRAPPER_REGISTER_OFFSET
+		v = WRAPPER_REGISTER_OFFSET + SOCSRAM_BASE_ADDRESS
 	default:
 		panic("bad core address")
 	}
@@ -340,7 +312,7 @@ func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
 	reg, err := d.rr(FuncBackplane, addr, size)
-	debug("read backplane", addr, "=", reg, err)
+	Debug("read backplane", addr, "=", reg, err)
 	if err != nil {
 		return 0, err
 	}
@@ -358,7 +330,7 @@ func (d *Dev) WriteBackplane(addr, size, value uint32) error {
 		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
 	err = d.wr(FuncBackplane, addr, size, value)
-	debug("write backplane", addr, "=", value, err)
+	Debug("write backplane", addr, "=", value, err)
 	if err != nil {
 		return err
 	}
@@ -372,16 +344,27 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 		SDIO_BACKPLANE_ADDRESS_MID  = 0x1000b
 		SDIO_BACKPLANE_ADDRESS_LOW  = 0x1000a
 	)
-	addr = addr &^ backplaneAddrMask
 	currentWindow := d.currentBackplaneWindow
+	Debug("setting backplane window with addr=", addr, "currentwindow=", currentWindow, "maskaddr=", addr&^backplaneAddrMask)
+	const (
+		addrtest = 0x18003000 + 0x10000 + 0x800
+		addrneg  = addrtest &^ backplaneAddrMask
+		hiset    = addrneg&0xff000000 != 0
+		medset   = addrneg&0xff0000 != 0
+		loset    = addrneg&0xff00 != 0
+	)
+	addr = addr &^ backplaneAddrMask
 	// TODO(soypat): maybe these should be calls to rr so that they are inlined?
 	if (addr & 0xff000000) != currentWindow&0xff000000 {
+		Debug("setting backplane addr hi")
 		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_HIGH, uint8(addr>>24))
 	}
-	if err != nil && (addr&0x00ff0000) != currentWindow&0x00ff0000 {
+	if err == nil && (addr&0x00ff0000) != currentWindow&0x00ff0000 {
+		Debug("setting backplane addr mid")
 		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_MID, uint8(addr>>16))
 	}
-	if err != nil && (addr&0x0000ff00) != currentWindow&0x0000ff00 {
+	if err == nil && (addr&0x0000ff00) != currentWindow&0x0000ff00 {
+		Debug("setting backplane addr low")
 		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_LOW, uint8(addr>>8))
 	}
 	if err != nil {
@@ -391,61 +374,11 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 	return err
 }
 
-var errFirmwareValidationFailed = errors.New("firmware validation failed")
-
 func (d *Dev) downloadResource(addr uint32, src []byte) error {
 	// round up length to simplify download.
 	rlen := (len(src) + 255) &^ 255
-	fwEnd := 800 // get last 800 bytes
-	if rlen < fwEnd {
-		return errors.New("bad firmware size: too small")
-	}
-
-	// First we validate the firmware by looking for the Version string:
-	b := src[rlen-fwEnd:]
-	// get length of trailer.
-	fwEnd -= 16 // skip DVID trailer.
-	trailLen := uint32(b[fwEnd-2]) | uint32(b[fwEnd-1])<<8
-	found := -1
-	if trailLen < 500 && b[fwEnd-3] == 0 {
-		var cmpString = []byte("Version: ")
-		for i := 80; i < int(trailLen); i++ {
-			ptr := fwEnd - 3 - i
-			if bytes.Equal(b[ptr:ptr+9], cmpString) {
-				found = i
-				break
-			}
-		}
-	}
-	if found == -1 {
-		return errors.New("could not find valid firmware")
-	}
-	version := b[fwEnd-3-found]
-	println("got version", version)
-
-	// Next step is actual download to the CYW43439.
 	const BLOCKSIZE = 64
-	for offset := 0; offset < rlen; offset += BLOCKSIZE {
-		sz := BLOCKSIZE
-		if offset+sz > rlen {
-			sz = rlen - offset
-		}
-		dstAddr := addr + uint32(offset)
-		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
-			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
-		}
-		err := d.setBackplaneWindow(dstAddr)
-		if err != nil {
-			return err
-		}
-		src = src[offset:]
-		err = d.WriteBytes(FuncBackplane, dstAddr&backplaneAddrMask, src[:sz])
-		if err != nil {
-			return err
-		}
-	}
-
-	// Finished writing firmware... should be ready for use. We choose to validate it though.
+	var srcPtr []byte
 	var buf [BLOCKSIZE]byte
 	for offset := 0; offset < rlen; offset += BLOCKSIZE {
 		sz := BLOCKSIZE
@@ -456,10 +389,41 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
 			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
 		}
+		// fmt.Println("set backplane window to ", dstAddr, offset)
 		err := d.setBackplaneWindow(dstAddr)
 		if err != nil {
 			return err
 		}
+		if offset+sz > len(src) {
+			fmt.Println("ALLOCA", sz)
+			srcPtr = buf[:sz]
+		} else {
+			srcPtr = src[offset:]
+		}
+		// fmt.Println("write bytes to addr ", dstAddr&backplaneAddrMask)
+		err = d.WriteBytes(FuncBackplane, dstAddr&backplaneAddrMask, srcPtr[:sz])
+		if err != nil {
+			return err
+		}
+	}
+	Debug("download finished, validate data")
+	// Finished writing firmware... should be ready for use. We choose to validate it though.
+
+	for offset := 0; offset < rlen; offset += BLOCKSIZE {
+		sz := BLOCKSIZE
+		if offset+sz > rlen {
+			sz = rlen - offset
+		}
+		dstAddr := addr + uint32(offset)
+		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
+			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
+		}
+		// fmt.Println("set backplane window", dstAddr)
+		err := d.setBackplaneWindow(dstAddr)
+		if err != nil {
+			return err
+		}
+		// fmt.Println("read back bytes into buf from ", dstAddr&backplaneAddrMask)
 		err = d.ReadBytes(FuncBackplane, dstAddr&backplaneAddrMask, buf[:sz])
 		if err != nil {
 			return err
