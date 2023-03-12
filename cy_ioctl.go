@@ -345,7 +345,7 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 		SDIO_BACKPLANE_ADDRESS_LOW  = 0x1000a
 	)
 	currentWindow := d.currentBackplaneWindow
-	Debug("setting backplane window with addr=", addr, "currentwindow=", currentWindow, "maskaddr=", addr&^backplaneAddrMask)
+	// Debug("setting backplane window with addr=", addr, "currentwindow=", currentWindow, "maskaddr=", addr&^backplaneAddrMask)
 	const (
 		addrtest = 0x18003000 + 0x10000 + 0x800
 		addrneg  = addrtest &^ backplaneAddrMask
@@ -379,7 +379,7 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 	rlen := (len(src) + 255) &^ 255
 	const BLOCKSIZE = 64
 	var srcPtr []byte
-	var buf [BLOCKSIZE]byte
+	var buf [BLOCKSIZE + 4]byte
 	for offset := 0; offset < rlen; offset += BLOCKSIZE {
 		sz := BLOCKSIZE
 		if offset+sz > rlen {
@@ -395,8 +395,8 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 			return err
 		}
 		if offset+sz > len(src) {
-			fmt.Println("ALLOCA", sz)
-			srcPtr = buf[:sz]
+			// fmt.Println("ALLOCA", sz)
+			srcPtr = src[:cap(src)][offset:]
 		} else {
 			srcPtr = src[offset:]
 		}
@@ -415,6 +415,7 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 			sz = rlen - offset
 		}
 		dstAddr := addr + uint32(offset)
+		Debug("dstAddr", dstAddr, "addr=", addr, "offset=", offset, "sz=", sz)
 		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
 			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
 		}
@@ -428,9 +429,10 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		if err != nil {
 			return err
 		}
-		src = src[offset:]
-		if !bytes.Equal(buf[:sz], src[:sz]) {
-			return errFirmwareValidationFailed
+		srcPtr = src[offset:]
+		if !bytes.Equal(buf[:sz], srcPtr[:sz]) {
+			err = fmt.Errorf("%w at addr=%#x: expected:%q\ngot: %q", errFirmwareValidationFailed, dstAddr, srcPtr[:sz], buf[:sz])
+			return err
 		}
 	}
 	return nil

@@ -54,20 +54,20 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 		panic("misuse of general write register")
 	}
 	d.csLow()
-	err := d.SPIWrite(cmd, buf[:4])
+	err := d.spiWrite(cmd, buf[:4])
 	d.csHigh()
 	return err
 }
 
 // WriteBytes is cyw43_write_bytes
 func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
-	println("writeBytes")
+	// println("writeBytes")
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3
 	if length != alignedLength {
 		return errors.New("buffer length must be length multiple of 4")
 	}
-	if fn == FuncBackplane || !(length <= 64 && (addr+length) <= 0x8000) {
+	if !(fn != FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)) {
 		panic("bad argument to WriteBytes")
 	}
 	if fn == FuncWLAN {
@@ -86,11 +86,14 @@ func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 		}
 	}
 	cmd := make_cmd(true, true, fn, addr, length)
-	return d.SPIWrite(cmd, src)
+	d.csLow()
+	err := d.spiWrite(cmd, src)
+	d.csHigh()
+	return err
 }
 
-// SPIWrite performs the gSPI Write action.
-func (d *Dev) SPIWrite(cmd uint32, w []byte) error {
+// spiWrite performs the gSPI Write action. Does not control CS pin.
+func (d *Dev) spiWrite(cmd uint32, w []byte) error {
 	var buf [4]byte
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -142,7 +145,7 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	cmd := make_cmd(false, true, fn, addr, size+padding)
 	var buf [4 + whdBusSPIBackplaneReadPadding]byte
 	d.csLow()
-	err := d.SPIRead(cmd, buf[:4+padding])
+	err := d.spiRead(cmd, buf[:4+padding])
 	d.csHigh()
 	result := endian.Uint32(buf[padding : padding+4]) // !LE
 	return result, err
@@ -158,7 +161,7 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 	assert := fn == FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)
 	assert = assert && alignedLength > 0 && alignedLength < maxReadPacket
 	if !assert {
-		panic("bad argument to WriteBytes")
+		panic("bad argument to ReadBytes")
 	}
 	padding := uint32(0)
 	if fn == FuncBackplane {
@@ -170,11 +173,14 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 	}
 	// TODO: Use DelayResponse to simulate padding effect.
 	cmd := make_cmd(false, true, fn, addr, length+padding)
-	return d.SPIRead(cmd, src)
+	d.csLow()
+	err := d.spiRead(cmd, src)
+	d.csHigh()
+	return err
 }
 
-// SPIRead performs the gSPI Read action.
-func (d *Dev) SPIRead(cmd uint32, r []byte) error {
+// spiRead performs the gSPI Read action.
+func (d *Dev) spiRead(cmd uint32, r []byte) error {
 	var buf [4]byte
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
