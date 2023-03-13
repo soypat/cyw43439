@@ -377,6 +377,9 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 func (d *Dev) downloadResource(addr uint32, src []byte) error {
 	// round up length to simplify download.
 	rlen := (len(src) + 255) &^ 255
+	if cap(src) < rlen {
+		return errors.New("firmware slice capacity needs extra 255 padding over it's length for transfer")
+	}
 	const BLOCKSIZE = 64
 	var srcPtr []byte
 	var buf [BLOCKSIZE + 4]byte
@@ -429,6 +432,7 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		if err != nil {
 			return err
 		}
+
 		srcPtr = src[offset:]
 		if !bytes.Equal(buf[:sz], srcPtr[:sz]) {
 			err = fmt.Errorf("%w at addr=%#x: expected:%q\ngot: %q", errFirmwareValidationFailed, dstAddr, srcPtr[:sz], buf[:sz])

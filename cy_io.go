@@ -145,7 +145,7 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	cmd := make_cmd(false, true, fn, addr, size+padding)
 	var buf [4 + whdBusSPIBackplaneReadPadding]byte
 	d.csLow()
-	err := d.spiRead(cmd, buf[:4+padding])
+	err := d.spiRead(cmd, buf[:4+padding], 0)
 	d.csHigh()
 	result := endian.Uint32(buf[padding : padding+4]) // !LE
 	return result, err
@@ -163,7 +163,7 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 	if !assert {
 		panic("bad argument to ReadBytes")
 	}
-	padding := uint32(0)
+	padding := uint8(0)
 	if fn == FuncBackplane {
 		padding = 4
 		if cap(src) < len(src)+4 {
@@ -172,15 +172,15 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 		src = src[:len(src)+4]
 	}
 	// TODO: Use DelayResponse to simulate padding effect.
-	cmd := make_cmd(false, true, fn, addr, length+padding)
+	cmd := make_cmd(false, true, fn, addr, length+uint32(padding))
 	d.csLow()
-	err := d.spiRead(cmd, src)
+	err := d.spiRead(cmd, src, uint8(padding))
 	d.csHigh()
 	return err
 }
 
 // spiRead performs the gSPI Read action.
-func (d *Dev) spiRead(cmd uint32, r []byte) error {
+func (d *Dev) spiRead(cmd uint32, r []byte, padding uint8) error {
 	var buf [4]byte
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -190,7 +190,7 @@ func (d *Dev) spiRead(cmd uint32, r []byte) error {
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
-	d.responseDelay()
+	d.responseDelay(padding)
 	err := d.spi.Tx(nil, r)
 	if err != nil || !d.enableStatusWord {
 		return err
@@ -219,9 +219,9 @@ func (d *Dev) csLow() {
 }
 
 //go:inline
-func (d *Dev) responseDelay() {
+func (d *Dev) responseDelay(padding uint8) {
 	// Wait for response.
-	for i := uint8(0); i < d.ResponseDelayByteCount; i++ {
+	for i := uint8(0); i < padding; i++ {
 		d.spi.Transfer(0)
 	}
 }
@@ -307,7 +307,7 @@ func (d *Dev) Read32S(fn Function, addr uint32) (uint32, error) {
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
-	d.responseDelay()
+	d.responseDelay(0)
 	err := d.spi.Tx(nil, buf[:])
 	result := swap32(binary.BigEndian.Uint32(buf[:]))
 	Debug("cyw43_read_reg_u32_swap", fn.String(), addr, "=", result, err)
