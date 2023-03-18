@@ -14,6 +14,9 @@ const wifiFWLen = 224190
 const wifibtFWLen = 231077
 const clmLen = 984
 
+// const nvramlen = len(nvram43439) // 742
+// const nvram1dxlen = len(nvram1dx) // 586
+
 var wififwptr = &wifibtFW
 
 const nvram43439 = "NVRAMRev=$Rev$" + "\x00" +
@@ -62,7 +65,7 @@ const nvram43439 = "NVRAMRev=$Rev$" + "\x00" +
 	"spurconfig=0x3" + "\x00" +
 	"glitch_based_crsmin=1" + "\x00" +
 	"btc_mode=1" + "\x00" +
-	"\x00\x00"
+	"\x00\x00\x00" // C includes null terminator in strings.
 
 // }
 
@@ -111,7 +114,7 @@ const nvram1dx = "manfid=0x2d0\x00" +
 	// Antenna diversity
 	"swdiv_en=1\x00" +
 	"swdiv_gpio=1\x00" +
-	"\x00\x00"
+	"\x00\x00\x00" // C includes null terminator in strings.
 
 // }
 

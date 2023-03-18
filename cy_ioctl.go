@@ -191,7 +191,7 @@ func (d *Dev) doIoctl(kind uint32, iface ioctlInterface, cmd sdpcmCmd, w []byte)
 
 // sendIoctl is cyw43_send_ioctl in pico-sdk (actually contained in cy43-driver)
 func (d *Dev) sendIoctl(kind uint32, iface ioctlInterface, cmd sdpcmCmd, w []byte) error {
-	println("sendIoctl")
+	Debug("sendIoctl")
 	length := uint32(len(w))
 	const sdpcmSize = uint32(unsafe.Sizeof(sdpcmHeader{}))
 	const ioctlSize = uint32(unsafe.Sizeof(ioctlHeader{}))
@@ -214,7 +214,7 @@ func (d *Dev) sendIoctl(kind uint32, iface ioctlInterface, cmd sdpcmCmd, w []byt
 // sendSDPCMCommon is cyw43_sdpcm_send_common in pico-sdk (actually contained in cy43-driver)
 func (d *Dev) sendSDPCMCommon(kind uint32, cmd sdpcmCmd, w []byte) error {
 	// TODO where is cmd used here????
-	println("sendSDPCMCommon")
+	Debug("sendSDPCMCommon")
 	if kind != sdpcmCTLHEADER && kind != sdpcmDATAHEADER {
 		return errors.New("unexpected SDPCM kind")
 	}
@@ -345,27 +345,25 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 		SDIO_BACKPLANE_ADDRESS_LOW  = 0x1000a
 	)
 	currentWindow := d.currentBackplaneWindow
-	// Debug("setting backplane window with addr=", addr, "currentwindow=", currentWindow, "maskaddr=", addr&^backplaneAddrMask)
-	const (
-		addrtest = 0x18003000 + 0x10000 + 0x800
-		addrneg  = addrtest &^ backplaneAddrMask
-		hiset    = addrneg&0xff000000 != 0
-		medset   = addrneg&0xff0000 != 0
-		loset    = addrneg&0xff00 != 0
-	)
 	addr = addr &^ backplaneAddrMask
+	if currentWindow&0xffff_ff00 != addr&0xffff_ff00 {
+		Debug("prepbackplane addr=", addr, " currentwindow=", currentWindow)
+	}
 	// TODO(soypat): maybe these should be calls to rr so that they are inlined?
 	if (addr & 0xff000000) != currentWindow&0xff000000 {
 		Debug("setting backplane addr hi")
-		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_HIGH, uint8(addr>>24))
+		err = d.wr(FuncBackplane, SDIO_BACKPLANE_ADDRESS_HIGH, 1, addr>>24)
+		// err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_HIGH, uint8(addr>>24))
 	}
 	if err == nil && (addr&0x00ff0000) != currentWindow&0x00ff0000 {
 		Debug("setting backplane addr mid")
-		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_MID, uint8(addr>>16))
+		err = d.wr(FuncBackplane, SDIO_BACKPLANE_ADDRESS_MID, 1, addr>>16)
+		// err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_MID, uint8(addr>>16))
 	}
 	if err == nil && (addr&0x0000ff00) != currentWindow&0x0000ff00 {
 		Debug("setting backplane addr low")
-		err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_LOW, uint8(addr>>8))
+		err = d.wr(FuncBackplane, SDIO_BACKPLANE_ADDRESS_LOW, 1, addr>>8)
+		// err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_LOW, uint8(addr>>8))
 	}
 	if err != nil {
 		return err
@@ -375,6 +373,7 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 }
 
 func (d *Dev) downloadResource(addr uint32, src []byte) error {
+	Debug("download resource addr=", addr, "len=", len(src))
 	// round up length to simplify download.
 	rlen := (len(src) + 255) &^ 255
 	if cap(src) < rlen {
@@ -411,14 +410,13 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 	}
 	Debug("download finished, validate data")
 	// Finished writing firmware... should be ready for use. We choose to validate it though.
-
 	for offset := 0; offset < rlen; offset += BLOCKSIZE {
 		sz := BLOCKSIZE
 		if offset+sz > rlen {
 			sz = rlen - offset
 		}
 		dstAddr := addr + uint32(offset)
-		Debug("dstAddr", dstAddr, "addr=", addr, "offset=", offset, "sz=", sz)
+		// Debug("dstAddr", dstAddr, "addr=", addr, "offset=", offset, "sz=", sz)
 		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
 			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
 		}
@@ -432,13 +430,18 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		if err != nil {
 			return err
 		}
-
-		srcPtr = src[offset:]
+		if offset+sz > len(src) {
+			// fmt.Println("ALLOCA", sz)
+			srcPtr = src[:cap(src)][offset:]
+		} else {
+			srcPtr = src[offset:]
+		}
 		if !bytes.Equal(buf[:sz], srcPtr[:sz]) {
 			err = fmt.Errorf("%w at addr=%#x: expected:%q\ngot: %q", errFirmwareValidationFailed, dstAddr, srcPtr[:sz], buf[:sz])
 			return err
 		}
 	}
+	Debug("firmware validation success")
 	return nil
 }
 

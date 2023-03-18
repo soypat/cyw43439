@@ -273,10 +273,13 @@ alpset:
 	if err != nil {
 		return err
 	}
+
 	const RamSize = (512 * 1024)
 	wifinvramLen := align32(uint32(len(nvram43439)), 64)
 	Debug("start nvram download")
-	err = d.downloadResource(RamSize-4-wifinvramLen, []byte(nvram43439))
+	var nvrambuf [1024]byte
+	copy(nvrambuf[:], nvram43439)
+	err = d.downloadResource(RamSize-4-wifinvramLen, nvrambuf[:len(nvram43439)])
 	if err != nil {
 		return err
 	}

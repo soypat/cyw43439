@@ -4,5 +4,6 @@
         "GOARCH": "arm",
         "GOROOT": "/home/pato/.cache/tinygo/goroot-fcc8cffbf6b269feac254418c8a231e847026660710a76e15c3cb083e6ea07e2",
         "GOFLAGS": "-tags=cortexm,baremetal,linux,arm,rp2040,rp,pico,tinygo,math_big_pure_go,gc.conservative,scheduler.tasks,serial.usb"
-    }
+    },
+    // "go.buildTags": "cy43firmware"
 }

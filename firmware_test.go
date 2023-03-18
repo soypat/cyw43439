@@ -1,83 +1,40 @@
 package cyw43439
 
 import (
-	"bytes"
 	"fmt"
-	"strconv"
+	"os"
 	"testing"
 )
 
-func TestFirmware(t *testing.T) {
-	cfg := DefaultConfig(false)
-
-	err := downloadResource(0x0, cfg.Firmware)
+func Test(t *testing.T) {
+	FW := wifiFW[:]
+	err := os.WriteFile("wififw.bin", FW, 0777)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
+	return
 }
+func TestFirmware(t *testing.T) {
+	FW := wifiFW[:]
+	fp, err := os.Create("wififw.S")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fp.Close()
+	fp.WriteString(".section .text\n")
+	fp.WriteString(".global cyw43439wififirmware\n")
+	fp.WriteString(".align\n")
+	fp.WriteString(".arm\n")
+	fp.WriteString("cyw43439wififirmware:\n")
+	const width = 4 * 3
 
-func downloadResource(addr uint32, src []byte) error {
-	// round up length to simplify download.
-	rlen := (len(src) + 255) &^ 255
-	const BLOCKSIZE = 64
-	var srcPtr []byte
-	var buf [BLOCKSIZE]byte
-	for offset := 0; offset < rlen; offset += BLOCKSIZE {
-		sz := BLOCKSIZE
-		if offset+sz > rlen {
-			sz = rlen - offset
+	for i := 0; i < len(FW); i++ {
+		if i%width == 0 {
+			fmt.Fprint(fp, "\n\t.byte ")
 		}
-		dstAddr := addr + uint32(offset)
-		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
-			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
-		}
-		fmt.Println("set backplane window to ", dstAddr, offset)
-		// err := d.setBackplaneWindow(dstAddr)
-		var err error
-		if err != nil {
-			return err
-		}
-		if offset+sz > len(src) {
-			fmt.Println("ALLOCA", sz)
-			srcPtr = buf[:sz]
-		} else {
-			srcPtr = src[offset:]
-		}
-
-		_ = srcPtr
-		fmt.Println("write bytes to addr ", dstAddr&backplaneAddrMask)
-		// err = d.WriteBytes(FuncBackplane, dstAddr&backplaneAddrMask, src[:sz])
-		if err != nil {
-			return err
+		fmt.Fprintf(fp, "%#x", FW[i])
+		if (i+1)%width != 0 {
+			fp.Write([]byte{','})
 		}
 	}
-	Debug("download finished, validate data")
-	// Finished writing firmware... should be ready for use. We choose to validate it though.
-
-	for offset := 0; offset < rlen; offset += BLOCKSIZE {
-		sz := BLOCKSIZE
-		if offset+sz > rlen {
-			sz = rlen - offset
-		}
-		dstAddr := addr + uint32(offset)
-		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
-			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
-		}
-		fmt.Println("set backplane window", dstAddr)
-		// err := d.setBackplaneWindow(dstAddr)
-		var err error
-		if err != nil {
-			return err
-		}
-		fmt.Println("read back bytes into buf from ", dstAddr&backplaneAddrMask)
-		// err = d.ReadBytes(FuncBackplane, dstAddr&backplaneAddrMask, buf[:sz])
-		if err != nil {
-			return err
-		}
-		src = src[offset:]
-		if !bytes.Equal(buf[:sz], src[:sz]) {
-			return errFirmwareValidationFailed
-		}
-	}
-	return nil
 }
