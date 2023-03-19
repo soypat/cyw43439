@@ -292,7 +292,7 @@ alpset:
 	if !d.CoreIsActive(CORE_WLAN_ARM) {
 		return errors.New("CORE_WLAN_ARM is not active after reset")
 	}
-
+	Debug("wlan core reset success")
 	// Wait until HT clock is available.
 	for i := 0; i < 1000; i++ {
 		reg, _ := d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)

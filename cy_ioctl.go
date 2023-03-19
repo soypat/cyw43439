@@ -290,6 +290,7 @@ func (d *Dev) CoreIsActive(coreID uint8) bool {
 	return reg&AIRC_RESET == 0
 }
 
+// coreaddress returns either WLAN=0x18103000  or  SOCRAM=0x18104000
 func coreaddress(coreID uint8) (v uint32) {
 	switch coreID {
 	case CORE_WLAN_ARM:
@@ -297,7 +298,7 @@ func coreaddress(coreID uint8) (v uint32) {
 	case CORE_SOCRAM:
 		v = WRAPPER_REGISTER_OFFSET + SOCSRAM_BASE_ADDRESS
 	default:
-		panic("bad core address")
+		panic("bad core id")
 	}
 	return v
 }

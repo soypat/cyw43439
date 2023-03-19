@@ -49,8 +49,12 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 	case 2:
 		endian.PutUint16(buf[:2], uint16(val)) // !LE
 	case 1:
-		buf[0] = byte(val)      // !LE
-		buf[1] = byte(val >> 8) // TODO: original driver has this behaviour. is it necessary?
+		buf[0] = byte(val) // !LE
+		// TODO: original driver writes msb bits even though specifying
+		// transaction size 1. Is it necessary?
+		buf[1] = byte(val >> 8)
+		buf[2] = byte(val >> 16)
+		buf[3] = byte(val >> 24)
 	default:
 		panic("misuse of general write register")
 	}
