@@ -18,19 +18,16 @@ var ErrDataNotAvailable = errors.New("requested data not available")
 
 func (d *Dev) Write32(fn Function, addr, val uint32) error {
 	err := d.wr(fn, addr, 4, uint32(val))
-	Debug("cyw43_write_reg_u32", fn.String(), addr, "=", val, err)
 	return err
 }
 
 func (d *Dev) Write16(fn Function, addr uint32, val uint16) error {
 	err := d.wr(fn, addr, 2, uint32(val))
-	Debug("cyw43_write_reg_u16", fn.String(), addr, "=", val, err)
 	return err
 }
 
 func (d *Dev) Write8(fn Function, addr uint32, val uint8) error {
 	err := d.wr(fn, addr, 1, uint32(val))
-	Debug("cyw43_write_reg_u8", fn.String(), addr, "=", val, err)
 	return err
 }
 
@@ -61,6 +58,18 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 	d.csLow()
 	err := d.spiWrite(cmd, buf[:4])
 	d.csHigh()
+	if verbose_debug {
+		function := "bad size"
+		switch size {
+		case 1:
+			function = "cyw43_write_reg_u8"
+		case 2:
+			function = "cyw43_write_reg_u16"
+		case 4:
+			function = "cyw43_write_reg_u32"
+		}
+		Debug(function, fn.String(), addr, "=", val, err)
+	}
 	return err
 }
 
@@ -125,19 +134,16 @@ func (d *Dev) spiWrite(cmd uint32, w []byte) error {
 
 func (d *Dev) Read32(fn Function, addr uint32) (uint32, error) {
 	v, err := d.rr(fn, addr, 4)
-	Debug("cyw43_read_reg_u32", fn.String(), addr, "=", uint32(v), err)
 	return v, err
 }
 
 func (d *Dev) Read16(fn Function, addr uint32) (uint16, error) {
 	v, err := d.rr(fn, addr, 2)
-	Debug("cyw43_read_reg_u16", fn.String(), addr, "=", uint16(v), err)
 	return uint16(v), err
 }
 
 func (d *Dev) Read8(fn Function, addr uint32) (uint8, error) {
 	v, err := d.rr(fn, addr, 1)
-	Debug("cyw43_read_reg_u8", fn.String(), addr, "=", uint8(v), err)
 	return uint8(v), err
 }
 
@@ -153,6 +159,18 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	err := d.spiRead(cmd, buf[:4+padding], 0)
 	d.csHigh()
 	result := endian.Uint32(buf[padding : padding+4]) // !LE
+	if verbose_debug {
+		function := "bad size"
+		switch size {
+		case 1:
+			function = "cyw43_read_reg_u8"
+		case 2:
+			function = "cyw43_read_reg_u16"
+		case 4:
+			function = "cyw43_read_reg_u32"
+		}
+		Debug(function, fn.String(), addr, "=", result, err)
+	}
 	return result, err
 }
 

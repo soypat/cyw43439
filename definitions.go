@@ -3,6 +3,7 @@ package cyw43439
 import (
 	"bytes"
 	"errors"
+	"machine"
 	"net"
 	"strconv"
 	"time"
@@ -321,12 +322,14 @@ var debugBuf [128]byte
 
 func Debug(a ...any) {
 	if verbose_debug {
-		for _, v := range a {
+		for i, v := range a {
 			printUi := false
+			printSpace := true
 			var ui uint64
 			switch c := v.(type) {
 			case string:
 				print(c)
+				printSpace = len(c) > 0 && c[len(c)-1] != '='
 			case int:
 				if c < 0 {
 					print(c)
@@ -363,9 +366,21 @@ func Debug(a ...any) {
 				n := len(strconv.AppendUint(debugBuf[2:2], ui, 16))
 				print(string(debugBuf[:2+n]))
 			}
-			print(" ")
+
+			if i > 0 {
+				lastStr, ok := a[i-1].(string)
+				if ok && len(lastStr) > 0 && lastStr[0] == '=' {
+					printSpace = false
+				}
+			}
+
+			if printSpace {
+				print(" ")
+			}
 		}
 		print("\n")
+	}
+	for machine.UART0.Bus.GetUARTFR_BUSY() != 0 {
 	}
 }
 

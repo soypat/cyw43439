@@ -139,6 +139,7 @@ func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
 }
 
 func (d *Dev) WriteIOVar(VAR string, iface ioctlInterface, val uint32) error {
+	Debug("WriteIOVar var=", VAR, "ioctl=", iface, "val=", val)
 	buf := d.buf[1024:]
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
@@ -267,6 +268,8 @@ func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 		cpuhaltFlag = SICF_CPUHALT
 	}
 	base := coreaddress(coreID)
+	const addr = 0x18103000 + AI_IOCTRL_OFFSET
+	Debug("begin reset process coreid=", coreID)
 	d.WriteBackplane(base+AI_IOCTRL_OFFSET, 1, SICF_FGC|SICF_CLOCK_EN|cpuhaltFlag)
 	d.ReadBackplane(base+AI_IOCTRL_OFFSET, 1)
 	d.WriteBackplane(base+AI_RESETCTRL_OFFSET, 1, 0)
@@ -274,6 +277,7 @@ func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 	d.WriteBackplane(base+AI_IOCTRL_OFFSET, 1, SICF_CLOCK_EN|cpuhaltFlag)
 	d.ReadBackplane(base+AI_IOCTRL_OFFSET, 1)
 	time.Sleep(time.Millisecond)
+	Debug("end reset process coreid=", coreID)
 	return nil
 }
 
@@ -304,6 +308,7 @@ func coreaddress(coreID uint8) (v uint32) {
 }
 
 func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
+	Debug("read backplane", addr, size)
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
 		return 0, err
@@ -312,8 +317,8 @@ func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 	if size == 4 {
 		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
+
 	reg, err := d.rr(FuncBackplane, addr, size)
-	Debug("read backplane", addr, "=", reg, err)
 	if err != nil {
 		return 0, err
 	}
@@ -322,6 +327,7 @@ func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 }
 
 func (d *Dev) WriteBackplane(addr, size, value uint32) error {
+	Debug("write backplane", addr, "=", value, "size=", int(size))
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
 		return err
@@ -331,7 +337,6 @@ func (d *Dev) WriteBackplane(addr, size, value uint32) error {
 		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
 	err = d.wr(FuncBackplane, addr, size, value)
-	Debug("write backplane", addr, "=", value, err)
 	if err != nil {
 		return err
 	}
@@ -347,30 +352,25 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 	)
 	currentWindow := d.currentBackplaneWindow
 	addr = addr &^ backplaneAddrMask
-	if currentWindow&0xffff_ff00 != addr&0xffff_ff00 {
-		Debug("prepbackplane addr=", addr, " currentwindow=", currentWindow)
+	if addr == currentWindow {
+		return nil
 	}
-	// TODO(soypat): maybe these should be calls to rr so that they are inlined?
+
 	if (addr & 0xff000000) != currentWindow&0xff000000 {
-		Debug("setting backplane addr hi")
 		err = d.wr(FuncBackplane, SDIO_BACKPLANE_ADDRESS_HIGH, 1, addr>>24)
-		// err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_HIGH, uint8(addr>>24))
 	}
 	if err == nil && (addr&0x00ff0000) != currentWindow&0x00ff0000 {
-		Debug("setting backplane addr mid")
 		err = d.wr(FuncBackplane, SDIO_BACKPLANE_ADDRESS_MID, 1, addr>>16)
-		// err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_MID, uint8(addr>>16))
 	}
 	if err == nil && (addr&0x0000ff00) != currentWindow&0x0000ff00 {
-		Debug("setting backplane addr low")
 		err = d.wr(FuncBackplane, SDIO_BACKPLANE_ADDRESS_LOW, 1, addr>>8)
-		// err = d.Write8(FuncBackplane, SDIO_BACKPLANE_ADDRESS_LOW, uint8(addr>>8))
 	}
 	if err != nil {
+		d.currentBackplaneWindow = 0
 		return err
 	}
 	d.currentBackplaneWindow = addr
-	return err
+	return nil
 }
 
 func (d *Dev) downloadResource(addr uint32, src []byte) error {
@@ -459,6 +459,7 @@ func (d *Dev) busSleep(canSleep bool) (err error) {
 
 // ksoSet enable KSO mode (keep SDIO on)
 func (d *Dev) ksoSet(enable bool) error {
+	Debug("ksoSet enable=", enable)
 	var writeVal uint8
 	if enable {
 		writeVal = SBSDIO_SLPCSR_KEEP_SDIO_ON

@@ -315,6 +315,7 @@ htready:
 	if err != nil {
 		return err
 	}
+	Debug("preparing F2")
 	for i := 0; i < 1000; i++ {
 		status, _ := d.GetStatus()
 		if status.F2PacketAvailable() {
@@ -326,6 +327,7 @@ htready:
 
 f2ready:
 	// Use of KSO:
+	Debug("preparing KSO")
 	reg8, err = d.Read8(FuncBackplane, SDIO_WAKEUP_CTRL)
 	if err != nil {
 		return err
@@ -354,21 +356,24 @@ f2ready:
 		return err
 	}
 	// Clear data unavailable error if there is any.
+	Debug("clear interrupts")
 	err = d.ClearInterrupts()
 	if err != nil {
 		return err
 	}
-
+	Debug("prep bus wake")
 	err = d.busSleep(false)
 	if err != nil {
 		return err
 	}
 
 	// Load CLM data. It's right after main firmware
+	Debug("prepare to flash CLM")
 	err = d.clmLoad(cfg.CLM)
 	if err != nil {
 		return err
 	}
+	Debug("final IOVar writes")
 	err = d.WriteIOVar("bus:txglom", wwd_STA_INTERFACE, 0)
 	if err != nil {
 		return err

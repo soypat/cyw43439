@@ -6,14 +6,6 @@ import (
 	"testing"
 )
 
-func Test(t *testing.T) {
-	FW := wifiFW[:]
-	err := os.WriteFile("wififw.bin", FW, 0777)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return
-}
 func TestFirmware(t *testing.T) {
 	FW := wifiFW[:]
 	fp, err := os.Create("wififw.S")
