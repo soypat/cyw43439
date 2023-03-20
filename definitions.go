@@ -346,6 +346,8 @@ func Debug(a ...any) {
 			case uint32:
 				printUi = true
 				ui = uint64(c)
+			case bool:
+				print(c)
 			case error:
 				if c == nil {
 					print("err=<nil>")

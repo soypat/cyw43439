@@ -332,9 +332,10 @@ f2ready:
 	if err != nil {
 		return err
 	}
+	reg8 |= (1 << 1) // SBSDIO_WCTRL_WAKE_TILL_HT_AVAIL
 	d.Write8(FuncBackplane, SDIO_WAKEUP_CTRL, reg8)
 	d.Write8(FuncBus, SDIOD_CCCR_BRCM_CARDCAP, SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC)
-	d.Write8(FuncBus, SDIO_CHIP_CLOCK_CSR, SBSDIO_FORCE_HT)
+	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_FORCE_HT)
 	reg8, err = d.Read8(FuncBackplane, SDIO_SLEEP_CSR)
 	if err != nil {
 		return err
@@ -343,7 +344,7 @@ f2ready:
 		reg8 |= SBSDIO_SLPCSR_KEEP_SDIO_ON
 		d.Write8(FuncBackplane, SDIO_SLEEP_CSR, reg8)
 	}
-	// Put interface back to sleep.
+	// Put SPI interface back to sleep.
 	d.Write8(FuncBackplane, SDIO_PULL_UP, 0xf)
 
 	// Clear pad pulls
