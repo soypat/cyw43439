@@ -461,10 +461,10 @@ func (d *Dev) busSleep(canSleep bool) (err error) {
 }
 
 // ksoSet enable KSO mode (keep SDIO on)
-func (d *Dev) ksoSet(enable bool) error {
-	Debug("ksoSet enable=", enable)
+func (d *Dev) ksoSet(value bool) error {
+	Debug("ksoSet enable=", value)
 	var writeVal uint8
-	if enable {
+	if value {
 		writeVal = SBSDIO_SLPCSR_KEEP_SDIO_ON
 	}
 	// These can fail and it's still ok.
@@ -474,7 +474,7 @@ func (d *Dev) ksoSet(enable bool) error {
 	// check for bit0 only, bit1(devon status) may not get cleared right away
 	var compareValue uint8
 	var bmask uint8 = SBSDIO_SLPCSR_KEEP_SDIO_ON
-	if enable {
+	if value {
 		// device WAKEUP through KSO:
 		// write bit 0 & read back until
 		// both bits 0(kso bit) & 1 (dev on status) are set
@@ -488,7 +488,7 @@ func (d *Dev) ksoSet(enable bool) error {
 		// in any case, read it back until it matches written value
 		// this can fail and it's still ok
 		readValue, err := d.Read8(FuncBackplane, SDIO_SLEEP_CSR)
-		if err != nil && readValue&bmask == compareValue && readValue != 0xff {
+		if err == nil && readValue&bmask == compareValue && readValue != 0xff {
 			return nil // success
 		}
 		time.Sleep(time.Millisecond)
@@ -524,6 +524,7 @@ func (d *Dev) clmLoad(clm []byte) error {
 		}
 		// Send data aligned to 8 bytes. We do end up sending scratch data
 		// at end of buffer that has not been set here.
+		Debug("clm data send off+len=", off+ln, "clmlen=", clmLen)
 		err := d.doIoctl(SDPCM_SET, wwd_STA_INTERFACE, wlc_SET_VAR, buf[:align32(20+uint32(ln), 8)])
 		if err != nil {
 			return err

@@ -95,6 +95,7 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 		ResponseDelayByteCount: 0,
 		enableStatusWord:       false,
 		currentBackplaneWindow: 0,
+		busIsUp:                false,
 	}
 }
 
@@ -208,7 +209,7 @@ chipup:
 		return err
 	}
 	Debug("backplane is ready")
-	//d.enableStatusWord = false
+
 	// TODO: For when we are ready to download firmware.
 	const (
 		SDIO_CHIP_CLOCK_CSR  = 0x1000e
@@ -238,7 +239,7 @@ alpset:
 	Debug("ALP Set")
 	// Clear request for ALP
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, 0)
-	if verbose_debug {
+	if verbose_debug && validateDownloads {
 		chipID, err := d.ReadBackplane(CHIPCOMMON_BASE_ADDRESS, 2)
 		if err != nil {
 			return err
@@ -343,11 +344,11 @@ f2ready:
 	d.Write8(FuncBackplane, SDIO_WAKEUP_CTRL, reg8)
 	d.Write8(FuncBus, SDIOD_CCCR_BRCM_CARDCAP, SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC)
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_FORCE_HT)
-	reg8, err = d.Read8(FuncBackplane, SDIO_SLEEP_CSR)
+	reg8, err = d.Read8(FuncBackplane, SDIO_SLEEP_CSR) // read 0x03000000, reference reads 0x03800000
 	if err != nil {
 		return err
 	}
-	if reg8&SBSDIO_SLPCSR_KEEP_SDIO_ON == 0 {
+	if reg8&SBSDIO_SLPCSR_KEEP_SDIO_ON == 0 { // Does not execute.
 		reg8 |= SBSDIO_SLPCSR_KEEP_SDIO_ON
 		d.Write8(FuncBackplane, SDIO_SLEEP_CSR, reg8)
 	}
@@ -359,7 +360,7 @@ f2ready:
 	if err != nil {
 		return err
 	}
-	_, err = d.Read8(FuncBackplane, SDIO_PULL_UP)
+	_, err = d.Read8(FuncBackplane, SDIO_PULL_UP) // read 0x00008001, ref reads 0x0000c001
 	if err != nil {
 		return err
 	}
@@ -369,6 +370,11 @@ f2ready:
 	if err != nil {
 		return err
 	}
+	if verbose_debug {
+		// This will be a non-zero value if save/restore is enabled
+		d.ReadBackplane(CHIPCOMMON_BASE_ADDRESS+0x508, 4)
+	}
+
 	Debug("prep bus wake")
 	err = d.busSleep(false)
 	if err != nil {
