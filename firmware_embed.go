@@ -10,6 +10,9 @@ import _ "embed"
 var (
 	// Of raw length 225240.
 	//go:embed wififw.bin
+	wifiFWs string
+	// Of raw length 225240.
+	//go:embed wififw.bin
 	wifiFW   []byte
 	wifibtFW [6164]byte
 	btFW     [232408]byte

@@ -238,6 +238,13 @@ alpset:
 	Debug("ALP Set")
 	// Clear request for ALP
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, 0)
+	if verbose_debug {
+		chipID, err := d.ReadBackplane(CHIPCOMMON_BASE_ADDRESS, 2)
+		if err != nil {
+			return err
+		}
+		Debug("chip ID:", chipID)
+	}
 
 	if cfg.Firmware == nil {
 		return nil
@@ -440,4 +447,9 @@ func (d *Dev) GPIOSetup() {
 	d.cs.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	machine.GPIO1.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	d.csHigh()
+}
+
+func flushprint() {
+	for machine.UART0.Bus.GetUARTFR_BUSY() != 0 {
+	}
 }

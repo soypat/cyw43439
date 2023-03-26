@@ -5,6 +5,8 @@
 *.so
 *.dylib
 
+cmd/cywanalyze/*.bin
+cmd/cywanalyze/*.txt
 # Test binary, built with `go test -c`
 *.test
 

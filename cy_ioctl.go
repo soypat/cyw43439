@@ -409,6 +409,9 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 			return err
 		}
 	}
+	if !validateDownloads {
+		return nil
+	}
 	Debug("download finished, validate data")
 	// Finished writing firmware... should be ready for use. We choose to validate it though.
 	for offset := 0; offset < rlen; offset += BLOCKSIZE {

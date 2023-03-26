@@ -3,15 +3,15 @@ package cyw43439
 import (
 	"bytes"
 	"errors"
-	"machine"
 	"net"
 	"strconv"
 	"time"
 )
 
 const (
-	verbose_debug = true
-	initReadback  = false
+	verbose_debug     = true
+	initReadback      = false
+	validateDownloads = false
 )
 
 type Config struct {
@@ -382,8 +382,7 @@ func Debug(a ...any) {
 		}
 		print("\n")
 	}
-	for machine.UART0.Bus.GetUARTFR_BUSY() != 0 {
-	}
+	flushprint()
 }
 
 func validateFirmware(src []byte) error {
