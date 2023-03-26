@@ -19,6 +19,8 @@ func main() {
 	enable := flag.String("enable", "digital_2.bin", "Binary Saleae digital data filename with SPI enable data.")
 	clk := flag.String("clk", "digital_1.bin", "Binary Saleae digital data filename with SPI clock data.")
 	output := flag.String("o", "commands.txt", "Output history of commands to file.")
+	flag.Parse()
+
 	start := time.Now()
 	if err := run(*sdio, *enable, *clk, *output); err != nil {
 		log.Fatal(err.Error())
