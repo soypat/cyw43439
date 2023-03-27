@@ -42,11 +42,11 @@ const (
 
 // SDIO_CHIP_CLOCK_CSR bits
 const (
-	SBSDIO_ALP_AVAIL           = (0x40)
-	SBSDIO_FORCE_HW_CLKREQ_OFF = (0x20)
-	SBSDIO_ALP_AVAIL_REQ       = (0x08)
-	SBSDIO_FORCE_ALP           = (0x01)
-	SBSDIO_FORCE_HT            = (0x02)
+	SBSDIO_ALP_AVAIL           = 0x40
+	SBSDIO_FORCE_HW_CLKREQ_OFF = 0x20
+	SBSDIO_ALP_AVAIL_REQ       = 0x08
+	SBSDIO_FORCE_ALP           = 0x01
+	SBSDIO_FORCE_HT            = 0x02
 )
 
 const (
@@ -79,9 +79,9 @@ const (
 	CONTROL_HEADER    = 0
 	ASYNCEVENT_HEADER = 1
 	DATA_HEADER       = 2
-	CDCF_IOC_ID_SHIFT = (16)
-	CDCF_IOC_ID_MASK  = (0xffff0000)
-	CDCF_IOC_IF_SHIFT = (12)
+	CDCF_IOC_ID_SHIFT = 16
+	CDCF_IOC_ID_MASK  = 0xffff0000
+	CDCF_IOC_IF_SHIFT = 12
 )
 
 const (
@@ -117,33 +117,33 @@ const (
 
 // SDIO bus specifics
 const (
-	SDIOD_CCCR_IOEN          = (0x02)
-	SDIOD_CCCR_IORDY         = (0x03)
-	SDIOD_CCCR_INTEN         = (0x04)
-	SDIOD_CCCR_BICTRL        = (0x07)
-	SDIOD_CCCR_BLKSIZE_0     = (0x10)
-	SDIOD_CCCR_SPEED_CONTROL = (0x13)
-	SDIOD_CCCR_BRCM_CARDCAP  = (0xf0)
-	SDIOD_SEP_INT_CTL        = (0xf2)
-	SDIOD_CCCR_F1BLKSIZE_0   = (0x110)
-	SDIOD_CCCR_F2BLKSIZE_0   = (0x210)
-	SDIOD_CCCR_F2BLKSIZE_1   = (0x211)
-	INTR_CTL_MASTER_EN       = (0x01)
-	INTR_CTL_FUNC1_EN        = (0x02)
-	INTR_CTL_FUNC2_EN        = (0x04)
-	SDIO_FUNC_ENABLE_1       = (0x02)
-	SDIO_FUNC_ENABLE_2       = (0x04)
-	SDIO_FUNC_READY_1        = (0x02)
-	SDIO_FUNC_READY_2        = (0x04)
-	SDIO_64B_BLOCK           = (64)
-	SDIO_PULL_UP             = (0x1000f)
+	SDIOD_CCCR_IOEN          = 0x02
+	SDIOD_CCCR_IORDY         = 0x03
+	SDIOD_CCCR_INTEN         = 0x04
+	SDIOD_CCCR_BICTRL        = 0x07
+	SDIOD_CCCR_BLKSIZE_0     = 0x10
+	SDIOD_CCCR_SPEED_CONTROL = 0x13
+	SDIOD_CCCR_BRCM_CARDCAP  = 0xf0
+	SDIOD_SEP_INT_CTL        = 0xf2
+	SDIOD_CCCR_F1BLKSIZE_0   = 0x110
+	SDIOD_CCCR_F2BLKSIZE_0   = 0x210
+	SDIOD_CCCR_F2BLKSIZE_1   = 0x211
+	INTR_CTL_MASTER_EN       = 0x01
+	INTR_CTL_FUNC1_EN        = 0x02
+	INTR_CTL_FUNC2_EN        = 0x04
+	SDIO_FUNC_ENABLE_1       = 0x02
+	SDIO_FUNC_ENABLE_2       = 0x04
+	SDIO_FUNC_READY_1        = 0x02
+	SDIO_FUNC_READY_2        = 0x04
+	SDIO_64B_BLOCK           = 64
+	SDIO_PULL_UP             = 0x1000f
 )
 
 // SDIOD_CCCR_BRCM_CARDCAP bits
 const (
-	SDIOD_CCCR_BRCM_CARDCAP_CMD14_SUPPORT = (0x02) // Supports CMD14
-	SDIOD_CCCR_BRCM_CARDCAP_CMD14_EXT     = (0x04) // CMD14 is allowed in FSM command state
-	SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC     = (0x08) // sdiod_aos does not decode any command
+	SDIOD_CCCR_BRCM_CARDCAP_CMD14_SUPPORT = 0x02 // Supports CMD14
+	SDIOD_CCCR_BRCM_CARDCAP_CMD14_EXT     = 0x04 // CMD14 is allowed in FSM command state
+	SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC     = 0x08 // sdiod_aos does not decode any command
 )
 
 // SDIOD_SEP_INT_CTL bits
@@ -180,3 +180,101 @@ const (
 const MAX_MULTICAST_REGISTERED_ADDRESS = 10
 
 // #define CYW_EAPOL_KEY_TIMEOUT (5000)
+
+// SPI Definitions.
+
+// Test register value
+const TEST_PATTERN = 0xFEEDBEAD
+
+// Register addresses
+const (
+	SPI_BUS_CONTROL               = 0x0000
+	SPI_RESPONSE_DELAY            = 0x0001
+	SPI_STATUS_ENABLE             = 0x0002
+	SPI_RESET_BP                  = 0x0003 // (corerev >= 1)
+	SPI_INTERRUPT_REGISTER        = 0x0004 // 16 bits - Interrupt status
+	SPI_INTERRUPT_ENABLE_REGISTER = 0x0006 // 16 bits - Interrupt mask
+	SPI_STATUS_REGISTER           = 0x0008 // 32 bits
+	SPI_FUNCTION1_INFO            = 0x000C // 16 bits
+	SPI_FUNCTION2_INFO            = 0x000E // 16 bits
+	SPI_FUNCTION3_INFO            = 0x0010 // 16 bits
+	SPI_READ_TEST_REGISTER        = 0x0014 // 32 bits
+	SPI_RESP_DELAY_F0             = 0x001c // 8 bits (corerev >= 3)
+	SPI_RESP_DELAY_F1             = 0x001d // 8 bits (corerev >= 3)
+	SPI_RESP_DELAY_F2             = 0x001e // 8 bits (corerev >= 3)
+	SPI_RESP_DELAY_F3             = 0x001f // 8 bits (corerev >= 3)
+)
+
+// SPI_FUNCTIONX_BITS
+const (
+	SPI_FUNCTIONX_ENABLED = 1 << 0
+	SPI_FUNCTIONX_READY   = 1 << 1
+)
+
+// SPI_BUS_CONTROL Bits
+const (
+	WORD_LENGTH_32          = 0x01 // 0/1 16/32 bit word length
+	ENDIAN_BIG              = 0x02 // 0/1 Little/Big Endian
+	CLOCK_PHASE             = 0x04 // 0/1 clock phase delay
+	CLOCK_POLARITY          = 0x08 // 0/1 Idle state clock polarity is low/high
+	HIGH_SPEED_MODE         = 0x10 // 1/0 High Speed mode / Normal mode
+	INTERRUPT_POLARITY_HIGH = 0x20 // 1/0 Interrupt active polarity is high/low
+	WAKE_UP                 = 0x80 // 0/1 Wake-up command from Host to WLAN
+)
+
+// SPI_STATUS_ENABLE bits
+const (
+	STATUS_ENABLE    = 0x01 // 1/0 Status sent/not sent to host after read/write
+	INTR_WITH_STATUS = 0x02 // 0/1 Do-not / do-interrupt if status is sent
+	RESP_DELAY_ALL   = 0x04 // Applicability of resp delay to F1 or all func's read
+	DWORD_PKT_LEN_EN = 0x08 // Packet len denoted in dwords instead of bytes
+	CMD_ERR_CHK_EN   = 0x20 // Command error check enable
+	DATA_ERR_CHK_EN  = 0x40 // Data error check enable
+)
+
+// SPI_INTERRUPT_REGISTER and SPI_INTERRUPT_ENABLE_REGISTER bits
+const (
+	DATA_UNAVAILABLE        = 0x0001 // Requested data not available; Clear by writing a "1"
+	F2_F3_FIFO_RD_UNDERFLOW = 0x0002
+	F2_F3_FIFO_WR_OVERFLOW  = 0x0004
+	COMMAND_ERROR           = 0x0008 // Cleared by writing 1
+	DATA_ERROR              = 0x0010 // Cleared by writing 1
+	F2_PACKET_AVAILABLE     = 0x0020
+	F3_PACKET_AVAILABLE     = 0x0040
+	F1_OVERFLOW             = 0x0080 // Due to last write. Bkplane has pending write requests
+	GSPI_PACKET_AVAILABLE   = 0x0100
+	MISC_INTR1              = 0x0200
+	MISC_INTR2              = 0x0400
+	MISC_INTR3              = 0x0800
+	MISC_INTR4              = 0x1000
+	F1_INTR                 = 0x2000
+	F2_INTR                 = 0x4000
+	F3_INTR                 = 0x8000
+)
+
+const BUS_OVERFLOW_UNDERFLOW = F1_OVERFLOW | F2_F3_FIFO_RD_UNDERFLOW | F2_F3_FIFO_WR_OVERFLOW
+
+// SPI_STATUS_REGISTER bits
+const (
+	STATUS_DATA_NOT_AVAILABLE = 0x00000001
+	STATUS_UNDERFLOW          = 0x00000002
+	STATUS_OVERFLOW           = 0x00000004
+	STATUS_F2_INTR            = 0x00000008
+	STATUS_F3_INTR            = 0x00000010
+	STATUS_F2_RX_READY        = 0x00000020
+	STATUS_F3_RX_READY        = 0x00000040
+	STATUS_HOST_CMD_DATA_ERR  = 0x00000080
+	STATUS_F2_PKT_AVAILABLE   = 0x00000100
+	STATUS_F2_PKT_LEN_MASK    = 0x000FFE00
+	STATUS_F2_PKT_LEN_SHIFT   = 9
+	STATUS_F3_PKT_AVAILABLE   = 0x00100000
+	STATUS_F3_PKT_LEN_MASK    = 0xFFE00000
+	STATUS_F3_PKT_LEN_SHIFT   = 21
+)
+
+const (
+	BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE = 64 // Max packet size on F1
+	BUS_SPI_BACKPLANE_READ_PADD_SIZE    = 4
+
+	SPI_FRAME_CONTROL = 0x1000D
+)

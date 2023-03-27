@@ -6,6 +6,8 @@ import (
 	"net"
 	"strconv"
 	"time"
+
+	"github.com/soypat/cy43439/whd"
 )
 
 const (
@@ -211,7 +213,7 @@ const (
 
 // SDIO bus specifics
 const (
-	SDIOD_CCCR_IOEN          = 0x02
+	SDIOD_CCCR_IOEN          = whd.SDIOD_CCCR_IOEN
 	SDIOD_CCCR_IORDY         = 0x03
 	SDIOD_CCCR_INTEN         = 0x04
 	SDIOD_CCCR_BICTRL        = 0x07

@@ -67,7 +67,7 @@ func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error
 	buf[length] = 0 // Null terminate the string
 	length++
 	binary.BigEndian.PutUint32(buf[length:], val)
-	return d.doIoctl(SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+4])
+	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+4])
 }
 
 func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
@@ -77,7 +77,7 @@ func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint3
 	length++
 	binary.BigEndian.PutUint32(buf[length:], val0)
 	binary.BigEndian.PutUint32(buf[length+4:], val1)
-	return d.doIoctl(SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+8])
+	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+8])
 }
 
 func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) error {
@@ -89,7 +89,7 @@ func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) erro
 	iobuf[length] = 0 // Null terminate the string
 	length++
 	length += copy(iobuf[length:], src)
-	return d.doIoctl(SDPCM_SET, iface, whd.WLC_SET_VAR, iobuf[:length])
+	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, iobuf[:length])
 }
 
 func (d *Dev) DoIoctl32(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
@@ -121,7 +121,7 @@ func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComman
 			return err
 		}
 		switch header {
-		case sdpcmCTLHEADER:
+		case whd.CONTROL_HEADER:
 
 		}
 		time.Sleep(time.Millisecond)
@@ -586,7 +586,7 @@ func (d *Dev) clmLoad(clm []byte) error {
 		// Send data aligned to 8 bytes. We do end up sending scratch data
 		// at end of buffer that has not been set here.
 		Debug("clm data send off+len=", off+ln, "clmlen=", clmLen)
-		err := d.doIoctl(SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:align32(20+uint32(ln), 8)])
+		err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:align32(20+uint32(ln), 8)])
 		if err != nil {
 			return err
 		}
@@ -594,7 +594,7 @@ func (d *Dev) clmLoad(clm []byte) error {
 	// CLM data send done.
 	const clmStatString = "clmload_status\x00\x00\x00\x00\x00"
 	copy(buf[:len(clmStatString)], clmStatString)
-	err := d.doIoctl(SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(clmStatString)])
+	err := d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(clmStatString)])
 	if err != nil {
 		return err
 	}

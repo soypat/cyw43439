@@ -175,6 +175,7 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 }
 
 func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
+	Debug("read bytes addr=", addr, "len=", len(src))
 	const maxReadPacket = 2040
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3
