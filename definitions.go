@@ -158,6 +158,9 @@ func (s Status) F3RxReady() bool { return s&0x40 != 0 }
 // HostCommandDataError TODO document.
 func (s Status) HostCommandDataError() bool { return s&0x80 != 0 }
 
+// GSPIPacketAvailable notifies there is a packet available over
+func (s Status) GSPIPacketAvailable() bool { return s&0x0100 != 0 }
+
 // F2PacketAvailable returns true if Packet is available/ready in F2 TX FIFO.
 func (s Status) F2PacketAvailable() bool { return s&(1<<8) != 0 }
 
@@ -174,6 +177,16 @@ func (s Status) F2PacketLength() uint16 {
 func (s Status) F3PacketLength() uint16 {
 	const mask = 1<<11 - 1
 	return uint16(s>>21) & mask
+}
+
+type Interrupts uint16
+
+func (Int Interrupts) IsBusOverflowedOrUnderflowed() bool {
+	return Int&(F2_F3_FIFO_RD_UNDERFLOW|F2_F3_FIFO_WR_OVERFLOW|F1_OVERFLOW) != 0
+}
+
+func (Int Interrupts) IsF2Available() bool {
+	return Int&(F2_PACKET_AVAILABLE) != 0
 }
 
 // Interrupt registers on SPI.

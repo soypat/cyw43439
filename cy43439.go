@@ -29,6 +29,7 @@ import (
 	"machine"
 	"time"
 
+	"github.com/soypat/cy43439/whd"
 	"tinygo.org/x/drivers"
 )
 
@@ -74,11 +75,13 @@ type Dev struct {
 	lastBackplaneWindow    uint32
 	ResponseDelayByteCount uint8
 	enableStatusWord       bool
+	hadSuccesfulPacket     bool
 	// Max packet size is 2048 bytes.
 	sdpcmTxSequence       uint8
 	sdpcmLastBusCredit    uint8
 	wlanFlowCtl           uint8
 	sdpcmRequestedIoctlID uint16
+	lastInt               uint16
 	buf                   [2048]byte
 }
 
@@ -388,11 +391,11 @@ f2ready:
 		return err
 	}
 	Debug("final IOVar writes")
-	err = d.WriteIOVar("bus:txglom", wwd_STA_INTERFACE, 0)
+	err = d.WriteIOVar("bus:txglom", whd.WWD_STA_INTERFACE, 0)
 	if err != nil {
 		return err
 	}
-	err = d.WriteIOVar("apsta", wwd_STA_INTERFACE, 1)
+	err = d.WriteIOVar("apsta", whd.WWD_STA_INTERFACE, 1)
 	if err != nil {
 		return err
 	}
@@ -401,7 +404,7 @@ f2ready:
 		// Do not check if MAC address is set in OTP.
 		return nil
 	}
-	err = d.WriteIOVarN("cur_etheraddr", wwd_STA_INTERFACE, cfg.MAC)
+	err = d.WriteIOVarN("cur_etheraddr", whd.WWD_STA_INTERFACE, cfg.MAC)
 	return err
 }
 
@@ -416,6 +419,14 @@ func (d *Dev) ClearStatus() (Status, error) {
 	d.Write32(FuncBus, AddrStatus, 0)
 	Debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
+}
+
+func (d *Dev) GetInterrupts() (Interrupts, error) {
+	reg, err := d.Read16(FuncBus, AddrInterrupt)
+	if err == nil {
+		d.lastInt = reg
+	}
+	return Interrupts(reg), err
 }
 
 func (d *Dev) ClearInterrupts() error {

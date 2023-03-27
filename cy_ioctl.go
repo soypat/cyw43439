@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 	"unsafe"
+
+	"github.com/soypat/cy43439/whd"
 )
 
 func (d *Dev) LED() Pin {
@@ -40,90 +42,10 @@ const (
 	sdpcmCTLHEADER      = 0
 	sdpcmASYNCEVTHEADER = 1
 	sdpcmDATAHEADER     = 2
+
+	sdpcmHeaderSize = 12 //unsafe.Sizeof(sdpcmHeader{})
+	ioctlHeaderSize = 16 // unsafe.Sizeof(ioctlHeader{})
 )
-
-type sdpcmCmd uint32
-
-// Wifi command for sdpcm send common.
-const (
-	wlc_UP            sdpcmCmd = 2
-	wlc_SET_INFRA     sdpcmCmd = 20
-	wlc_SET_AUTH      sdpcmCmd = 22
-	wlc_GET_SSID      sdpcmCmd = 25
-	wlc_SET_SSID      sdpcmCmd = 26
-	wlc_SET_CHANNEL   sdpcmCmd = 30
-	wlc_DISASSOC      sdpcmCmd = 52
-	wlc_GET_ANTDIV    sdpcmCmd = 63
-	wlc_SET_ANTDIV    sdpcmCmd = 64
-	wlc_SET_DTIMPRD   sdpcmCmd = 78
-	wlc_SET_PM        sdpcmCmd = 86
-	wlc_SET_GMODE     sdpcmCmd = 110
-	wlc_SET_WSEC      sdpcmCmd = 134
-	wlc_SET_BAND      sdpcmCmd = 142
-	wlc_GET_ASSOCLIST sdpcmCmd = 159
-	wlc_SET_WPA_AUTH  sdpcmCmd = 165
-	wlc_SET_VAR       sdpcmCmd = 263
-	wlc_GET_VAR       sdpcmCmd = 262
-	wlc_SET_WSEC_PMK  sdpcmCmd = 268
-)
-
-type ioctlInterface uint8
-
-// Interface.
-const (
-	wwd_STA_INTERFACE ioctlInterface = 0
-	wwd_AP_INTERFACE  ioctlInterface = 1
-	wwd_P2P_INTERFACE ioctlInterface = 2
-)
-
-type sdpcmHeader struct {
-	Size            uint16
-	SizeCom         uint16
-	Seq             uint8
-	ChanAndFlags    uint8
-	NextLength      uint8
-	HeaderLength    uint8
-	WirelessFlowCtl uint8
-	BusDataCredit   uint8
-	Reserved        [2]uint8
-}
-
-type ioctlHeader struct {
-	Cmd    sdpcmCmd
-	Len    uint32
-	Flags  uint32
-	Status uint32
-}
-
-// PaddedSize rounds size up to multiple of 64.
-func (s *sdpcmHeader) PaddedSize() uint32 {
-	a := uint32(s.Size)
-	return (a + 63) &^ 63
-}
-
-func (s *sdpcmHeader) ArrayPtr() *[12]byte {
-	const mustBe12 = unsafe.Sizeof(sdpcmHeader{}) // Will fail to compile when size changes.
-	return (*[mustBe12]byte)(unsafe.Pointer(s))
-}
-
-// Put puts all 12 bytes of sdpcmHeader in dst. Panics if dst is shorter than 12 bytes in length.
-func (s *sdpcmHeader) Put(dst []byte) {
-	_ = dst[11]
-	ptr := s.ArrayPtr()[:]
-	copy(dst, ptr)
-}
-
-func (io *ioctlHeader) ArrayPtr() *[16]byte {
-	const mustBe16 = unsafe.Sizeof(ioctlHeader{}) // Will fail to compile when size changes.
-	return (*[mustBe16]byte)(unsafe.Pointer(io))
-}
-
-// Put puts all 16 bytes of ioctlHeader in dst. Panics if dst is shorter than 16 bytes in length.
-func (io *ioctlHeader) Put(dst []byte) {
-	_ = dst[15]
-	ptr := io.ArrayPtr()[:]
-	copy(dst, ptr)
-}
 
 func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	if wlGPIO >= 3 {
@@ -131,34 +53,34 @@ func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	}
 	val := uint32(1 << wlGPIO)
 	if value {
-		err = d.WriteIOVar2("gpioout", wwd_STA_INTERFACE, val, val)
+		err = d.WriteIOVar2("gpioout", whd.WWD_STA_INTERFACE, val, val)
 	} else {
-		err = d.WriteIOVar2("gpioout", wwd_STA_INTERFACE, val, 0)
+		err = d.WriteIOVar2("gpioout", whd.WWD_STA_INTERFACE, val, 0)
 	}
 	return err
 }
 
-func (d *Dev) WriteIOVar(VAR string, iface ioctlInterface, val uint32) error {
+func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error {
 	Debug("WriteIOVar var=", VAR, "ioctl=", iface, "val=", val)
 	buf := d.buf[1024:]
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
 	length++
 	binary.BigEndian.PutUint32(buf[length:], val)
-	return d.doIoctl(SDPCM_SET, iface, wlc_SET_VAR, buf[:length+4])
+	return d.doIoctl(SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+4])
 }
 
-func (d *Dev) WriteIOVar2(VAR string, iface ioctlInterface, val0, val1 uint32) error {
+func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
 	buf := d.buf[1024:]
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
 	length++
 	binary.BigEndian.PutUint32(buf[length:], val0)
 	binary.BigEndian.PutUint32(buf[length+4:], val1)
-	return d.doIoctl(SDPCM_SET, iface, wlc_SET_VAR, buf[:length+8])
+	return d.doIoctl(SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+8])
 }
 
-func (d *Dev) WriteIOVarN(VAR string, iface ioctlInterface, src []byte) error {
+func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) error {
 	iobuf := d.buf[1024:]
 	if len(VAR)+len(src)+1 > len(iobuf) {
 		return errors.New("buffer too short for IOVarN call")
@@ -167,17 +89,17 @@ func (d *Dev) WriteIOVarN(VAR string, iface ioctlInterface, src []byte) error {
 	iobuf[length] = 0 // Null terminate the string
 	length++
 	length += copy(iobuf[length:], src)
-	return d.doIoctl(SDPCM_SET, iface, wlc_SET_VAR, iobuf[:length])
+	return d.doIoctl(SDPCM_SET, iface, whd.WLC_SET_VAR, iobuf[:length])
 }
 
-func (d *Dev) DoIoctl32(kind uint32, iface ioctlInterface, cmd sdpcmCmd, val uint32) error {
+func (d *Dev) DoIoctl32(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
 	println("DoIoctl32")
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], val)
 	return d.doIoctl(kind, iface, cmd, buf[:])
 }
 
-func (d *Dev) ioctl(cmd sdpcmCmd, iface ioctlInterface, w []byte) error {
+func (d *Dev) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
 	kind := uint32(0)
 	if cmd&1 != 0 {
 		kind = 2
@@ -185,51 +107,190 @@ func (d *Dev) ioctl(cmd sdpcmCmd, iface ioctlInterface, w []byte) error {
 	return d.doIoctl(kind, iface, cmd>>1, w)
 }
 
-func (d *Dev) doIoctl(kind uint32, iface ioctlInterface, cmd sdpcmCmd, w []byte) error {
+func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
 	// TODO do we have to add all that polling?
-	return d.sendIoctl(kind, iface, cmd, w)
+	err := d.sendIoctl(kind, iface, cmd, w)
+	if err != nil {
+		return err
+	}
+	start := time.Now()
+	const ioctlTimeout = 50 * time.Millisecond
+	for time.Since(start) < ioctlTimeout {
+		header, err := d.sdpcmPoll(d.buf[:])
+		if err != nil {
+			return err
+		}
+		switch header {
+		case sdpcmCTLHEADER:
+
+		}
+		time.Sleep(time.Millisecond)
+	}
+	Debug("todo")
+	return nil
+}
+
+func (d *Dev) sdpcmPoll(buf []byte) (headerType uint32, err error) {
+	noPacketSuccess := !d.hadSuccesfulPacket
+	if noPacketSuccess && !d.wlRegOn.Get() {
+		return 0, errors.New("sdpcmPoll yield fault")
+	}
+	err = d.busSleep(false)
+	if err != nil {
+		return 0, err
+	}
+	if noPacketSuccess {
+		lastInt := d.lastInt
+		stat, err := d.GetInterrupts()
+		if err != nil || lastInt != uint16(stat) && stat.IsBusOverflowedOrUnderflowed() {
+			Debug("bus error condition detected =", uint16(stat), err)
+		}
+		if stat != 0 {
+			d.Write16(FuncBus, AddrInterrupt, uint16(stat))
+		}
+		if !stat.IsF2Available() {
+			return 0, errors.New("sdpcmPoll: F2 unavailable")
+		}
+	}
+	const (
+		payloadMTU         = 1500
+		linkHeader         = 30
+		ethernetSize       = 14
+		linkMTU            = payloadMTU + linkHeader + ethernetSize
+		gspiPacketOverhead = 8
+	)
+	var status Status = 0xFFFFFFFF
+	for i := 0; i < 1000 && status == 0xFFFFFFFF; i++ {
+		status, err = d.GetStatus()
+	}
+	if status == 0xFFFFFFFF || err != nil {
+		return 0, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
+	}
+	if !status.F2PacketAvailable() {
+		Debug("no packet")
+		d.hadSuccesfulPacket = false
+		return 0, errors.New("sdpcmPoll: no packet")
+	}
+	bytesPending := status.F2PacketLength()
+	if bytesPending == 0 || bytesPending > linkMTU-gspiPacketOverhead || status.IsUnderflow() {
+		Debug("SPI invalid bytes pending", bytesPending)
+		const SPI_FRAME_CONTROL = 0x1000D
+		d.Write8(FuncBackplane, SPI_FRAME_CONTROL, 1)
+		d.hadSuccesfulPacket = false
+		return 0, errors.New("sdpcmPoll: invalid bytes pending")
+	}
+	err = d.ReadBytes(FuncWLAN, 0, d.buf[:bytesPending])
+	if err != nil {
+		return 0, err
+	}
+	hdr0 := binary.LittleEndian.Uint16(d.buf[:])
+	hdr1 := binary.LittleEndian.Uint16(d.buf[2:])
+	if hdr0 == 0 && hdr1 == 0 {
+		// no packets.
+		Debug("no packet:zero size header")
+		d.hadSuccesfulPacket = false
+		return 0, errors.New("sdpcmPoll:zero header")
+	}
+	d.hadSuccesfulPacket = true
+	if hdr0^hdr1 != 0xffff {
+		Debug("header xor mismatch h[0]=", hdr0, "h[1]=", hdr1)
+		return 0, errors.New("sdpcmPoll:header mismatch")
+	}
+
+	return d.sdpcmProcessRxPacket(buf)
+}
+
+var (
+	Err2InvalidPacket             = errors.New("invalid packet")
+	Err3PacketTooSmall            = errors.New("packet too small")
+	Err4IgnoreControlPacket       = errors.New("ignore flow ctl packet")
+	Err5IgnoreSmallControlPacket  = errors.New("ignore too small flow ctl packet")
+	Err6IgnoreWrongIDPacket       = errors.New("ignore packet with wrong id")
+	Err7IgnoreSmallDataPacket     = errors.New("ignore too small data packet")
+	Err8IgnoreTooSmallAsyncPacket = errors.New("ignore too small async packet")
+	Err9WrongPayloadType          = errors.New("wrong payload type")
+	Err10IncorrectOUI             = errors.New("incorrect oui")
+	Err11IncorrectOUI             = errors.New("unknown header")
+)
+
+func (d *Dev) sdpcmProcessRxPacket(buf []byte) (uint32, error) {
+	hdr := whd.DecodeSDPCMHeader(buf)
+	switch {
+	case hdr.Size != ^hdr.SizeCom&0xffff:
+		return 0, Err2InvalidPacket
+	case hdr.Size < sdpcmHeaderSize:
+		return 0, Err3PacketTooSmall
+	}
+	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
+		Debug("WLAN: changed flow control", d.wlanFlowCtl, hdr.WirelessFlowCtl)
+	}
+	d.wlanFlowCtl = hdr.WirelessFlowCtl
+
+	if hdr.ChanAndFlags&0xf < 3 {
+		// A valid header, check the bus data credit.
+		credit := hdr.BusDataCredit - d.sdpcmLastBusCredit
+		if credit <= 20 {
+			d.sdpcmLastBusCredit = hdr.BusDataCredit
+		}
+	}
+	if hdr.Size == whd.SDPCM_HEADER_LEN {
+		return 0, Err4IgnoreControlPacket // Flow ctl packet with no data.
+	}
+
+	switch hdr.ChanAndFlags & 0xf {
+	case whd.CONTROL_HEADER:
+		if hdr.Size < ioctlHeaderSize+sdpcmHeaderSize {
+			return 0, Err5IgnoreSmallControlPacket
+		}
+		ioctlHeader := whd.DecodeIoctlHeader(buf[hdr.HeaderLength:])
+		id := ioctlHeader.Flags & whd.DATA_HEADER
+		return id, nil
+	}
+	return 0, nil
 }
 
 // sendIoctl is cyw43_send_ioctl in pico-sdk (actually contained in cy43-driver)
-func (d *Dev) sendIoctl(kind uint32, iface ioctlInterface, cmd sdpcmCmd, w []byte) error {
+func (d *Dev) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
 	Debug("sendIoctl")
 	length := uint32(len(w))
-	const sdpcmSize = uint32(unsafe.Sizeof(sdpcmHeader{}))
-	const ioctlSize = uint32(unsafe.Sizeof(ioctlHeader{}))
-	if uint32(len(d.buf)) < sdpcmSize+ioctlSize+length {
+	if uint32(len(d.buf)) < whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length {
 		return errors.New("ioctl buffer too large for sending")
 	}
 	d.sdpcmRequestedIoctlID++
 	id := uint32(d.sdpcmRequestedIoctlID)
 	flags := (id<<16)&0xffff_0000 | uint32(kind) | uint32(iface)<<12 // look for CDCF_IOC* identifiers in pico-sdk
-	header := ioctlHeader{
+	header := whd.IoctlHeader{
 		Cmd:   cmd,
 		Len:   length & 0xffff,
 		Flags: flags,
 	}
-	header.Put(d.buf[sdpcmSize:])
-	copy(d.buf[sdpcmSize+ioctlSize:], w)
-	return d.sendSDPCMCommon(sdpcmCTLHEADER, cmd, d.buf[:sdpcmSize+ioctlSize+length])
+	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
+	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
+	return d.sendSDPCMCommon(sdpcmCTLHEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
 }
 
 // sendSDPCMCommon is cyw43_sdpcm_send_common in pico-sdk (actually contained in cy43-driver)
-func (d *Dev) sendSDPCMCommon(kind uint32, cmd sdpcmCmd, w []byte) error {
+func (d *Dev) sendSDPCMCommon(kind uint32, w []byte) error {
 	// TODO where is cmd used here????
 	Debug("sendSDPCMCommon")
 	if kind != sdpcmCTLHEADER && kind != sdpcmDATAHEADER {
 		return errors.New("unexpected SDPCM kind")
 	}
-	headerLength := uint8(unsafe.Sizeof(sdpcmHeader{}))
-	if kind == 2 {
+	err := d.busSleep(false)
+	if err != nil {
+		return err
+	}
+	headerLength := uint8(whd.SDPCM_HEADER_LEN)
+	if kind == sdpcmDATAHEADER {
 		headerLength += 2
 	}
-	size := uint16(len(w)) + uint16(headerLength)
-	paddedSize := (size + 63) &^ 63
+	size := uint16(len(w))        //+ uint16(hdlen)
+	paddedSize := (size + 3) &^ 3 // If not using gSPI then this should be padded to 64bytes
 	if uint16(cap(w)) < paddedSize {
 		return errors.New("buffer too small to be SDPCM padded")
 	}
-	w = w[:paddedSize]
-	header := sdpcmHeader{
+	w = w[0:paddedSize]
+	header := whd.SDPCMHeader{
 		Size:         size,
 		SizeCom:      ^size & 0xffff,
 		Seq:          d.sdpcmTxSequence,
@@ -498,9 +559,8 @@ func (d *Dev) ksoSet(value bool) error {
 }
 
 func (d *Dev) clmLoad(clm []byte) error {
-	const sdpcmHeaderLen = unsafe.Sizeof(sdpcmHeader{})
 	const CLM_CHUNK_LEN = 1024
-	buf := d.buf[sdpcmHeaderLen+16:]
+	buf := d.buf[whd.SDPCM_HEADER_LEN+16:]
 	clmLen := uint16(len(clm))
 	const clmLoadString = "clmload\x00"
 	for off := uint16(0); off < clmLen; off += CLM_CHUNK_LEN {
@@ -514,10 +574,11 @@ func (d *Dev) clmLoad(clm []byte) error {
 			ln = clmLen - off
 		}
 		copy(buf[:len(clmLoadString)], clmLoadString)
-		binary.BigEndian.PutUint16(buf[8:], flag)
-		binary.BigEndian.PutUint16(buf[10:], 2)
-		binary.BigEndian.PutUint32(buf[12:], uint32(ln))
-		binary.BigEndian.PutUint32(buf[16:], 0)
+		// endian
+		binary.LittleEndian.PutUint16(buf[8:], flag)
+		binary.LittleEndian.PutUint16(buf[10:], 2)
+		binary.LittleEndian.PutUint32(buf[12:], uint32(ln))
+		binary.LittleEndian.PutUint32(buf[16:], 0)
 		n := copy(buf[20:], clm[off:off+ln])
 		if uint16(n) != ln {
 			return errors.New("CLM download failed due to small buffer")
@@ -525,7 +586,7 @@ func (d *Dev) clmLoad(clm []byte) error {
 		// Send data aligned to 8 bytes. We do end up sending scratch data
 		// at end of buffer that has not been set here.
 		Debug("clm data send off+len=", off+ln, "clmlen=", clmLen)
-		err := d.doIoctl(SDPCM_SET, wwd_STA_INTERFACE, wlc_SET_VAR, buf[:align32(20+uint32(ln), 8)])
+		err := d.doIoctl(SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:align32(20+uint32(ln), 8)])
 		if err != nil {
 			return err
 		}
@@ -533,7 +594,7 @@ func (d *Dev) clmLoad(clm []byte) error {
 	// CLM data send done.
 	const clmStatString = "clmload_status\x00\x00\x00\x00\x00"
 	copy(buf[:len(clmStatString)], clmStatString)
-	err := d.doIoctl(SDPCM_GET, wwd_STA_INTERFACE, wlc_GET_VAR, buf[:len(clmStatString)])
+	err := d.doIoctl(SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(clmStatString)])
 	if err != nil {
 		return err
 	}
@@ -549,11 +610,11 @@ func (d *Dev) putMAC(dst []byte) error {
 	if len(dst) < 6 {
 		panic("dst too short to put MAC")
 	}
-	const sdpcmHeaderLen = unsafe.Sizeof(sdpcmHeader{})
+	const sdpcmHeaderLen = unsafe.Sizeof(whd.SDPCMHeader{})
 	buf := d.buf[sdpcmHeaderLen+16:]
 	const varMAC = "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00"
 	copy(buf[:len(varMAC)], varMAC)
-	err := d.doIoctl(SDPCM_GET, wwd_STA_INTERFACE, wlc_GET_VAR, buf[:len(varMAC)])
+	err := d.doIoctl(SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(varMAC)])
 	if err == nil {
 		copy(dst[:6], buf)
 	}
