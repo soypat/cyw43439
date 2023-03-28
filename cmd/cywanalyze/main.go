@@ -122,11 +122,11 @@ func process(txs []analyzers.TxSPI) (cytxs []cywtx) {
 		}
 		cmd, data := CommandFromBytes(tx.SDO)
 		for j := i + 1; j < len(txs); j++ {
-			accumulativeResults++
 			nextcmd, nextdata := CommandFromBytes(txs[j].SDO)
 			if nextcmd != cmd || !bytes.Equal(data, nextdata) {
 				break
 			}
+			accumulativeResults++
 			i = j
 		}
 		cytxs = append(cytxs, cywtx{
@@ -134,7 +134,7 @@ func process(txs []analyzers.TxSPI) (cytxs []cywtx) {
 			Cmd:  cmd,
 			Data: data,
 		})
-		accumulativeResults = 0
+		accumulativeResults = 1
 	}
 	return cytxs
 }

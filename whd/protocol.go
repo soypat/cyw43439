@@ -50,6 +50,10 @@ type IoctlHeader struct {
 	Status uint32
 }
 
+func (io *IoctlHeader) ID() uint16 {
+	return uint16((io.Flags & CDCF_IOC_ID_MASK) >> CDCF_IOC_ID_SHIFT)
+}
+
 func DecodeIoctlHeader(b []byte) (hdr IoctlHeader) {
 	_ = b[IOCTL_HEADER_LEN-1]
 	hdr.Cmd = SDPCMCommand(binary.LittleEndian.Uint32(b))
@@ -69,4 +73,79 @@ func (io *IoctlHeader) Put(dst []byte) {
 	_ = dst[15]
 	ptr := io.arrayPtr()[:]
 	copy(dst, ptr)
+}
+
+type BDCHeader struct {
+	Flags      uint8
+	Priority   uint8
+	Flags2     uint8
+	DataOffset uint8
+}
+
+func (bdc *BDCHeader) arrayptr() *[4]byte {
+	return (*[4]byte)(unsafe.Pointer(bdc))
+}
+
+func (bdc *BDCHeader) ptr() *uint32 {
+	return (*uint32)(unsafe.Pointer(bdc))
+}
+
+func (bdc *BDCHeader) Put(b []byte) {
+	_ = b[3]
+	// ptr := bdc.uint32ptr()
+	copy(b, bdc.arrayptr()[:])
+}
+
+func DecodeBDCHeader(b []byte) (hdr BDCHeader) {
+	_ = b[3]
+	copy(hdr.arrayptr()[:], b)
+	return hdr
+}
+
+type AsyncEvent struct {
+	_         uint16
+	Flags     uint16
+	EventType uint32
+	Status    uint32
+	Reason    uint32
+	_         [30]byte
+	Interface uint8
+	u         EventScanResult
+}
+
+// EventScanResult holds wifi scan results.
+type EventScanResult struct {
+	_ [5]uint32
+	// Access point MAC address.
+	BSSID [8]uint8
+	_     [2]uint16
+	// Length of access point name.
+	SSIDLength uint8
+	// WLAN access point name.
+	SSID    [32]byte
+	_       [5]uint32
+	Channel uint16
+	_       uint16
+	// Wifi auth mode. See CYW43_AUTH_*.
+	AuthMode uint8
+	// Signal strength.
+	RSSI int16
+}
+
+// ScanOptions are wifi scan options.
+type ScanOptions struct {
+	Version     uint32
+	Action      uint16
+	_           uint16
+	SSIDLength  uint32
+	SSID        [32]byte
+	BSSID       [6]byte
+	BSSType     int8
+	ScanType    int8
+	NProbes     int32
+	ActiveTime  int32
+	PassiveTime int32
+	HomeTime    int32
+	ChannelNum  int32
+	ChannelList [1]uint16
 }

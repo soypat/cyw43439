@@ -434,3 +434,21 @@ func validateFirmware(src []byte) error {
 	}
 	return nil
 }
+
+type _integer = interface {
+	~int | ~uint16 | ~uint32 | ~uint64 | ~uint8
+}
+
+func max[T _integer](a, b T) T {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min[T _integer](a, b T) T {
+	if a < b {
+		return a
+	}
+	return b
+}
