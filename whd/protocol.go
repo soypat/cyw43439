@@ -18,6 +18,8 @@ type SDPCMHeader struct {
 	Reserved        [2]uint8
 }
 
+func (s SDPCMHeader) Type() SDPCMHeaderType { return SDPCMHeaderType(s.ChanAndFlags & 0xf) }
+
 func DecodeSDPCMHeader(b []byte) (hdr SDPCMHeader) {
 	_ = b[SDPCM_HEADER_LEN-1]
 	hdr.Size = binary.LittleEndian.Uint16(b)

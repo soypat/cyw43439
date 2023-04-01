@@ -114,12 +114,13 @@ func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComman
 	}
 	start := time.Now()
 	const ioctlTimeout = 50 * time.Millisecond
-	for time.Since(start) < ioctlTimeout {
+	const maxRetries = 3
+	for retries := 0; time.Since(start) < ioctlTimeout || retries < maxRetries; retries++ {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		Debug("doIoctl:sdpcmPoll conclude poff=", payloadOffset, "plen=", plen, "header=", header, err)
+		Debug("doIoctl:sdpcmPoll conclude payloadoffset=", int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
 		// The "wrong payload type" appears to happen during startup. See sdpcmProcessRxPacket
 		if err != nil && !errors.Is(err, Err9WrongPayloadType) {
-			return err
+			continue
 		}
 		payload := d.buf[payloadOffset : payloadOffset+plen]
 		switch header {
@@ -147,7 +148,7 @@ var errDoioctlTimeout = errors.New("doIoctl time out waiting for data")
 
 // sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
 // payload, length of the payload and the header type.
-func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header uint8, err error) {
+func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
 	const badResult = 0
 	noPacketSuccess := !d.hadSuccesfulPacket
 	if noPacketSuccess && !d.wlRegOn.Get() {
@@ -213,7 +214,8 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header uint8, e
 		Debug("header xor mismatch h[0]=", hdr0, "h[1]=", hdr1)
 		return 0, 0, badResult, errors.New("sdpcmPoll:header mismatch")
 	}
-	return d.sdpcmProcessRxPacket(buf)
+	payloadOffset, plen, header, err = d.sdpcmProcessRxPacket(buf)
+	return payloadOffset, plen, header, err
 }
 
 var (
@@ -229,7 +231,7 @@ var (
 	Err11UnknownHeader            = errors.New("unknown header")
 )
 
-func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag uint8, err error) {
+func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag whd.SDPCMHeaderType, err error) {
 	const badFlag = 0
 	const sdpcmOffset = 0
 	hdr := whd.DecodeSDPCMHeader(buf[sdpcmOffset:])
@@ -256,7 +258,7 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 	}
 
 	payloadOffset = uint32(hdr.HeaderLength)
-	headerFlag := hdr.ChanAndFlags & 0xf
+	headerFlag := hdr.Type()
 	switch headerFlag {
 	case whd.CONTROL_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
@@ -270,6 +272,7 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 		}
 		payloadOffset += whd.IOCTL_HEADER_LEN
 		plen = uint32(hdr.Size) - payloadOffset
+		Debug("ioctl response id=", id, "len=", plen)
 
 	case whd.DATA_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
@@ -328,6 +331,7 @@ func (d *Dev) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComm
 	}
 	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
 	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
+	Debug("sendIoctl cmd=", uint32(header.Cmd), " len=", header.Len, " flags=", header.Flags, "status=", header.Status)
 	return d.sendSDPCMCommon(sdpcmCTLHEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
 }
 
@@ -647,16 +651,18 @@ func (d *Dev) clmLoad(clm []byte) error {
 		}
 		// Send data aligned to 8 bytes. We do end up sending scratch data
 		// at end of buffer that has not been set here.
-		Debug("clm data send off+len=", off+ln, "clmlen=", clmLen)
+		Debug("clm data send off+len=", int(off+ln), "clmlen=", int(clmLen))
 		err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:align32(20+uint32(ln), 8)])
 		if err != nil {
 			return err
 		}
 	}
-	// CLM data send done.
+	Debug("clm data send done")
+	// Check status of the download.
 	const clmStatString = "clmload_status\x00\x00\x00\x00\x00"
-	copy(buf[:len(clmStatString)], clmStatString)
-	err := d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(clmStatString)])
+	const clmStatLen = len(clmStatString)
+	copy(buf[:clmStatLen], clmStatString)
+	err := d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:clmStatLen])
 	if err != nil {
 		return err
 	}

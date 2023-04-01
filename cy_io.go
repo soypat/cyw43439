@@ -75,7 +75,7 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 
 // WriteBytes is cyw43_write_bytes
 func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
-	// println("writeBytes")
+	// Debug("WriteBytes addr=", addr, "len=", len(src), "fn=", fn.String())
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3
 	if length != alignedLength {
@@ -179,8 +179,8 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 	const maxReadPacket = 2040
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3
-	if length != alignedLength || alignedLength < 0 || alignedLength > maxReadPacket {
-		return errors.New("buffer length must be length multiple of 4 and in 0..2040")
+	if alignedLength < 0 || alignedLength > maxReadPacket {
+		return errors.New("buffer length must be length in 0..2040")
 	}
 	assert := fn != FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)
 	if !assert {

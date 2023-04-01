@@ -346,12 +346,13 @@ func Debug(a ...any) {
 				print(c)
 				printSpace = len(c) > 0 && c[len(c)-1] != '='
 			case int:
-				if c < 0 {
-					print(c)
-				} else {
-					printUi = true
-					ui = uint64(c)
-				}
+				print(c)
+				// if c < 0 {
+				// 	print(c)
+				// } else {
+				// 	printUi = true
+				// 	ui = uint64(c)
+				// }
 			case uint8:
 				printUi = true
 				ui = uint64(c)

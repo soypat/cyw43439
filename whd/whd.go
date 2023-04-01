@@ -75,15 +75,32 @@ const (
 	WWD_P2P_INTERFACE IoctlInterface = 2
 )
 
+type SDPCMHeaderType uint8
+
 // for cyw43_sdpcm_send_common
 const (
-	CONTROL_HEADER    = 0
-	ASYNCEVENT_HEADER = 1
-	DATA_HEADER       = 2
+	CONTROL_HEADER    SDPCMHeaderType = 0
+	ASYNCEVENT_HEADER SDPCMHeaderType = 1
+	DATA_HEADER       SDPCMHeaderType = 2
+
 	CDCF_IOC_ID_SHIFT = 16
 	CDCF_IOC_ID_MASK  = 0xffff0000
 	CDCF_IOC_IF_SHIFT = 12
 )
+
+func (ht SDPCMHeaderType) String() (s string) {
+	switch ht {
+	case CONTROL_HEADER:
+		s = "ctl"
+	case ASYNCEVENT_HEADER:
+		s = "asyncev"
+	case DATA_HEADER:
+		s = "data"
+	default:
+		s = "unknown"
+	}
+	return s
+}
 
 const (
 	SDPCM_GET = 0
