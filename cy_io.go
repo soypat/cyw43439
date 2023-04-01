@@ -175,17 +175,16 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 }
 
 func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
-	Debug("read bytes addr=", addr, "len=", len(src))
+	Debug("read bytes addr=", addr, "len=", len(src), "fn=", fn.String())
 	const maxReadPacket = 2040
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3
-	if length != alignedLength {
-		return errors.New("buffer length must be length multiple of 4")
+	if length != alignedLength || alignedLength < 0 || alignedLength > maxReadPacket {
+		return errors.New("buffer length must be length multiple of 4 and in 0..2040")
 	}
-	assert := fn == FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)
-	assert = assert && alignedLength > 0 && alignedLength < maxReadPacket
+	assert := fn != FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)
 	if !assert {
-		panic("bad argument to ReadBytes")
+		return errors.New("bad argument to ReadBytes")
 	}
 	padding := uint8(0)
 	if fn == FuncBackplane {

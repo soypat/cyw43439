@@ -108,7 +108,6 @@ func (d *Dev) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) er
 }
 
 func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, buf []byte) error {
-	// TODO do we have to add all that polling?
 	err := d.sendIoctl(kind, iface, cmd, buf)
 	if err != nil {
 		return err
@@ -118,25 +117,37 @@ func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComman
 	for time.Since(start) < ioctlTimeout {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
 		Debug("doIoctl:sdpcmPoll conclude poff=", payloadOffset, "plen=", plen, "header=", header, err)
-		if err != nil {
+		// The "wrong payload type" appears to happen during startup. See sdpcmProcessRxPacket
+		if err != nil && !errors.Is(err, Err9WrongPayloadType) {
 			return err
 		}
-
+		payload := d.buf[payloadOffset : payloadOffset+plen]
 		switch header {
 		case whd.CONTROL_HEADER:
-			n := copy(buf[:], d.buf[:plen])
+			n := copy(buf[:], payload)
 			if uint32(n) != plen {
 				return errors.New("not enough space on ioctl buffer for control header copy")
 			}
 			return nil
+
+		case whd.ASYNCEVENT_HEADER:
+			Debug("ASYNCEVENT not handled")
+		case whd.DATA_HEADER:
+			Debug("CY43 has no ethernet interface")
+		default:
+			Debug("doIoctl got unexpected packet", header)
 		}
 		time.Sleep(time.Millisecond)
 	}
 	Debug("todo")
-	return nil
+	return errDoioctlTimeout
 }
 
-func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, res uint8, err error) {
+var errDoioctlTimeout = errors.New("doIoctl time out waiting for data")
+
+// sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
+// payload, length of the payload and the header type.
+func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header uint8, err error) {
 	const badResult = 0
 	noPacketSuccess := !d.hadSuccesfulPacket
 	if noPacketSuccess && !d.wlRegOn.Get() {
@@ -185,12 +196,12 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, res uint8, err 
 		d.hadSuccesfulPacket = false
 		return 0, 0, badResult, errors.New("sdpcmPoll: invalid bytes pending")
 	}
-	err = d.ReadBytes(FuncWLAN, 0, d.buf[:bytesPending])
+	err = d.ReadBytes(FuncWLAN, 0, buf[:bytesPending])
 	if err != nil {
 		return 0, 0, badResult, err
 	}
-	hdr0 := binary.LittleEndian.Uint16(d.buf[:])
-	hdr1 := binary.LittleEndian.Uint16(d.buf[2:])
+	hdr0 := binary.LittleEndian.Uint16(buf[:])
+	hdr1 := binary.LittleEndian.Uint16(buf[2:])
 	if hdr0 == 0 && hdr1 == 0 {
 		// no packets.
 		Debug("no packet:zero size header")
@@ -202,7 +213,7 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, res uint8, err 
 		Debug("header xor mismatch h[0]=", hdr0, "h[1]=", hdr1)
 		return 0, 0, badResult, errors.New("sdpcmPoll:header mismatch")
 	}
-	return d.sdpcmProcessRxPacket(d.buf[:])
+	return d.sdpcmProcessRxPacket(buf)
 }
 
 var (
@@ -284,7 +295,8 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 		if !(payload[12] == 0x88 && payload[13] == 0x6c) {
 			// ethernet packet doesn't have the correct type.
 			// Note - this happens during startup but appears to be expected
-			return 0, 0, badFlag, Err9WrongPayloadType
+			// return 0, 0, badFlag, Err9WrongPayloadType
+			err = Err9WrongPayloadType
 		}
 		// Check the Broadcom OUI.
 		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
@@ -296,7 +308,7 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 		// Unknown Header.
 		return 0, 0, badFlag, Err11UnknownHeader
 	}
-	return payloadOffset, plen, headerFlag, nil
+	return payloadOffset, plen, headerFlag, err
 }
 
 // sendIoctl is cyw43_send_ioctl in pico-sdk (actually contained in cy43-driver)

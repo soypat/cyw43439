@@ -279,3 +279,22 @@ const (
 
 	SPI_FRAME_CONTROL = 0x1000D
 )
+
+// Async events, event_type field
+const (
+	CYW43_EV_SET_SSID         = (0)
+	CYW43_EV_JOIN             = (1)
+	CYW43_EV_AUTH             = (3)
+	CYW43_EV_DEAUTH           = (5)
+	CYW43_EV_DEAUTH_IND       = (6)
+	CYW43_EV_ASSOC            = (7)
+	CYW43_EV_DISASSOC         = (11)
+	CYW43_EV_DISASSOC_IND     = (12)
+	CYW43_EV_LINK             = (16)
+	CYW43_EV_PRUNE            = (23)
+	CYW43_EV_PSK_SUP          = (46)
+	CYW43_EV_ESCAN_RESULT     = (69)
+	CYW43_EV_CSA_COMPLETE_IND = (80)
+	CYW43_EV_ASSOC_REQ_IE     = (87)
+	CYW43_EV_ASSOC_RESP_IE    = (88)
+)
