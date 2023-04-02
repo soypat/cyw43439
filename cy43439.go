@@ -83,6 +83,7 @@ type Dev struct {
 	sdpcmRequestedIoctlID uint16
 	lastInt               uint16
 	buf                   [2048]byte
+	auxbuf                [2048]byte
 }
 
 func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {

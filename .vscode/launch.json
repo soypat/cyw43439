@@ -5,6 +5,35 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Generate command.txt",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/cywanalyze",
+            "args": [
+                "-clk=${workspaceFolder}/cmd/cywanalyze/digital_1.bin", 
+                "-enable=${workspaceFolder}/cmd/cywanalyze/digital_2.bin",
+                "-sdio=${workspaceFolder}/cmd/cywanalyze/digital_4.bin",
+                "-o=${workspaceFolder}/cmd/cywanalyze/commands.txt",
+                "-omit-read-data",
+            ]
+        },
+        {
+            "name": "Generate reference.txt",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/cywanalyze",
+            "args": [
+                "-clk=${workspaceFolder}/cmd/cywanalyze/ref/ref-clk.bin", 
+                "-enable=${workspaceFolder}/cmd/cywanalyze/ref/ref-enable.bin",
+                "-sdio=${workspaceFolder}/cmd/cywanalyze/ref/ref-sdio.bin",
+                "-o=${workspaceFolder}/cmd/cywanalyze/reference.txt",
+                "-omit-read-data",
+            ]
+        },
+
+        {
             "name": "Launch test function",
             "type": "go",
             "request": "launch",

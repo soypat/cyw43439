@@ -23,8 +23,8 @@ func (d *Dev) LED() Pin {
 }
 
 type Pin struct {
-	pin uint8
 	d   *Dev
+	pin uint8
 }
 
 func (p Pin) Set(b bool) error {
@@ -48,6 +48,7 @@ const (
 )
 
 func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
+	Debug("gpioset", int(wlGPIO), "value=", value)
 	if wlGPIO >= 3 {
 		panic("GPIO out of range 0..2")
 	}
@@ -60,9 +61,12 @@ func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	return err
 }
 
+// Returns a safe to use buffer outside of the bounds of buffers used by Ioctl calls.
+func (d *Dev) offbuf() []byte { return d.auxbuf[:] }
+
 func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error {
-	Debug("WriteIOVar var=", VAR, "ioctl=", iface, "val=", val)
-	buf := d.buf[1024:]
+	Debug("WriteIOVar var=", VAR, "ioctl=", uint8(iface), "val=", val)
+	buf := d.offbuf()
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
 	length++
@@ -71,7 +75,8 @@ func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error
 }
 
 func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
-	buf := d.buf[1024:]
+	Debug("WriteIOVar2 var=", VAR, "ioctl=", uint8(iface), "val1=", val0, "val2=", val1)
+	buf := d.offbuf()
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
 	length++
@@ -81,7 +86,8 @@ func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint3
 }
 
 func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) error {
-	iobuf := d.buf[1024:]
+	Debug("WriteIOVarN var=", VAR, "ioctl=", uint8(iface), "len=", len(src))
+	iobuf := d.offbuf()
 	if len(VAR)+len(src)+1 > len(iobuf) {
 		return errors.New("buffer too short for IOVarN call")
 	}
@@ -146,8 +152,29 @@ func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComman
 
 var errDoioctlTimeout = errors.New("doIoctl time out waiting for data")
 
+// sendIoctl is cyw43_send_ioctl in pico-sdk (actually contained in cy43-driver)
+func (d *Dev) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
+	Debug("sendIoctl")
+	length := uint32(len(w))
+	if uint32(len(d.buf)) < whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length {
+		return errors.New("ioctl buffer too large for sending")
+	}
+	d.sdpcmRequestedIoctlID++
+	id := uint32(d.sdpcmRequestedIoctlID)
+	flags := (id<<16)&0xffff_0000 | uint32(kind) | uint32(iface)<<12 // look for CDCF_IOC* identifiers in pico-sdk
+	header := whd.IoctlHeader{
+		Cmd:   cmd,
+		Len:   length & 0xffff,
+		Flags: flags,
+	}
+	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
+	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
+	Debug("sendIoctl cmd=", uint32(header.Cmd), " len=", header.Len, " flags=", header.Flags, "status=", header.Status)
+	return d.sendSDPCMCommon(sdpcmCTLHEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
+}
+
 // sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
-// payload, length of the payload and the header type.
+// payload, length of the payload and the header type. Is cyw43_ll_sdpcm_poll_device in reference.
 func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
 	const badResult = 0
 	noPacketSuccess := !d.hadSuccesfulPacket
@@ -218,127 +245,11 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPC
 	return payloadOffset, plen, header, err
 }
 
-var (
-	Err2InvalidPacket             = errors.New("invalid packet")
-	Err3PacketTooSmall            = errors.New("packet too small")
-	Err4IgnoreControlPacket       = errors.New("ignore flow ctl packet")
-	Err5IgnoreSmallControlPacket  = errors.New("ignore too small flow ctl packet")
-	Err6IgnoreWrongIDPacket       = errors.New("ignore packet with wrong id")
-	Err7IgnoreSmallDataPacket     = errors.New("ignore too small data packet")
-	Err8IgnoreTooSmallAsyncPacket = errors.New("ignore too small async packet")
-	Err9WrongPayloadType          = errors.New("wrong payload type")
-	Err10IncorrectOUI             = errors.New("incorrect oui")
-	Err11UnknownHeader            = errors.New("unknown header")
-)
-
-func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag whd.SDPCMHeaderType, err error) {
-	const badFlag = 0
-	const sdpcmOffset = 0
-	hdr := whd.DecodeSDPCMHeader(buf[sdpcmOffset:])
-	switch {
-	case hdr.Size != ^hdr.SizeCom&0xffff:
-		return 0, 0, badFlag, Err2InvalidPacket
-	case hdr.Size < sdpcmHeaderSize:
-		return 0, 0, badFlag, Err3PacketTooSmall
-	}
-	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
-		Debug("WLAN: changed flow control", d.wlanFlowCtl, hdr.WirelessFlowCtl)
-	}
-	d.wlanFlowCtl = hdr.WirelessFlowCtl
-
-	if hdr.ChanAndFlags&0xf < 3 {
-		// A valid header, check the bus data credit.
-		credit := hdr.BusDataCredit - d.sdpcmLastBusCredit
-		if credit <= 20 {
-			d.sdpcmLastBusCredit = hdr.BusDataCredit
-		}
-	}
-	if hdr.Size == whd.SDPCM_HEADER_LEN {
-		return 0, 0, badFlag, Err4IgnoreControlPacket // Flow ctl packet with no data.
-	}
-
-	payloadOffset = uint32(hdr.HeaderLength)
-	headerFlag := hdr.Type()
-	switch headerFlag {
-	case whd.CONTROL_HEADER:
-		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
-		if hdr.Size < totalHeaderSize {
-			return 0, 0, badFlag, Err5IgnoreSmallControlPacket
-		}
-		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
-		id := ioctlHeader.ID()
-		if id != d.sdpcmRequestedIoctlID {
-			return 0, 0, badFlag, Err6IgnoreWrongIDPacket
-		}
-		payloadOffset += whd.IOCTL_HEADER_LEN
-		plen = uint32(hdr.Size) - payloadOffset
-		Debug("ioctl response id=", id, "len=", plen)
-
-	case whd.DATA_HEADER:
-		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
-		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, Err7IgnoreSmallDataPacket
-		}
-
-		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
-		itf := bdcHeader.Flags2 // Get interface number.
-		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
-		plen = (uint32(hdr.Size) - payloadOffset) | uint32(itf)<<31
-
-	case whd.ASYNCEVENT_HEADER:
-		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
-		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, Err8IgnoreTooSmallAsyncPacket
-		}
-		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
-		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
-		plen = uint32(hdr.Size) - payloadOffset
-		payload := buf[payloadOffset:]
-		// payload is actually an ethernet packet with type 0x886c.
-		if !(payload[12] == 0x88 && payload[13] == 0x6c) {
-			// ethernet packet doesn't have the correct type.
-			// Note - this happens during startup but appears to be expected
-			// return 0, 0, badFlag, Err9WrongPayloadType
-			err = Err9WrongPayloadType
-		}
-		// Check the Broadcom OUI.
-		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
-			return 0, 0, badFlag, Err10IncorrectOUI
-		}
-		plen = plen - 24
-		payloadOffset = payloadOffset + 24
-	default:
-		// Unknown Header.
-		return 0, 0, badFlag, Err11UnknownHeader
-	}
-	return payloadOffset, plen, headerFlag, err
-}
-
-// sendIoctl is cyw43_send_ioctl in pico-sdk (actually contained in cy43-driver)
-func (d *Dev) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
-	Debug("sendIoctl")
-	length := uint32(len(w))
-	if uint32(len(d.buf)) < whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length {
-		return errors.New("ioctl buffer too large for sending")
-	}
-	d.sdpcmRequestedIoctlID++
-	id := uint32(d.sdpcmRequestedIoctlID)
-	flags := (id<<16)&0xffff_0000 | uint32(kind) | uint32(iface)<<12 // look for CDCF_IOC* identifiers in pico-sdk
-	header := whd.IoctlHeader{
-		Cmd:   cmd,
-		Len:   length & 0xffff,
-		Flags: flags,
-	}
-	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
-	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
-	Debug("sendIoctl cmd=", uint32(header.Cmd), " len=", header.Len, " flags=", header.Flags, "status=", header.Status)
-	return d.sendSDPCMCommon(sdpcmCTLHEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
-}
-
 // sendSDPCMCommon is cyw43_sdpcm_send_common in pico-sdk (actually contained in cy43-driver)
+// Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
 func (d *Dev) sendSDPCMCommon(kind uint32, w []byte) error {
 	// TODO where is cmd used here????
-	Debug("sendSDPCMCommon")
+	Debug("sendSDPCMCommon len=", len(w))
 	if kind != sdpcmCTLHEADER && kind != sdpcmDATAHEADER {
 		return errors.New("unexpected SDPCM kind")
 	}
@@ -355,7 +266,7 @@ func (d *Dev) sendSDPCMCommon(kind uint32, w []byte) error {
 	if uint16(cap(w)) < paddedSize {
 		return errors.New("buffer too small to be SDPCM padded")
 	}
-	w = w[0:paddedSize]
+	//w = w[0:paddedSize] // padded in WriteBytes.
 	header := whd.SDPCMHeader{
 		Size:         size,
 		SizeCom:      ^size & 0xffff,
@@ -661,6 +572,7 @@ func (d *Dev) clmLoad(clm []byte) error {
 	// Check status of the download.
 	const clmStatString = "clmload_status\x00\x00\x00\x00\x00"
 	const clmStatLen = len(clmStatString)
+	buf = d.auxbuf[:]
 	copy(buf[:clmStatLen], clmStatString)
 	err := d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:clmStatLen])
 	if err != nil {
@@ -679,7 +591,7 @@ func (d *Dev) putMAC(dst []byte) error {
 		panic("dst too short to put MAC")
 	}
 	const sdpcmHeaderLen = unsafe.Sizeof(whd.SDPCMHeader{})
-	buf := d.buf[sdpcmHeaderLen+16:]
+	buf := d.auxbuf[sdpcmHeaderLen+16:]
 	const varMAC = "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00"
 	copy(buf[:len(varMAC)], varMAC)
 	err := d.doIoctl(SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(varMAC)])
@@ -687,4 +599,102 @@ func (d *Dev) putMAC(dst []byte) error {
 		copy(dst[:6], buf)
 	}
 	return err
+}
+
+var (
+	Err2InvalidPacket             = errors.New("invalid packet")
+	Err3PacketTooSmall            = errors.New("packet too small")
+	Err4IgnoreControlPacket       = errors.New("ignore flow ctl packet")
+	Err5IgnoreSmallControlPacket  = errors.New("ignore too small flow ctl packet")
+	Err6IgnoreWrongIDPacket       = errors.New("ignore packet with wrong id")
+	Err7IgnoreSmallDataPacket     = errors.New("ignore too small data packet")
+	Err8IgnoreTooSmallAsyncPacket = errors.New("ignore too small async packet")
+	Err9WrongPayloadType          = errors.New("wrong payload type")
+	Err10IncorrectOUI             = errors.New("incorrect oui")
+	Err11UnknownHeader            = errors.New("unknown header")
+)
+
+// sdpcmProcessRxPacket finds payload in WLAN RxPacket and returns the kind of packet.
+// is sdpcm_process_rx_packet in reference.
+func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag whd.SDPCMHeaderType, err error) {
+	const badFlag = 0
+	const sdpcmOffset = 0
+	hdr := whd.DecodeSDPCMHeader(buf[sdpcmOffset:])
+	switch {
+	case hdr.Size != ^hdr.SizeCom&0xffff:
+		return 0, 0, badFlag, Err2InvalidPacket
+	case hdr.Size < sdpcmHeaderSize:
+		return 0, 0, badFlag, Err3PacketTooSmall
+	}
+	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
+		Debug("WLAN: changed flow control", d.wlanFlowCtl, hdr.WirelessFlowCtl)
+	}
+	d.wlanFlowCtl = hdr.WirelessFlowCtl
+
+	if hdr.ChanAndFlags&0xf < 3 {
+		// A valid header, check the bus data credit.
+		credit := hdr.BusDataCredit - d.sdpcmLastBusCredit
+		if credit <= 20 {
+			d.sdpcmLastBusCredit = hdr.BusDataCredit
+		}
+	}
+	if hdr.Size == whd.SDPCM_HEADER_LEN {
+		return 0, 0, badFlag, Err4IgnoreControlPacket // Flow ctl packet with no data.
+	}
+
+	payloadOffset = uint32(hdr.HeaderLength)
+	headerFlag := hdr.Type()
+	switch headerFlag {
+	case whd.CONTROL_HEADER:
+		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
+		if hdr.Size < totalHeaderSize {
+			return 0, 0, badFlag, Err5IgnoreSmallControlPacket
+		}
+		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
+		id := ioctlHeader.ID()
+		if id != d.sdpcmRequestedIoctlID {
+			return 0, 0, badFlag, Err6IgnoreWrongIDPacket
+		}
+		payloadOffset += whd.IOCTL_HEADER_LEN
+		plen = uint32(hdr.Size) - payloadOffset
+		Debug("ioctl response id=", id, "len=", plen)
+
+	case whd.DATA_HEADER:
+		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
+		if hdr.Size <= totalHeaderSize {
+			return 0, 0, badFlag, Err7IgnoreSmallDataPacket
+		}
+
+		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
+		itf := bdcHeader.Flags2 // Get interface number.
+		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
+		plen = (uint32(hdr.Size) - payloadOffset) | uint32(itf)<<31
+
+	case whd.ASYNCEVENT_HEADER:
+		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
+		if hdr.Size <= totalHeaderSize {
+			return 0, 0, badFlag, Err8IgnoreTooSmallAsyncPacket
+		}
+		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
+		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
+		plen = uint32(hdr.Size) - payloadOffset
+		payload := buf[payloadOffset:]
+		// payload is actually an ethernet packet with type 0x886c.
+		if !(payload[12] == 0x88 && payload[13] == 0x6c) {
+			// ethernet packet doesn't have the correct type.
+			// Note - this happens during startup but appears to be expected
+			// return 0, 0, badFlag, Err9WrongPayloadType
+			err = Err9WrongPayloadType
+		}
+		// Check the Broadcom OUI.
+		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
+			return 0, 0, badFlag, Err10IncorrectOUI
+		}
+		plen = plen - 24
+		payloadOffset = payloadOffset + 24
+	default:
+		// Unknown Header.
+		return 0, 0, badFlag, Err11UnknownHeader
+	}
+	return payloadOffset, plen, headerFlag, err
 }

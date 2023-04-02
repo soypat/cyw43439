@@ -170,6 +170,24 @@ func TestShellmode() {
 			if err == nil {
 				println("init success")
 			}
+		case 'i':
+			println("running init + blink")
+			err = dev.Init(cyw43439.DefaultConfig(false))
+			if err != nil {
+				break
+			}
+			println("init success")
+			err = dev.LED().High()
+			if err != nil {
+				break
+			}
+			time.Sleep(time.Second)
+			err = dev.LED().Low()
+			if err != nil {
+				break
+			}
+			time.Sleep(time.Second)
+			err = dev.LED().High()
 		case 'o':
 			b := arg1 > 0
 			println("setting WL_REG_ON", b)

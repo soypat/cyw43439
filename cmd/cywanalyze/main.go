@@ -14,11 +14,16 @@ import (
 	"github.com/soypat/saleae/analyzers"
 )
 
+var (
+	omitReadData bool
+)
+
 func main() {
 	sdio := flag.String("sdio", "digital_4.bin", "Binary Saleae digital data filename with SPI SDO/SDI data.")
 	enable := flag.String("enable", "digital_2.bin", "Binary Saleae digital data filename with SPI enable data.")
 	clk := flag.String("clk", "digital_1.bin", "Binary Saleae digital data filename with SPI clock data.")
 	output := flag.String("o", "commands.txt", "Output history of commands to file.")
+	flag.BoolVar(&omitReadData, "omit-read-data", false, "Choose to omit read data in output.")
 	flag.Parse()
 
 	start := time.Now()
@@ -40,6 +45,9 @@ func run(sdio, enable, clk, output string) error {
 	}
 	defer fp.Close()
 	for _, action := range commands {
+		if omitReadData && !action.Cmd.Write {
+			action.Data = []byte{}
+		}
 		_, err = fmt.Fprintf(fp, fmtMsg, action.Num, action.Cmd.String(), action.Data)
 		if err != nil {
 			return err
@@ -93,6 +101,12 @@ func (cmd *CYW43439Cmd) String() string {
 }
 
 func CommandFromBytes(b []byte) (cmd CYW43439Cmd, data []byte) {
+	if len(b) < 4 {
+		// Invalid command.
+		cmd, _ := CommandFromBytes([]byte{0xff, 0xff, 0xff, 0xff})
+		cmd.Write = true
+		return cmd, b
+	}
 	_ = b[3]
 	command := binary.LittleEndian.Uint32(b)
 	cmd.Write = command&(1<<31) != 0
@@ -117,9 +131,6 @@ func process(txs []analyzers.TxSPI) (cytxs []cywtx) {
 	var accumulativeResults int
 	for i := 0; i < len(txs); i++ {
 		tx := txs[i]
-		if len(tx.SDO) < 4 {
-			panic("too short exchange for cyw43439!")
-		}
 		cmd, data := CommandFromBytes(tx.SDO)
 		for j := i + 1; j < len(txs); j++ {
 			nextcmd, nextdata := CommandFromBytes(txs[j].SDO)

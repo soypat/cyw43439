@@ -78,13 +78,17 @@ func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 	// Debug("WriteBytes addr=", addr, "len=", len(src), "fn=", fn.String())
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3
-	if length != alignedLength {
-		return errors.New("buffer length must be length multiple of 4")
+	assert := alignedLength > 0 && alignedLength <= 2040
+	if !assert {
+		return errors.New("buffer length not in 1..2040")
 	}
 	if !(fn != FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)) {
 		panic("bad argument to WriteBytes")
 	}
 	if fn == FuncWLAN {
+		if cap(src) < int(alignedLength) {
+			return errors.New("buffer capacity too small for WLAN writeBytes to pad to 4 bytes")
+		}
 		readyAttempts := 1000
 		for ; readyAttempts > 0; readyAttempts-- {
 			status, err := d.GetStatus() // TODO: We're getting Status not ready here.
@@ -98,6 +102,7 @@ func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 		if readyAttempts <= 0 {
 			return errors.New("F2 not ready")
 		}
+		src = src[:alignedLength]
 	}
 	cmd := make_cmd(true, true, fn, addr, length)
 	d.csLow()
