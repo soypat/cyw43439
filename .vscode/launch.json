@@ -16,6 +16,7 @@
                 "-sdio=${workspaceFolder}/cmd/cywanalyze/digital_4.bin",
                 "-o=${workspaceFolder}/cmd/cywanalyze/commands.txt",
                 "-omit-read-data",
+                "-timings-output=timings.txt",
             ]
         },
         {

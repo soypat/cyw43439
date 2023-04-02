@@ -1,8 +1,8 @@
-module github.com/soypat/cy43439
+module github.com/soypat/cyw43439
 
 go 1.19
 
 require (
-	github.com/soypat/saleae v0.0.0-20230326034755-fd6646c23cb5
+	github.com/soypat/saleae v0.0.0-20230402180913-3584b7515dae
 	tinygo.org/x/drivers v0.23.0
 )

@@ -9,13 +9,15 @@ import (
 	"os"
 	"time"
 
-	cyw43439 "github.com/soypat/cy43439"
+	cyw43439 "github.com/soypat/cyw43439"
 	"github.com/soypat/saleae"
 	"github.com/soypat/saleae/analyzers"
 )
 
+// Optional flags.
 var (
-	omitReadData bool
+	omitReadData  bool
+	timingsOutput string
 )
 
 func main() {
@@ -23,6 +25,8 @@ func main() {
 	enable := flag.String("enable", "digital_2.bin", "Binary Saleae digital data filename with SPI enable data.")
 	clk := flag.String("clk", "digital_1.bin", "Binary Saleae digital data filename with SPI clock data.")
 	output := flag.String("o", "commands.txt", "Output history of commands to file.")
+
+	flag.StringVar(&timingsOutput, "timings-output", "", "Output timing data to a file corresponding to output command history line-by-line.")
 	flag.BoolVar(&omitReadData, "omit-read-data", false, "Choose to omit read data in output.")
 	flag.Parse()
 
@@ -44,6 +48,17 @@ func run(sdio, enable, clk, output string) error {
 		return err
 	}
 	defer fp.Close()
+
+	var timings *os.File
+	if timingsOutput != "" {
+		log.Println("creating timings file", timingsOutput)
+		timings, err = os.Create(timingsOutput)
+		if err != nil {
+			return err
+		}
+		defer timings.Close()
+	}
+
 	for _, action := range commands {
 		if omitReadData && !action.Cmd.Write {
 			action.Data = []byte{}
@@ -51,6 +66,9 @@ func run(sdio, enable, clk, output string) error {
 		_, err = fmt.Fprintf(fp, fmtMsg, action.Num, action.Cmd.String(), action.Data)
 		if err != nil {
 			return err
+		}
+		if timings != nil {
+			fmt.Fprintf(timings, "t=%f\tdata=%q\n", action.Start, action.Data)
 		}
 	}
 	return nil
@@ -122,9 +140,10 @@ func CommandFromBytes(b []byte) (cmd CYW43439Cmd, data []byte) {
 }
 
 type cywtx struct {
-	Num  int
-	Cmd  CYW43439Cmd
-	Data []byte
+	Num   int
+	Cmd   CYW43439Cmd
+	Data  []byte
+	Start float64
 }
 
 func process(txs []analyzers.TxSPI) (cytxs []cywtx) {
@@ -141,9 +160,10 @@ func process(txs []analyzers.TxSPI) (cytxs []cywtx) {
 			i = j
 		}
 		cytxs = append(cytxs, cywtx{
-			Num:  accumulativeResults,
-			Cmd:  cmd,
-			Data: data,
+			Num:   accumulativeResults,
+			Cmd:   cmd,
+			Data:  data,
+			Start: tx.StartTime(),
 		})
 		accumulativeResults = 1
 	}

@@ -29,7 +29,7 @@ import (
 	"machine"
 	"time"
 
-	"github.com/soypat/cy43439/whd"
+	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers"
 )
 

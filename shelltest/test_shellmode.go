@@ -10,7 +10,7 @@ import (
 	"time"
 	"unsafe"
 
-	cyw43439 "github.com/soypat/cy43439"
+	cyw43439 "github.com/soypat/cyw43439"
 )
 
 func TestShellmode() {

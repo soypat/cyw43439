@@ -11,7 +11,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/soypat/cy43439/whd"
+	"github.com/soypat/cyw43439/whd"
 )
 
 func (d *Dev) LED() Pin {
@@ -70,7 +70,7 @@ func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
 	length++
-	binary.BigEndian.PutUint32(buf[length:], val)
+	binary.LittleEndian.PutUint32(buf[length:], val)
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+4])
 }
 
@@ -80,8 +80,8 @@ func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint3
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
 	length++
-	binary.BigEndian.PutUint32(buf[length:], val0)
-	binary.BigEndian.PutUint32(buf[length+4:], val1)
+	binary.LittleEndian.PutUint32(buf[length:], val0)
+	binary.LittleEndian.PutUint32(buf[length+4:], val1)
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+8])
 }
 
@@ -101,7 +101,7 @@ func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) erro
 func (d *Dev) DoIoctl32(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
 	println("DoIoctl32")
 	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], val)
+	binary.LittleEndian.PutUint32(buf[:], val)
 	return d.doIoctl(kind, iface, cmd, buf[:])
 }
 
@@ -578,7 +578,7 @@ func (d *Dev) clmLoad(clm []byte) error {
 	if err != nil {
 		return err
 	}
-	status := binary.BigEndian.Uint32(buf[:])
+	status := binary.LittleEndian.Uint32(buf[:])
 	if status != 0 {
 		return errors.New("CLM load failed due to bad status return")
 	}
