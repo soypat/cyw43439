@@ -1,6 +1,43 @@
 # cyw43439
 Driver for the Wifi+bluetooth integrated circuit on the pico.
 
+## Contributions
+PRs welcome! I've paused my own development for now. If you want to contribute 
+feel free to file a issue for what you wish to contribute so I and others
+can be aware of ongoing work. This can also serve as a preliminary step 
+for API design vision.
+
+## Development
+
+Compile and flash the development program to the currently connected Pico W by running:
+
+```shell
+tinygo flash -monitor -target=pico ./shelltest/.
+```
+
+After the program is done flashing it will enter shell-mode communications with the
+Pico W. One has several commands they can run from there on out.
+
+To initialize the board type in the following **shell command** and press enter
+
+```
+$i0
+```
+
+A shell command is composed of 4 parts and serves the purpose of debugging:
+
+1. `$`: While in shell-mode the program waits for the `$` character before parsing input.
+2. The next character after the `$` is the "command" character.
+3. After the "command" is the number argument, which may not have effect in
+some commands
+4. The <kbd>Enter</kbd> or newline.
+
+All commands must have these 4 parts
+
+To develop add a command under the [`TestShellmode` function (switch statement)](./shelltest/test_shellmode.go).
+This command will probably contain a function or action with the CYW43439 you wish to test.
+
+
 ## FYI
 * [RP2040 datasheet](https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf).
 
