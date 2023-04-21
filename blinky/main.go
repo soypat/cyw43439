@@ -7,7 +7,7 @@ import (
 )
 
 func main() {
-	const spiNOPs = 1
+	const spiNOPs = 0
 	spi, cs, WL_REG_ON, irq := cyw43439.PicoWSpi(spiNOPs)
 
 	dev := cyw43439.NewDev(spi, cs, WL_REG_ON, irq, irq)
