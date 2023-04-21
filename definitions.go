@@ -46,34 +46,24 @@ const (
 	pollLimit                                   = 60 * time.Millisecond
 )
 
-// 32 bit register addresses on SPI.
-const (
-	AddrBusControl = 0x0000
-	AddrStatus     = 0x0008
-	// 32 bit address that contains only-read 0xFEEDBEAD value.
-	AddrTest = 0x0014
-	// 32 bit test value at gSPI address 0x14.
-	TestPattern uint32 = 0xFEEDBEAD
-)
-
 // 16 bit register addresses on SPI.
 const (
-	AddrInterrupt       = 0x0004
-	AddrInterruptEnable = 0x0006
-	AddrFunc1Info       = 0x000c
-	AddrFunc2Info       = 0x000e
-	AddrFunc3Info       = 0x0010
+	addrInterrupt       = 0x0004
+	addrInterruptEnable = 0x0006
+	addrFunc1Info       = 0x000c
+	addrFunc2Info       = 0x000e
+	addrFunc3Info       = 0x0010
 )
 
 // 8 bit register addresses on SPI.
 const (
-	AddrRespDelayF0   = 0x001c // corerev >= 1
-	AddrRespDelayF1   = 0x001d // corerev >= 1
-	AddrRespDelayF2   = 0x001e // corerev >= 1
-	AddrRespDelayF3   = 0x001f // corerev >= 1
-	AddrResponseDelay = 0x0001
-	AddrStatusEnable  = 0x0002
-	AddrResetBP       = 0x0003 // corerev >= 1
+	addrRespDelayF0   = 0x001c // corerev >= 1
+	addrRespDelayF1   = 0x001d // corerev >= 1
+	addrRespDelayF2   = 0x001e // corerev >= 1
+	addrRespDelayF3   = 0x001f // corerev >= 1
+	addrResponseDelay = 0x0001
+	addrStatusEnable  = 0x0002
+	addrResetBP       = 0x0003 // corerev >= 1
 )
 
 type Function uint32
@@ -184,76 +174,12 @@ func (s Status) F3PacketLength() uint16 {
 type Interrupts uint16
 
 func (Int Interrupts) IsBusOverflowedOrUnderflowed() bool {
-	return Int&(F2_F3_FIFO_RD_UNDERFLOW|F2_F3_FIFO_WR_OVERFLOW|F1_OVERFLOW) != 0
+	return Int&(whd.F2_F3_FIFO_RD_UNDERFLOW|whd.F2_F3_FIFO_WR_OVERFLOW|whd.F1_OVERFLOW) != 0
 }
 
 func (Int Interrupts) IsF2Available() bool {
-	return Int&(F2_PACKET_AVAILABLE) != 0
+	return Int&(whd.F2_PACKET_AVAILABLE) != 0
 }
-
-// Interrupt registers on SPI.
-const (
-	DATA_UNAVAILABLE        = 0x0001 // Requested data not available; Clear by writing a "1"
-	F2_F3_FIFO_RD_UNDERFLOW = 0x0002
-	F2_F3_FIFO_WR_OVERFLOW  = 0x0004
-	COMMAND_ERROR           = 0x0008 // Cleared by writing 1
-	DATA_ERROR              = 0x0010 // Cleared by writing 1
-	F2_PACKET_AVAILABLE     = 0x0020
-	F3_PACKET_AVAILABLE     = 0x0040
-	F1_OVERFLOW             = 0x0080 // Due to last write. Bkplane has pending write requests
-	GSPI_PACKET_AVAILABLE   = 0x0100
-	MISC_INTR1              = 0x0200
-	MISC_INTR2              = 0x0400
-	MISC_INTR3              = 0x0800
-	MISC_INTR4              = 0x1000
-	F1_INTR                 = 0x2000
-	F2_INTR                 = 0x4000
-	F3_INTR                 = 0x8000
-)
-
-// SDIO bus specifics
-const (
-	SDIOD_CCCR_IOEN          = whd.SDIOD_CCCR_IOEN
-	SDIOD_CCCR_IORDY         = 0x03
-	SDIOD_CCCR_INTEN         = 0x04
-	SDIOD_CCCR_BICTRL        = 0x07
-	SDIOD_CCCR_BLKSIZE_0     = 0x10
-	SDIOD_CCCR_SPEED_CONTROL = 0x13
-	SDIOD_CCCR_BRCM_CARDCAP  = 0xf0
-	SDIOD_SEP_INT_CTL        = 0xf2
-	SDIOD_CCCR_F1BLKSIZE_0   = 0x110
-	SDIOD_CCCR_F2BLKSIZE_0   = 0x210
-	SDIOD_CCCR_F2BLKSIZE_1   = 0x211
-	INTR_CTL_MASTER_EN       = 0x01
-	INTR_CTL_FUNC1_EN        = 0x02
-	INTR_CTL_FUNC2_EN        = 0x04
-	SDIO_FUNC_ENABLE_1       = 0x02
-	SDIO_FUNC_ENABLE_2       = 0x04
-	SDIO_FUNC_READY_1        = 0x02
-	SDIO_FUNC_READY_2        = 0x04
-	SDIO_64B_BLOCK           = 64
-	SDIO_CHIP_CLOCK_CSR      = 0x1000e
-	SDIO_PULL_UP             = 0x1000f
-)
-
-// SDIOD_CCCR_BRCM_CARDCAP bits
-const (
-	SDIOD_CCCR_BRCM_CARDCAP_CMD14_SUPPORT = 0x02 // Supports CMD14
-	SDIOD_CCCR_BRCM_CARDCAP_CMD14_EXT     = 0x04 // CMD14 is allowed in FSM command state
-	SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC     = 0x08 // sdiod_aos does not decode any command
-)
-
-// SDIO_SLEEP_CSR bits
-const (
-	SBSDIO_SLPCSR_KEEP_SDIO_ON = 1 << 0 // KeepSdioOn bit
-	SBSDIO_SLPCSR_DEVICE_ON    = 1 << 1 // DeviceOn bit
-)
-
-// IOCTL kinds.
-const (
-	SDPCM_GET = 0
-	SDPCM_SET = 2
-)
 
 func GetCLM(firmware []byte) []byte {
 	clmAddr := align32(uint32(len(firmware)), 512)
@@ -265,71 +191,6 @@ func GetCLM(firmware []byte) []byte {
 
 //go:inline
 func align32(val, align uint32) uint32 { return (val + align - 1) &^ (align - 1) }
-
-// SPIWriteRead performs the gSPI Write-Read action.
-// Not used!
-// func (d *Dev) SPIWriteRead(cmd uint32, w, r []byte) error {
-// 	var buf [4]byte
-// 	d.csLow()
-// 	if sharedDATA {
-// 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
-// 	}
-// 	binary.BigEndian.PutUint32(buf[:], cmd) // !LE
-// 	d.spi.Tx(buf[:], nil)
-
-// 	err := d.spi.Tx(w, nil)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	d.responseDelay()
-// 	err = d.spi.Tx(nil, r)
-// 	if err != nil || !d.enableStatusWord {
-// 		return err
-// 	}
-
-// 	// Read Status.
-// 	buf = [4]byte{}
-// 	d.spi.Tx(buf[:], buf[:])
-// 	d.csHigh()
-// 	status := Status(binary.BigEndian.Uint32(buf[:])) // !LE
-// 	status = Status(swap32(uint32(status)))
-// 	if !status.IsDataAvailable() {
-// 		println("got status:", status)
-// 		return ErrDataNotAvailable
-// 	}
-// 	return nil
-// }
-
-const (
-	CORE_WLAN_ARM              = 1
-	WLAN_ARMCM3_BASE_ADDRESS   = 0x18003000
-	WRAPPER_REGISTER_OFFSET    = 0x100_000
-	CORE_SOCRAM                = 2
-	SOCSRAM_BASE_ADDRESS       = 0x18004000
-	SBSDIO_SB_ACCESS_2_4B_FLAG = 0x08000
-	CHIPCOMMON_BASE_ADDRESS    = 0x18000000
-	backplaneAddrMask          = 0x7fff
-	AI_RESETCTRL_OFFSET        = 0x800
-	AIRC_RESET                 = 1
-	AI_IOCTRL_OFFSET           = 0x408
-	SICF_FGC                   = 2
-	SICF_CLOCK_EN              = 1
-	SICF_CPUHALT               = 0x20
-	SOCSRAM_BANKX_INDEX        = (0x18004000) + 0x10
-
-	SOCSRAM_BANKX_PDA        = (SOCSRAM_BASE_ADDRESS + 0x44)
-	SBSDIO_HT_AVAIL          = 0x80
-	SDIO_BASE_ADDRESS        = 0x18002000
-	SDIO_INT_HOST_MASK       = SDIO_BASE_ADDRESS + 0x24
-	I_HMB_SW_MASK            = 0x000000f0
-	SDIO_FUNCTION2_WATERMARK = 0x10008
-	SPI_F2_WATERMARK         = 32
-
-	SDIO_WAKEUP_CTRL = 0x1001e
-	SDIO_SLEEP_CSR   = 0x1001f
-	SBSDIO_FORCE_ALP = 0x01
-	SBSDIO_FORCE_HT  = 0x02
-)
 
 var errFirmwareValidationFailed = errors.New("firmware validation failed")
 

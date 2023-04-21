@@ -1,4 +1,5 @@
 // package whd implements Cypress' Wifi Host Driver controller interface API.
+
 package whd
 
 const (
@@ -23,6 +24,9 @@ const (
 )
 
 const (
+	CORE_WLAN_ARM = 1
+	CORE_SOCRAM   = 2
+
 	CHIPCOMMON_BASE_ADDRESS  = 0x18000000
 	SDIO_BASE_ADDRESS        = 0x18002000
 	WLAN_ARMCM3_BASE_ADDRESS = 0x18003000
@@ -216,11 +220,12 @@ const (
 	SPI_FUNCTION1_INFO            = 0x000C // 16 bits
 	SPI_FUNCTION2_INFO            = 0x000E // 16 bits
 	SPI_FUNCTION3_INFO            = 0x0010 // 16 bits
-	SPI_READ_TEST_REGISTER        = 0x0014 // 32 bits
-	SPI_RESP_DELAY_F0             = 0x001c // 8 bits (corerev >= 3)
-	SPI_RESP_DELAY_F1             = 0x001d // 8 bits (corerev >= 3)
-	SPI_RESP_DELAY_F2             = 0x001e // 8 bits (corerev >= 3)
-	SPI_RESP_DELAY_F3             = 0x001f // 8 bits (corerev >= 3)
+	// 32 bit address that contains only-read 0xFEEDBEAD value.
+	SPI_READ_TEST_REGISTER = 0x0014 // 32 bits
+	SPI_RESP_DELAY_F0      = 0x001c // 8 bits (corerev >= 3)
+	SPI_RESP_DELAY_F1      = 0x001d // 8 bits (corerev >= 3)
+	SPI_RESP_DELAY_F2      = 0x001e // 8 bits (corerev >= 3)
+	SPI_RESP_DELAY_F3      = 0x001f // 8 bits (corerev >= 3)
 )
 
 // SPI_FUNCTIONX_BITS

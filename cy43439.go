@@ -136,11 +136,11 @@ func (d *Dev) Init(cfg Config) (err error) {
 	// Little endian test address values.
 	for i := 0; i < 10; i++ {
 		time.Sleep(time.Millisecond)
-		got, err = d.Read32S(FuncBus, AddrTest)
+		got, err = d.Read32S(FuncBus, whd.SPI_READ_TEST_REGISTER)
 		if err != nil {
 			return err
 		}
-		if got == TestPattern {
+		if got == whd.TEST_PATTERN {
 			goto chipup
 		}
 	}
@@ -167,24 +167,24 @@ chipup:
 	)
 	b := setupValue | (b2u32(endian == binary.LittleEndian) << EndianessBigPos)
 	// Write wake-up bit, switch to 32 bit SPI, and keep default interrupt polarity.
-	err = d.Write32S(FuncBus, AddrBusControl, b) // Last use of a swap writer/reader.
+	err = d.Write32S(FuncBus, whd.SPI_BUS_CONTROL, b) // Last use of a swap writer/reader.
 	if err != nil {
 		return err
 	}
-	got, err = d.Read32(FuncBus, AddrBusControl) // print out data on register contents
+	got, err = d.Read32(FuncBus, whd.SPI_BUS_CONTROL) // print out data on register contents
 	if err != nil {
 		return err
 	}
 	if got != b&^(1<<10) {
 		return fmt.Errorf("register write-readback failed on bus control. beware erratic behavior. got=%#x, expect:%#x", got, b&^(1<<10))
 	}
-	const WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE = 4
-	err = d.Write8(FuncBus, AddrRespDelayF1, WHD_BUS_SPI_BACKPLANE_READ_PADD_SIZE)
+
+	err = d.Write8(FuncBus, whd.SPI_RESP_DELAY_F1, whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE)
 	if err != nil {
 		return err
 	}
 	if initReadback {
-		d.Read8(FuncBus, AddrRespDelayF1)
+		d.Read8(FuncBus, addrRespDelayF1)
 	}
 	// Make sure error interrupt bits are clear
 	const (
@@ -194,21 +194,21 @@ chipup:
 		f1Overflow      = 0x80
 		value           = dataUnavailable | commandError | dataError | f1Overflow
 	)
-	err = d.Write8(FuncBus, AddrInterrupt, value)
+	err = d.Write8(FuncBus, addrInterrupt, value)
 	if err != nil {
 		return err
 	}
 	if initReadback {
-		d.Read8(FuncBus, AddrInterrupt)
+		d.Read8(FuncBus, addrInterrupt)
 	}
 	// Enable selection of interrupts:
-	const wifiIntr = F2_F3_FIFO_RD_UNDERFLOW | F2_F3_FIFO_WR_OVERFLOW |
-		COMMAND_ERROR | DATA_ERROR | F2_PACKET_AVAILABLE | f1Overflow
+	const wifiIntr = whd.F2_F3_FIFO_RD_UNDERFLOW | whd.F2_F3_FIFO_WR_OVERFLOW |
+		whd.COMMAND_ERROR | whd.DATA_ERROR | whd.F2_PACKET_AVAILABLE | f1Overflow
 	var intr uint16 = wifiIntr
 	if cfg.EnableBluetooth {
-		intr |= F1_INTR
+		intr |= whd.F1_INTR
 	}
-	err = d.Write16(FuncBus, AddrInterruptEnable, intr)
+	err = d.Write16(FuncBus, addrInterruptEnable, intr)
 	if err != nil {
 		return err
 	}
@@ -244,7 +244,7 @@ alpset:
 	// Clear request for ALP
 	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, 0)
 	if verbose_debug && validateDownloads {
-		chipID, err := d.ReadBackplane(CHIPCOMMON_BASE_ADDRESS, 2)
+		chipID, err := d.ReadBackplane(whd.CHIPCOMMON_BASE_ADDRESS, 2)
 		if err != nil {
 			return err
 		}
@@ -258,24 +258,24 @@ alpset:
 	}
 	Debug("begin disabling cores")
 	// Begin preparing for Firmware download.
-	err = d.disableDeviceCore(CORE_WLAN_ARM, false)
+	err = d.disableDeviceCore(whd.CORE_WLAN_ARM, false)
 	if err != nil {
 		return err
 	}
-	err = d.disableDeviceCore(CORE_SOCRAM, false)
+	err = d.disableDeviceCore(whd.CORE_SOCRAM, false)
 	if err != nil {
 		return err
 	}
-	err = d.resetDeviceCore(CORE_SOCRAM, false)
+	err = d.resetDeviceCore(whd.CORE_SOCRAM, false)
 	if err != nil {
 		return err
 	}
 	// 4343x specific stuff: disable remap for SRAM_3
-	err = d.WriteBackplane(SOCSRAM_BANKX_INDEX, 4, 0x3)
+	err = d.WriteBackplane(whd.SOCSRAM_BANKX_INDEX, 4, 0x3)
 	if err != nil {
 		return err
 	}
-	err = d.WriteBackplane(SOCSRAM_BANKX_PDA, 4, 0)
+	err = d.WriteBackplane(whd.SOCSRAM_BANKX_PDA, 4, 0)
 	if err != nil {
 		return err
 	}
@@ -300,15 +300,15 @@ alpset:
 	if err != nil {
 		return err
 	}
-	d.resetDeviceCore(CORE_WLAN_ARM, false)
-	if !d.CoreIsActive(CORE_WLAN_ARM) {
+	d.resetDeviceCore(whd.CORE_WLAN_ARM, false)
+	if !d.CoreIsActive(whd.CORE_WLAN_ARM) {
 		return errors.New("CORE_WLAN_ARM is not active after reset")
 	}
 	Debug("wlan core reset success")
 	// Wait until HT clock is available.
 	for i := 0; i < 1000; i++ {
 		reg, _ := d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)
-		if reg&SBSDIO_HT_AVAIL != 0 {
+		if reg&whd.SBSDIO_HT_AVAIL != 0 {
 			goto htready
 		}
 		time.Sleep(time.Millisecond)
@@ -317,13 +317,13 @@ alpset:
 
 htready:
 	Debug("HT Ready")
-	err = d.WriteBackplane(SDIO_INT_HOST_MASK, 4, I_HMB_SW_MASK)
+	err = d.WriteBackplane(whd.SDIO_INT_HOST_MASK, 4, whd.I_HMB_SW_MASK)
 	if err != nil {
 		return err
 	}
 
 	// Lower F2 Watermark to avoid DMA Hang in F2 when SD Clock is stopped.
-	err = d.Write8(FuncBackplane, SDIO_FUNCTION2_WATERMARK, SPI_F2_WATERMARK)
+	err = d.Write8(FuncBackplane, whd.SDIO_FUNCTION2_WATERMARK, whd.SPI_F2_WATERMARK)
 	if err != nil {
 		return err
 	}
@@ -340,31 +340,31 @@ htready:
 f2ready:
 	// Use of KSO:
 	Debug("preparing KSO")
-	reg8, err = d.Read8(FuncBackplane, SDIO_WAKEUP_CTRL)
+	reg8, err = d.Read8(FuncBackplane, whd.SDIO_WAKEUP_CTRL)
 	if err != nil {
 		return err
 	}
 	reg8 |= (1 << 1) // SBSDIO_WCTRL_WAKE_TILL_HT_AVAIL
-	d.Write8(FuncBackplane, SDIO_WAKEUP_CTRL, reg8)
-	d.Write8(FuncBus, SDIOD_CCCR_BRCM_CARDCAP, SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC)
-	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_FORCE_HT)
-	reg8, err = d.Read8(FuncBackplane, SDIO_SLEEP_CSR) // read 0x03000000, reference reads 0x03800000
+	d.Write8(FuncBackplane, whd.SDIO_WAKEUP_CTRL, reg8)
+	d.Write8(FuncBus, whd.SDIOD_CCCR_BRCM_CARDCAP, whd.SDIOD_CCCR_BRCM_CARDCAP_CMD_NODEC)
+	d.Write8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR, whd.SBSDIO_FORCE_HT)
+	reg8, err = d.Read8(FuncBackplane, whd.SDIO_SLEEP_CSR) // read 0x03000000, reference reads 0x03800000
 	if err != nil {
 		return err
 	}
-	if reg8&SBSDIO_SLPCSR_KEEP_SDIO_ON == 0 { // Does not execute.
-		reg8 |= SBSDIO_SLPCSR_KEEP_SDIO_ON
-		d.Write8(FuncBackplane, SDIO_SLEEP_CSR, reg8)
+	if reg8&whd.SBSDIO_SLPCSR_KEEP_SDIO_ON == 0 { // Does not execute.
+		reg8 |= whd.SBSDIO_SLPCSR_KEEP_SDIO_ON
+		d.Write8(FuncBackplane, whd.SDIO_SLEEP_CSR, reg8)
 	}
 	// Put SPI interface back to sleep.
-	d.Write8(FuncBackplane, SDIO_PULL_UP, 0xf)
+	d.Write8(FuncBackplane, whd.SDIO_PULL_UP, 0xf)
 
 	// Clear pad pulls
-	err = d.Write8(FuncBackplane, SDIO_PULL_UP, 0)
+	err = d.Write8(FuncBackplane, whd.SDIO_PULL_UP, 0)
 	if err != nil {
 		return err
 	}
-	_, err = d.Read8(FuncBackplane, SDIO_PULL_UP) // read 0x00008001, ref reads 0x0000c001
+	_, err = d.Read8(FuncBackplane, whd.SDIO_PULL_UP) // read 0x00008001, ref reads 0x0000c001
 	if err != nil {
 		return err
 	}
@@ -376,7 +376,7 @@ f2ready:
 	}
 	if verbose_debug {
 		// This will be a non-zero value if save/restore is enabled
-		d.ReadBackplane(CHIPCOMMON_BASE_ADDRESS+0x508, 4)
+		d.ReadBackplane(whd.CHIPCOMMON_BASE_ADDRESS+0x508, 4)
 	}
 
 	Debug("prep bus wake")
@@ -410,20 +410,20 @@ f2ready:
 }
 
 func (d *Dev) GetStatus() (Status, error) {
-	busStatus, err := d.Read32(FuncBus, AddrStatus)
+	busStatus, err := d.Read32(FuncBus, whd.SPI_STATUS_REGISTER)
 	Debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
 }
 
 func (d *Dev) ClearStatus() (Status, error) {
-	busStatus, err := d.Read32(FuncBus, AddrStatus)
-	d.Write32(FuncBus, AddrStatus, 0)
+	busStatus, err := d.Read32(FuncBus, whd.SPI_STATUS_REGISTER)
+	d.Write32(FuncBus, whd.SPI_STATUS_REGISTER, 0)
 	Debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
 }
 
 func (d *Dev) GetInterrupts() (Interrupts, error) {
-	reg, err := d.Read16(FuncBus, AddrInterrupt)
+	reg, err := d.Read16(FuncBus, addrInterrupt)
 	if err == nil {
 		d.lastInt = reg
 	}
@@ -432,15 +432,15 @@ func (d *Dev) GetInterrupts() (Interrupts, error) {
 
 func (d *Dev) ClearInterrupts() error {
 	const dataUnavail = 0x1
-	spiIntStatus, err := d.Read16(FuncBus, AddrInterrupt)
+	spiIntStatus, err := d.Read16(FuncBus, addrInterrupt)
 	if err != nil || spiIntStatus&dataUnavail == 0 {
 		return err // no flags to clear or error.
 	}
-	err = d.Write16(FuncBus, AddrInterrupt, dataUnavail)
+	err = d.Write16(FuncBus, addrInterrupt, dataUnavail)
 	if err != nil {
 		return err
 	}
-	spiIntStatus, err = d.Read16(FuncBus, AddrInterrupt)
+	spiIntStatus, err = d.Read16(FuncBus, addrInterrupt)
 	if err == nil && spiIntStatus&dataUnavail != 0 {
 		err = errors.New("interrupt raised after clear or clear failed")
 	}

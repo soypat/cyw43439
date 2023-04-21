@@ -125,7 +125,7 @@ func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComman
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
 		Debug("doIoctl:sdpcmPoll conclude payloadoffset=", int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
 		// The "wrong payload type" appears to happen during startup. See sdpcmProcessRxPacket
-		if err != nil && !errors.Is(err, Err9WrongPayloadType) {
+		if err != nil && !errors.Is(err, err9WrongPayloadType) {
 			continue
 		}
 		payload := d.buf[payloadOffset : payloadOffset+plen]
@@ -192,7 +192,7 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPC
 			Debug("bus error condition detected =", uint16(intStat), err)
 		}
 		if intStat != 0 {
-			d.Write16(FuncBus, AddrInterrupt, uint16(intStat))
+			d.Write16(FuncBus, addrInterrupt, uint16(intStat))
 		}
 		if !intStat.IsF2Available() {
 			return 0, 0, badResult, errors.New("sdpcmPoll: F2 unavailable")
@@ -282,12 +282,12 @@ func (d *Dev) sendSDPCMCommon(kind uint32, w []byte) error {
 func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	base := coreaddress(coreID)
 	Debug("disable core", coreID, base)
-	d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
-	reg, err := d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
+	d.ReadBackplane(base+whd.AI_RESETCTRL_OFFSET, 1)
+	reg, err := d.ReadBackplane(base+whd.AI_RESETCTRL_OFFSET, 1)
 	if err != nil {
 		return err
 	}
-	if reg&AIRC_RESET != 0 {
+	if reg&whd.AIRC_RESET != 0 {
 		return nil
 	}
 	Debug("core not in reset", reg)
@@ -303,17 +303,17 @@ func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 	}
 	var cpuhaltFlag uint32
 	if coreHalt {
-		cpuhaltFlag = SICF_CPUHALT
+		cpuhaltFlag = whd.SICF_CPUHALT
 	}
 	base := coreaddress(coreID)
-	const addr = 0x18103000 + AI_IOCTRL_OFFSET
+	const addr = 0x18103000 + whd.AI_IOCTRL_OFFSET
 	Debug("begin reset process coreid=", coreID)
-	d.WriteBackplane(base+AI_IOCTRL_OFFSET, 1, SICF_FGC|SICF_CLOCK_EN|cpuhaltFlag)
-	d.ReadBackplane(base+AI_IOCTRL_OFFSET, 1)
-	d.WriteBackplane(base+AI_RESETCTRL_OFFSET, 1, 0)
+	d.WriteBackplane(base+whd.AI_IOCTRL_OFFSET, 1, whd.SICF_FGC|whd.SICF_CLOCK_EN|cpuhaltFlag)
+	d.ReadBackplane(base+whd.AI_IOCTRL_OFFSET, 1)
+	d.WriteBackplane(base+whd.AI_RESETCTRL_OFFSET, 1, 0)
 	time.Sleep(time.Millisecond)
-	d.WriteBackplane(base+AI_IOCTRL_OFFSET, 1, SICF_CLOCK_EN|cpuhaltFlag)
-	d.ReadBackplane(base+AI_IOCTRL_OFFSET, 1)
+	d.WriteBackplane(base+whd.AI_IOCTRL_OFFSET, 1, whd.SICF_CLOCK_EN|cpuhaltFlag)
+	d.ReadBackplane(base+whd.AI_IOCTRL_OFFSET, 1)
 	time.Sleep(time.Millisecond)
 	Debug("end reset process coreid=", coreID)
 	return nil
@@ -324,21 +324,21 @@ func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 // It returns true if communications are down (WL_REG_ON at low).
 func (d *Dev) CoreIsActive(coreID uint8) bool {
 	base := coreaddress(coreID)
-	reg, _ := d.ReadBackplane(base+AI_IOCTRL_OFFSET, 1)
-	if reg&(SICF_FGC|SICF_CLOCK_EN) != SICF_CLOCK_EN {
+	reg, _ := d.ReadBackplane(base+whd.AI_IOCTRL_OFFSET, 1)
+	if reg&(whd.SICF_FGC|whd.SICF_CLOCK_EN) != whd.SICF_CLOCK_EN {
 		return false
 	}
-	reg, _ = d.ReadBackplane(base+AI_RESETCTRL_OFFSET, 1)
-	return reg&AIRC_RESET == 0
+	reg, _ = d.ReadBackplane(base+whd.AI_RESETCTRL_OFFSET, 1)
+	return reg&whd.AIRC_RESET == 0
 }
 
 // coreaddress returns either WLAN=0x18103000  or  SOCRAM=0x18104000
 func coreaddress(coreID uint8) (v uint32) {
 	switch coreID {
-	case CORE_WLAN_ARM:
-		v = WRAPPER_REGISTER_OFFSET + WLAN_ARMCM3_BASE_ADDRESS
-	case CORE_SOCRAM:
-		v = WRAPPER_REGISTER_OFFSET + SOCSRAM_BASE_ADDRESS
+	case whd.CORE_WLAN_ARM:
+		v = whd.WRAPPER_REGISTER_OFFSET + whd.WLAN_ARMCM3_BASE_ADDRESS
+	case whd.CORE_SOCRAM:
+		v = whd.WRAPPER_REGISTER_OFFSET + whd.SOCSRAM_BASE_ADDRESS
 	default:
 		panic("bad core id")
 	}
@@ -351,16 +351,17 @@ func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	addr &= backplaneAddrMask
+	addr &= whd.BACKPLANE_ADDR_MASK
+	// addr &=  whd.BACKPLANE_ADDR_MASK
 	if size == 4 {
-		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
+		addr |= whd.SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
 
 	reg, err := d.rr(FuncBackplane, addr, size)
 	if err != nil {
 		return 0, err
 	}
-	err = d.setBackplaneWindow(CHIPCOMMON_BASE_ADDRESS)
+	err = d.setBackplaneWindow(whd.CHIPCOMMON_BASE_ADDRESS)
 	return reg, err
 }
 
@@ -370,16 +371,16 @@ func (d *Dev) WriteBackplane(addr, size, value uint32) error {
 	if err != nil {
 		return err
 	}
-	addr &= backplaneAddrMask
+	addr &= whd.BACKPLANE_ADDR_MASK
 	if size == 4 {
-		addr |= SBSDIO_SB_ACCESS_2_4B_FLAG
+		addr |= whd.SBSDIO_SB_ACCESS_2_4B_FLAG
 	}
 	err = d.wr(FuncBackplane, addr, size, value)
 	if err != nil {
 		return err
 	}
 
-	return d.setBackplaneWindow(CHIPCOMMON_BASE_ADDRESS)
+	return d.setBackplaneWindow(whd.CHIPCOMMON_BASE_ADDRESS)
 }
 
 func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
@@ -389,7 +390,7 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 		SDIO_BACKPLANE_ADDRESS_LOW  = 0x1000a
 	)
 	currentWindow := d.currentBackplaneWindow
-	addr = addr &^ backplaneAddrMask
+	addr = addr &^ whd.BACKPLANE_ADDR_MASK
 	if addr == currentWindow {
 		return nil
 	}
@@ -427,7 +428,7 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 			sz = rlen - offset
 		}
 		dstAddr := addr + uint32(offset)
-		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
+		if dstAddr&whd.BACKPLANE_ADDR_MASK+uint32(sz) > whd.BACKPLANE_ADDR_MASK+1 {
 			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
 		}
 		// fmt.Println("set backplane window to ", dstAddr, offset)
@@ -441,8 +442,8 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		} else {
 			srcPtr = src[offset:]
 		}
-		// fmt.Println("write bytes to addr ", dstAddr&backplaneAddrMask)
-		err = d.WriteBytes(FuncBackplane, dstAddr&backplaneAddrMask, srcPtr[:sz])
+		// fmt.Println("write bytes to addr ", dstAddr& whd.BACKPLANE_ADDR_MASK)
+		err = d.WriteBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, srcPtr[:sz])
 		if err != nil {
 			return err
 		}
@@ -459,7 +460,7 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		}
 		dstAddr := addr + uint32(offset)
 		// Debug("dstAddr", dstAddr, "addr=", addr, "offset=", offset, "sz=", sz)
-		if dstAddr&backplaneAddrMask+uint32(sz) > backplaneAddrMask+1 {
+		if dstAddr&whd.BACKPLANE_ADDR_MASK+uint32(sz) > whd.BACKPLANE_ADDR_MASK+1 {
 			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
 		}
 		// fmt.Println("set backplane window", dstAddr)
@@ -467,8 +468,8 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		if err != nil {
 			return err
 		}
-		// fmt.Println("read back bytes into buf from ", dstAddr&backplaneAddrMask)
-		err = d.ReadBytes(FuncBackplane, dstAddr&backplaneAddrMask, buf[:sz])
+		// fmt.Println("read back bytes into buf from ", dstAddr& whd.BACKPLANE_ADDR_MASK)
+		err = d.ReadBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, buf[:sz])
 		if err != nil {
 			return err
 		}
@@ -503,20 +504,20 @@ func (d *Dev) ksoSet(value bool) error {
 	Debug("ksoSet enable=", value)
 	var writeVal uint8
 	if value {
-		writeVal = SBSDIO_SLPCSR_KEEP_SDIO_ON
+		writeVal = whd.SBSDIO_SLPCSR_KEEP_SDIO_ON
 	}
 	// These can fail and it's still ok.
-	d.Write8(FuncBackplane, SDIO_SLEEP_CSR, writeVal)
-	d.Write8(FuncBackplane, SDIO_SLEEP_CSR, writeVal)
+	d.Write8(FuncBackplane, whd.SDIO_SLEEP_CSR, writeVal)
+	d.Write8(FuncBackplane, whd.SDIO_SLEEP_CSR, writeVal)
 	// Put device to sleep, turn off KSO if value == 0 and
 	// check for bit0 only, bit1(devon status) may not get cleared right away
 	var compareValue uint8
-	var bmask uint8 = SBSDIO_SLPCSR_KEEP_SDIO_ON
+	var bmask uint8 = whd.SBSDIO_SLPCSR_KEEP_SDIO_ON
 	if value {
 		// device WAKEUP through KSO:
 		// write bit 0 & read back until
 		// both bits 0(kso bit) & 1 (dev on status) are set
-		compareValue = SBSDIO_SLPCSR_KEEP_SDIO_ON | SBSDIO_SLPCSR_DEVICE_ON
+		compareValue = whd.SBSDIO_SLPCSR_KEEP_SDIO_ON | whd.SBSDIO_SLPCSR_DEVICE_ON
 		bmask = compareValue
 	}
 	for i := 0; i < 64; i++ {
@@ -525,12 +526,12 @@ func (d *Dev) ksoSet(value bool) error {
 		// just one write attempt may fail, (same is with read ?)
 		// in any case, read it back until it matches written value
 		// this can fail and it's still ok
-		readValue, err := d.Read8(FuncBackplane, SDIO_SLEEP_CSR)
+		readValue, err := d.Read8(FuncBackplane, whd.SDIO_SLEEP_CSR)
 		if err == nil && readValue&bmask == compareValue && readValue != 0xff {
 			return nil // success
 		}
 		time.Sleep(time.Millisecond)
-		d.Write8(FuncBackplane, SDIO_SLEEP_CSR, writeVal)
+		d.Write8(FuncBackplane, whd.SDIO_SLEEP_CSR, writeVal)
 	}
 	return errors.New("kso set failed")
 }
@@ -594,7 +595,7 @@ func (d *Dev) putMAC(dst []byte) error {
 	buf := d.auxbuf[sdpcmHeaderLen+16:]
 	const varMAC = "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00"
 	copy(buf[:len(varMAC)], varMAC)
-	err := d.doIoctl(SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(varMAC)])
+	err := d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(varMAC)])
 	if err == nil {
 		copy(dst[:6], buf)
 	}
@@ -602,16 +603,16 @@ func (d *Dev) putMAC(dst []byte) error {
 }
 
 var (
-	Err2InvalidPacket             = errors.New("invalid packet")
-	Err3PacketTooSmall            = errors.New("packet too small")
-	Err4IgnoreControlPacket       = errors.New("ignore flow ctl packet")
-	Err5IgnoreSmallControlPacket  = errors.New("ignore too small flow ctl packet")
-	Err6IgnoreWrongIDPacket       = errors.New("ignore packet with wrong id")
-	Err7IgnoreSmallDataPacket     = errors.New("ignore too small data packet")
-	Err8IgnoreTooSmallAsyncPacket = errors.New("ignore too small async packet")
-	Err9WrongPayloadType          = errors.New("wrong payload type")
-	Err10IncorrectOUI             = errors.New("incorrect oui")
-	Err11UnknownHeader            = errors.New("unknown header")
+	err2InvalidPacket             = errors.New("invalid packet")
+	err3PacketTooSmall            = errors.New("packet too small")
+	err4IgnoreControlPacket       = errors.New("ignore flow ctl packet")
+	err5IgnoreSmallControlPacket  = errors.New("ignore too small flow ctl packet")
+	err6IgnoreWrongIDPacket       = errors.New("ignore packet with wrong id")
+	err7IgnoreSmallDataPacket     = errors.New("ignore too small data packet")
+	err8IgnoreTooSmallAsyncPacket = errors.New("ignore too small async packet")
+	err9WrongPayloadType          = errors.New("wrong payload type")
+	err10IncorrectOUI             = errors.New("incorrect oui")
+	err11UnknownHeader            = errors.New("unknown header")
 )
 
 // sdpcmProcessRxPacket finds payload in WLAN RxPacket and returns the kind of packet.
@@ -622,9 +623,9 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 	hdr := whd.DecodeSDPCMHeader(buf[sdpcmOffset:])
 	switch {
 	case hdr.Size != ^hdr.SizeCom&0xffff:
-		return 0, 0, badFlag, Err2InvalidPacket
+		return 0, 0, badFlag, err2InvalidPacket
 	case hdr.Size < sdpcmHeaderSize:
-		return 0, 0, badFlag, Err3PacketTooSmall
+		return 0, 0, badFlag, err3PacketTooSmall
 	}
 	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
 		Debug("WLAN: changed flow control", d.wlanFlowCtl, hdr.WirelessFlowCtl)
@@ -639,7 +640,7 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 		}
 	}
 	if hdr.Size == whd.SDPCM_HEADER_LEN {
-		return 0, 0, badFlag, Err4IgnoreControlPacket // Flow ctl packet with no data.
+		return 0, 0, badFlag, err4IgnoreControlPacket // Flow ctl packet with no data.
 	}
 
 	payloadOffset = uint32(hdr.HeaderLength)
@@ -648,12 +649,12 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 	case whd.CONTROL_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
 		if hdr.Size < totalHeaderSize {
-			return 0, 0, badFlag, Err5IgnoreSmallControlPacket
+			return 0, 0, badFlag, err5IgnoreSmallControlPacket
 		}
 		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
 		id := ioctlHeader.ID()
 		if id != d.sdpcmRequestedIoctlID {
-			return 0, 0, badFlag, Err6IgnoreWrongIDPacket
+			return 0, 0, badFlag, err6IgnoreWrongIDPacket
 		}
 		payloadOffset += whd.IOCTL_HEADER_LEN
 		plen = uint32(hdr.Size) - payloadOffset
@@ -662,7 +663,7 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 	case whd.DATA_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, Err7IgnoreSmallDataPacket
+			return 0, 0, badFlag, err7IgnoreSmallDataPacket
 		}
 
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
@@ -673,7 +674,7 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 	case whd.ASYNCEVENT_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, Err8IgnoreTooSmallAsyncPacket
+			return 0, 0, badFlag, err8IgnoreTooSmallAsyncPacket
 		}
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
 		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
@@ -684,17 +685,17 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 			// ethernet packet doesn't have the correct type.
 			// Note - this happens during startup but appears to be expected
 			// return 0, 0, badFlag, Err9WrongPayloadType
-			err = Err9WrongPayloadType
+			err = err9WrongPayloadType
 		}
 		// Check the Broadcom OUI.
 		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
-			return 0, 0, badFlag, Err10IncorrectOUI
+			return 0, 0, badFlag, err10IncorrectOUI
 		}
 		plen = plen - 24
 		payloadOffset = payloadOffset + 24
 	default:
 		// Unknown Header.
-		return 0, 0, badFlag, Err11UnknownHeader
+		return 0, 0, badFlag, err11UnknownHeader
 	}
 	return payloadOffset, plen, headerFlag, err
 }
