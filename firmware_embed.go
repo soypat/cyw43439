@@ -8,14 +8,16 @@ import _ "embed"
 // when developing.
 
 var (
-	// Of raw length 225240.
-	//go:embed wififw.bin
-	wifiFWs string
-	// Of raw length 225240.
-	//go:embed wififw.bin
-	wifiFW   []byte
-	wifibtFW [6164]byte
-	btFW     [232408]byte
+
+	// Of raw size 225240.
+	//go:embed firmware/wififw.bin
+	wifiFW []byte
+	// Of raw size 232408 bytes
+	//go:embed firmware/wifibtfw.bin
+	wifibtFW []byte
+	// Of raw size 6164 bytes.
+	//go:embed firmware/btfw.bin
+	btFW []byte
 )
 
 const (
