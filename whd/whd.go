@@ -2,6 +2,67 @@
 
 package whd
 
+// CountryCode returns the country code representation given an uppercase two character string.
+// Known countries:
+//   - WORLDWIDE      "XX" (use this if in doubt)
+//   - AUSTRALIA      "AU"
+//   - AUSTRIA        "AT"
+//   - BELGIUM        "BE"
+//   - BRAZIL         "BR"
+//   - CANADA         "CA"
+//   - CHILE          "CL"
+//   - CHINA          "CN"
+//   - COLOMBIA       "CO"
+//   - CZECH_REPUBLIC "CZ"
+//   - DENMARK        "DK"
+//   - ESTONIA        "EE"
+//   - FINLAND        "FI"
+//   - FRANCE         "FR"
+//   - GERMANY        "DE"
+//   - GREECE         "GR"
+//   - HONG_KONG      "HK"
+//   - HUNGARY        "HU"
+//   - ICELAND        "IS"
+//   - INDIA          "IN"
+//   - ISRAEL         "IL"
+//   - ITALY          "IT"
+//   - JAPAN          "JP"
+//   - KENYA          "KE"
+//   - LATVIA         "LV"
+//   - LIECHTENSTEIN  "LI"
+//   - LITHUANIA      "LT"
+//   - LUXEMBOURG     "LU"
+//   - MALAYSIA       "MY"
+//   - MALTA          "MT"
+//   - MEXICO         "MX"
+//   - NETHERLANDS    "NL"
+//   - NEW_ZEALAND    "NZ"
+//   - NIGERIA        "NG"
+//   - NORWAY         "NO"
+//   - PERU           "PE"
+//   - PHILIPPINES    "PH"
+//   - POLAND         "PL"
+//   - PORTUGAL       "PT"
+//   - SINGAPORE      "SG"
+//   - SLOVAKIA       "SK"
+//   - SLOVENIA       "SI"
+//   - SOUTH_AFRICA   "ZA"
+//   - SOUTH_KOREA    "KR"
+//   - SPAIN          "ES"
+//   - SWEDEN         "SE"
+//   - SWITZERLAND    "CH"
+//   - TAIWAN         "TW"
+//   - THAILAND       "TH"
+//   - TURKEY         "TR"
+//   - UK             "GB"
+//   - USA            "US"
+func CountryCode(s string, rev uint8) uint32 {
+	if len(s) != 2 || s[0] < 'A' || s[0] > 'Z' || s[1] < 'A' || s[1] > 'Z' {
+		return 0 // bad country code.
+	}
+	return uint32(s[0]) | uint32(s[0])<<8 | uint32(rev)<<16
+}
+
 const (
 	SDPCM_HEADER_LEN = 12
 	IOCTL_HEADER_LEN = 16

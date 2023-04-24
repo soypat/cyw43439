@@ -48,11 +48,11 @@ const (
 
 // 16 bit register addresses on SPI.
 const (
-	addrInterrupt       = 0x0004
-	addrInterruptEnable = 0x0006
-	addrFunc1Info       = 0x000c
-	addrFunc2Info       = 0x000e
-	addrFunc3Info       = 0x0010
+	addrInterrupt       = whd.SPI_INTERRUPT_REGISTER
+	addrInterruptEnable = whd.SPI_INTERRUPT_ENABLE_REGISTER
+	addrFunc1Info       = whd.SPI_FUNCTION1_INFO
+	addrFunc2Info       = whd.SPI_FUNCTION2_INFO
+	addrFunc3Info       = whd.SPI_FUNCTION3_INFO
 )
 
 // 8 bit register addresses on SPI.

@@ -1,5 +1,3 @@
-//go:build !cy43firmware
-
 package cyw43439
 
 import _ "embed"
