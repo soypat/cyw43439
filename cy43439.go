@@ -471,3 +471,84 @@ func flushprint() {
 	for machine.UART0.Bus.GetUARTFR_BUSY() != 0 {
 	}
 }
+
+// cyw43_ll_wifi_on
+func (d *Dev) wifiOn(country uint32) error {
+	buf := d.offbuf()
+	copy(buf, "country\x00")
+	binary.LittleEndian.PutUint32(buf[:8], country&0xff_ff)
+	if country>>16 == 0 {
+		binary.LittleEndian.PutUint32(buf[:12], 4294967295)
+	} else {
+		binary.LittleEndian.PutUint32(buf[:12], country>>16)
+	}
+	binary.LittleEndian.PutUint32(buf[:16], country&0xff_ff)
+	err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:20])
+	if err != nil {
+		return err
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	// Set antenna to chip antenna
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_ANTDIV, 0)
+	if err != nil {
+		return err
+	}
+
+	// Set some WiFi config
+	err = d.WriteIOVar("bus:txglom", whd.WWD_STA_INTERFACE, 0) // Tx glomming off.
+	if err != nil {
+		return err
+	}
+	err = d.WriteIOVar("apsta", whd.WWD_STA_INTERFACE, 1) // apsta on.
+	if err != nil {
+		return err
+	}
+	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
+	if err != nil {
+		return err
+	}
+	err = d.WriteIOVar("ampdu_mpdu", whd.WWD_STA_INTERFACE, 4)
+	if err != nil {
+		return err
+	}
+	err = d.WriteIOVar("ampdu_rx_factor", whd.WWD_STA_INTERFACE, 0)
+	if err != nil {
+		return err
+	}
+
+	// This delay is needed for the WLAN chip to do some processing, otherwise
+	// SDIOIT/OOB WL_HOST_WAKE IRQs in bus-sleep mode do no work correctly.
+	time.Sleep(150 * time.Millisecond) // TODO(soypat): rewrite to only sleep if 150ms did not elapse since startup.
+	const (
+		msg    = "bsscfg:event_msgs\x00"
+		msgLen = len(msg)
+	)
+	copy(buf, msg)
+	for i := 0; i < 19; i++ {
+		buf[22+i] = 0xff // Clear async events.
+	}
+	clrEv := func(buf []byte, i int) {
+		buf[18+4+i/8] &= ^(1 << (i % 8))
+	}
+	clrEv(buf, 19)
+	clrEv(buf, 20)
+	clrEv(buf, 40)
+	clrEv(buf, 44)
+	clrEv(buf, 54)
+	clrEv(buf, 71)
+
+	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:18+4+19])
+	if err != nil {
+		return err
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Set interface as "up".
+	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_UP, nil)
+	if err != nil {
+		return err
+	}
+	time.Sleep(50 * time.Millisecond)
+	return nil
+}

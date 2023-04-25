@@ -39,11 +39,8 @@ func (p Pin) Low() error  { return p.Set(false) }
 // Most of these were inspired by cyw43-driver/src/cyw43_ll.c contents.
 
 const (
-	sdpcmCTLHEADER      = 0
-	sdpcmASYNCEVTHEADER = 1
-	sdpcmDATAHEADER     = 2
-
-	sdpcmHeaderSize = 12 //unsafe.Sizeof(sdpcmHeader{})
+	// a =
+	// sdpcmHeaderSize = 12 //unsafe.Sizeof(sdpcmHeader{})
 	ioctlHeaderSize = 16 // unsafe.Sizeof(ioctlHeader{})
 )
 
@@ -103,6 +100,20 @@ func (d *Dev) DoIoctl32(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComm
 	var buf [4]byte
 	binary.LittleEndian.PutUint32(buf[:], val)
 	return d.doIoctl(kind, iface, cmd, buf[:])
+}
+
+func (d *Dev) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
+	println("SetIoctl32")
+	var buf [4]byte
+	binary.LittleEndian.PutUint32(buf[:], val)
+	return d.doIoctl(whd.SDPCM_SET, iface, cmd, buf[:])
+}
+
+func (d *Dev) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uint32, error) {
+	println("GetIoctl32")
+	var buf [4]byte
+	err := d.doIoctl(whd.SDPCM_GET, iface, cmd, buf[:])
+	return binary.LittleEndian.Uint32(buf[:4]), err
 }
 
 func (d *Dev) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
@@ -170,7 +181,8 @@ func (d *Dev) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComm
 	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
 	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
 	Debug("sendIoctl cmd=", uint32(header.Cmd), " len=", header.Len, " flags=", header.Flags, "status=", header.Status)
-	return d.sendSDPCMCommon(sdpcmCTLHEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
+
+	return d.sendSDPCMCommon(whd.CONTROL_HEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
 }
 
 // sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
@@ -247,10 +259,10 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPC
 
 // sendSDPCMCommon is cyw43_sdpcm_send_common in pico-sdk (actually contained in cy43-driver)
 // Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
-func (d *Dev) sendSDPCMCommon(kind uint32, w []byte) error {
+func (d *Dev) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 	// TODO where is cmd used here????
 	Debug("sendSDPCMCommon len=", len(w))
-	if kind != sdpcmCTLHEADER && kind != sdpcmDATAHEADER {
+	if kind != whd.CONTROL_HEADER && kind != whd.DATA_HEADER {
 		return errors.New("unexpected SDPCM kind")
 	}
 	err := d.busSleep(false)
@@ -258,7 +270,7 @@ func (d *Dev) sendSDPCMCommon(kind uint32, w []byte) error {
 		return err
 	}
 	headerLength := uint8(whd.SDPCM_HEADER_LEN)
-	if kind == sdpcmDATAHEADER {
+	if kind == whd.DATA_HEADER {
 		headerLength += 2
 	}
 	size := uint16(len(w))        //+ uint16(hdlen)
@@ -624,7 +636,7 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 	switch {
 	case hdr.Size != ^hdr.SizeCom&0xffff:
 		return 0, 0, badFlag, err2InvalidPacket
-	case hdr.Size < sdpcmHeaderSize:
+	case hdr.Size < whd.SDPCM_HEADER_LEN:
 		return 0, 0, badFlag, err3PacketTooSmall
 	}
 	if d.wlanFlowCtl != hdr.WirelessFlowCtl {

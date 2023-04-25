@@ -56,6 +56,8 @@ package whd
 //   - TURKEY         "TR"
 //   - UK             "GB"
 //   - USA            "US"
+//
+//go:inline
 func CountryCode(s string, rev uint8) uint32 {
 	if len(s) != 2 || s[0] < 'A' || s[0] > 'Z' || s[1] < 'A' || s[1] > 'Z' {
 		return 0 // bad country code.
