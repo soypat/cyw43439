@@ -57,6 +57,7 @@ func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	return spi, CS, WL_REG_ON, IRQ
 }
 
+// reference: cyw43_ll_t
 type Dev struct {
 	spi drivers.SPI
 	// Chip select pin. Driven LOW during SPI transaction.
@@ -103,6 +104,7 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 	}
 }
 
+// reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Dev) Init(cfg Config) (err error) {
 	if cfg.MAC != nil && len(cfg.MAC) != 6 {
 		return errors.New("bad MAC address")
@@ -184,7 +186,7 @@ chipup:
 		return err
 	}
 	if initReadback {
-		d.Read8(FuncBus, addrRespDelayF1)
+		d.Read8(FuncBus, whd.SPI_RESP_DELAY_F1)
 	}
 	// Make sure error interrupt bits are clear
 	const (
@@ -194,12 +196,12 @@ chipup:
 		f1Overflow      = 0x80
 		value           = dataUnavailable | commandError | dataError | f1Overflow
 	)
-	err = d.Write8(FuncBus, addrInterrupt, value)
+	err = d.Write8(FuncBus, whd.SPI_INTERRUPT_REGISTER, value)
 	if err != nil {
 		return err
 	}
 	if initReadback {
-		d.Read8(FuncBus, addrInterrupt)
+		d.Read8(FuncBus, whd.SPI_INTERRUPT_REGISTER)
 	}
 	// Enable selection of interrupts:
 	const wifiIntr = whd.F2_F3_FIFO_RD_UNDERFLOW | whd.F2_F3_FIFO_WR_OVERFLOW |
@@ -208,31 +210,25 @@ chipup:
 	if cfg.EnableBluetooth {
 		intr |= whd.F1_INTR
 	}
-	err = d.Write16(FuncBus, addrInterruptEnable, intr)
+	err = d.Write16(FuncBus, whd.SPI_INTERRUPT_ENABLE_REGISTER, intr)
 	if err != nil {
 		return err
 	}
 	Debug("backplane is ready")
 
-	// TODO: For when we are ready to download firmware.
-	const (
-		SDIO_CHIP_CLOCK_CSR  = 0x1000e
-		SBSDIO_ALP_AVAIL_REQ = 0x8
-		SBSDIO_ALP_AVAIL     = 0x40
-	)
 	// Clear data unavailable error if there is any.
 	// err = d.ClearInterrupts()
 	// if err != nil {
 	// 	return err
 	// }
-	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, SBSDIO_ALP_AVAIL_REQ)
+	d.Write8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR, whd.SBSDIO_ALP_AVAIL_REQ)
 	for i := 0; i < 10; i++ {
 		time.Sleep(time.Millisecond)
-		reg8, err = d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)
+		reg8, err = d.Read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
 		if err != nil {
 			return err
 		}
-		if reg8&SBSDIO_ALP_AVAIL != 0 {
+		if reg8&whd.SBSDIO_ALP_AVAIL != 0 {
 			goto alpset
 		}
 	}
@@ -242,7 +238,7 @@ chipup:
 alpset:
 	Debug("ALP Set")
 	// Clear request for ALP
-	d.Write8(FuncBackplane, SDIO_CHIP_CLOCK_CSR, 0)
+	d.Write8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR, 0)
 	if verbose_debug && validateDownloads {
 		chipID, err := d.ReadBackplane(whd.CHIPCOMMON_BASE_ADDRESS, 2)
 		if err != nil {
@@ -307,7 +303,7 @@ alpset:
 	Debug("wlan core reset success")
 	// Wait until HT clock is available.
 	for i := 0; i < 1000; i++ {
-		reg, _ := d.Read8(FuncBackplane, SDIO_CHIP_CLOCK_CSR)
+		reg, _ := d.Read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
 		if reg&whd.SBSDIO_HT_AVAIL != 0 {
 			goto htready
 		}
@@ -423,7 +419,7 @@ func (d *Dev) ClearStatus() (Status, error) {
 }
 
 func (d *Dev) GetInterrupts() (Interrupts, error) {
-	reg, err := d.Read16(FuncBus, addrInterrupt)
+	reg, err := d.Read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
 	if err == nil {
 		d.lastInt = reg
 	}
@@ -432,15 +428,15 @@ func (d *Dev) GetInterrupts() (Interrupts, error) {
 
 func (d *Dev) ClearInterrupts() error {
 	const dataUnavail = 0x1
-	spiIntStatus, err := d.Read16(FuncBus, addrInterrupt)
+	spiIntStatus, err := d.Read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
 	if err != nil || spiIntStatus&dataUnavail == 0 {
 		return err // no flags to clear or error.
 	}
-	err = d.Write16(FuncBus, addrInterrupt, dataUnavail)
+	err = d.Write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, dataUnavail)
 	if err != nil {
 		return err
 	}
-	spiIntStatus, err = d.Read16(FuncBus, addrInterrupt)
+	spiIntStatus, err = d.Read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
 	if err == nil && spiIntStatus&dataUnavail != 0 {
 		err = errors.New("interrupt raised after clear or clear failed")
 	}
@@ -472,7 +468,7 @@ func flushprint() {
 	}
 }
 
-// cyw43_ll_wifi_on
+// reference: cyw43_ll_wifi_on
 func (d *Dev) wifiOn(country uint32) error {
 	buf := d.offbuf()
 	copy(buf, "country\x00")
@@ -519,7 +515,7 @@ func (d *Dev) wifiOn(country uint32) error {
 
 	// This delay is needed for the WLAN chip to do some processing, otherwise
 	// SDIOIT/OOB WL_HOST_WAKE IRQs in bus-sleep mode do no work correctly.
-	time.Sleep(150 * time.Millisecond) // TODO(soypat): rewrite to only sleep if 150ms did not elapse since startup.
+	time.Sleep(150 * time.Millisecond) // TODO(soypat): Not critical: rewrite to only sleep if 150ms did not elapse since startup.
 	const (
 		msg    = "bsscfg:event_msgs\x00"
 		msgLen = len(msg)

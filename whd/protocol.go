@@ -116,6 +116,7 @@ type AsyncEvent struct {
 	u         EventScanResult
 }
 
+// reference: cyw43_ll_parse_async_event
 func ParseAsyncEvent(buf []byte) (as AsyncEvent, err error) {
 	if len(buf) < int(unsafe.Sizeof(as)) {
 		return as, errors.New("buffer too small to parse async event")
@@ -182,6 +183,7 @@ type EventScanResult struct {
 	RSSI int16
 }
 
+// reference: cyw43_ll_wifi_parse_scan_result
 func ParseScanResult(buf []byte) (sr EventScanResult, err error) {
 	type scanresult struct {
 		buflen   uint32
@@ -197,7 +199,7 @@ func ParseScanResult(buf []byte) (sr EventScanResult, err error) {
 	if uint32(scan.bss.IEOffset)+scan.bss.IELength > scan.bss.Length {
 		return sr, errors.New("IE end exceeds bss length")
 	}
-	// TODO lots of stuff missing here.
+	// TODO(soypat): lots of stuff missing here.
 	return *(*EventScanResult)(unsafe.Pointer(&scan.bss)), nil
 }
 
@@ -221,81 +223,3 @@ type ScanOptions struct {
 	ChannelNum  int32
 	ChannelList [1]uint16
 }
-
-// func ProcessSDPCMRxPacket(buf []byte, lastCredit uint8, requestIoctlID uint16) (payloadOffset, plen uint32, hdr SDPCMHeader, newCredit uint8, err error) {
-// 	const badFlag = 0
-// 	const sdpcmOffset = 0
-// 	hdr = DecodeSDPCMHeader(buf[sdpcmOffset:])
-// 	switch {
-// 	case hdr.Size != ^hdr.SizeCom&0xffff:
-// 		return 0, 0, SDPCMHeader{}, lastCredit, Err2InvalidPacket
-// 	case hdr.Size < SDPCM_HEADER_LEN:
-// 		return 0, 0, SDPCMHeader{}, lastCredit, Err3PacketTooSmall
-// 	}
-
-// 	if hdr.Type() < 3 {
-// 		// A valid header, check the bus data credit.
-// 		credit := hdr.BusDataCredit - lastCredit
-// 		if credit <= 20 {
-// 			newCredit = hdr.BusDataCredit
-// 		}
-// 	}
-// 	if hdr.Size == SDPCM_HEADER_LEN {
-// 		return 0, 0, hdr, newCredit, Err4IgnoreControlPacket // Flow ctl packet with no data.
-// 	}
-
-// 	payloadOffset = uint32(hdr.HeaderLength)
-// 	headerFlag := hdr.Type()
-// 	switch headerFlag {
-// 	case CONTROL_HEADER:
-// 		const totalHeaderSize = SDPCM_HEADER_LEN + IOCTL_HEADER_LEN
-// 		if hdr.Size < totalHeaderSize {
-// 			return 0, 0, hdr, newCredit, Err5IgnoreSmallControlPacket
-// 		}
-// 		ioctlHeader := DecodeIoctlHeader(buf[payloadOffset:])
-// 		id := ioctlHeader.ID()
-// 		if id != requestIoctlID {
-// 			return 0, 0, hdr, newCredit, Err6IgnoreWrongIDPacket
-// 		}
-// 		payloadOffset += IOCTL_HEADER_LEN
-// 		plen = uint32(hdr.Size) - payloadOffset
-
-// 	case DATA_HEADER:
-// 		const totalHeaderSize = SDPCM_HEADER_LEN + BDC_HEADER_LEN
-// 		if hdr.Size <= totalHeaderSize {
-// 			return 0, 0, hdr, newCredit, Err7IgnoreSmallDataPacket
-// 		}
-
-// 		bdcHeader := DecodeBDCHeader(buf[payloadOffset:])
-// 		itf := bdcHeader.Flags2 // Get interface number.
-// 		payloadOffset += BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
-// 		plen = (uint32(hdr.Size) - payloadOffset) | uint32(itf)<<31
-
-// 	case ASYNCEVENT_HEADER:
-// 		const totalHeaderSize = SDPCM_HEADER_LEN + BDC_HEADER_LEN
-// 		if hdr.Size <= totalHeaderSize {
-// 			return 0, 0, hdr, newCredit, Err8IgnoreTooSmallAsyncPacket
-// 		}
-// 		bdcHeader := DecodeBDCHeader(buf[payloadOffset:])
-// 		payloadOffset += BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
-// 		plen = uint32(hdr.Size) - payloadOffset
-// 		payload := buf[payloadOffset:]
-// 		// payload is actually an ethernet packet with type 0x886c.
-// 		if !(payload[12] == 0x88 && payload[13] == 0x6c) {
-// 			// ethernet packet doesn't have the correct type.
-// 			// Note - this happens during startup but appears to be expected
-// 			// return 0, 0, badFlag, Err9WrongPayloadType
-// 			err = Err9WrongPayloadType
-// 		}
-// 		// Check the Broadcom OUI.
-// 		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
-// 			return 0, 0, hdr, newCredit, Err10IncorrectOUI
-// 		}
-// 		plen = plen - 24
-// 		payloadOffset = payloadOffset + 24
-// 	default:
-// 		// Unknown Header.
-// 		return 0, 0, hdr, newCredit, Err11UnknownHeader
-// 	}
-// 	return payloadOffset, plen, hdr, newCredit, err
-// }

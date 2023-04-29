@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"strconv"
-	"time"
 
 	"github.com/soypat/cyw43439/whd"
 )
@@ -26,6 +25,7 @@ type Config struct {
 func DefaultConfig(enableBT bool) Config {
 	var fw []byte
 	if enableBT {
+		panic("not implemented yet")
 		// fw = wifibtFW[:wifibtFWLen]
 	} else {
 		fw = wifiFW[:wifiFWLen]
@@ -38,32 +38,8 @@ func DefaultConfig(enableBT bool) Config {
 	}
 }
 
-// TODO: delete these auxiliary variables.
 const (
-	responseDelay                 time.Duration = 0 //20 * time.Microsecond
-	whdBusSPIBackplaneReadPadding               = 4
-	sharedDATA                                  = true
-	pollLimit                                   = 60 * time.Millisecond
-)
-
-// 16 bit register addresses on SPI.
-const (
-	addrInterrupt       = whd.SPI_INTERRUPT_REGISTER
-	addrInterruptEnable = whd.SPI_INTERRUPT_ENABLE_REGISTER
-	addrFunc1Info       = whd.SPI_FUNCTION1_INFO
-	addrFunc2Info       = whd.SPI_FUNCTION2_INFO
-	addrFunc3Info       = whd.SPI_FUNCTION3_INFO
-)
-
-// 8 bit register addresses on SPI.
-const (
-	addrRespDelayF0   = 0x001c // corerev >= 1
-	addrRespDelayF1   = 0x001d // corerev >= 1
-	addrRespDelayF2   = 0x001e // corerev >= 1
-	addrRespDelayF3   = 0x001f // corerev >= 1
-	addrResponseDelay = 0x0001
-	addrStatusEnable  = 0x0002
-	addrResetBP       = 0x0003 // corerev >= 1
+	sharedDATA = true
 )
 
 type Function uint32
@@ -196,6 +172,9 @@ var errFirmwareValidationFailed = errors.New("firmware validation failed")
 
 var debugBuf [128]byte
 
+// Debug prints out arguments. Keep in mind it needs primitive Go types to work.
+// This means it will not print out user defined types, even if the underlying type is an integer.
+// Nil arguments are omitted.
 func Debug(a ...any) {
 	if verbose_debug {
 		for i, v := range a {
@@ -208,12 +187,6 @@ func Debug(a ...any) {
 				printSpace = len(c) > 0 && c[len(c)-1] != '='
 			case int:
 				print(c)
-				// if c < 0 {
-				// 	print(c)
-				// } else {
-				// 	printUi = true
-				// 	ui = uint64(c)
-				// }
 			case uint8:
 				printUi = true
 				ui = uint64(c)

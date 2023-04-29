@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"machine"
+
+	"github.com/soypat/cyw43439/whd"
 )
 
 // gSPI transaction endianess.
@@ -21,11 +23,13 @@ func (d *Dev) Write32(fn Function, addr, val uint32) error {
 	return err
 }
 
+// reference: cyw43_write_reg_u16
 func (d *Dev) Write16(fn Function, addr uint32, val uint16) error {
 	err := d.wr(fn, addr, 2, uint32(val))
 	return err
 }
 
+// reference: cyw43_write_reg_u8
 func (d *Dev) Write8(fn Function, addr uint32, val uint8) error {
 	err := d.wr(fn, addr, 1, uint32(val))
 	return err
@@ -40,15 +44,16 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 		d.lastHeader[1] = uint32(val)
 		d.lastBackplaneWindow = d.currentBackplaneWindow
 	}
+	// TODO(soypat): It seems that this would work with one single case:
+	// endian.PutUint32(buf[:], val). Leave as is until driver is complete and can be end-to-end tested.
 	switch size {
 	case 4:
 		endian.PutUint32(buf[:], val)
 	case 2:
-		endian.PutUint16(buf[:2], uint16(val)) // !LE
+		endian.PutUint16(buf[:2], uint16(val))
 	case 1:
-		buf[0] = byte(val) // !LE
-		// TODO: original driver writes msb bits even though specifying
-		// transaction size 1. Is it necessary?
+
+		buf[0] = byte(val)
 		buf[1] = byte(val >> 8)
 		buf[2] = byte(val >> 16)
 		buf[3] = byte(val >> 24)
@@ -73,7 +78,7 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 	return err
 }
 
-// WriteBytes is cyw43_write_bytes
+// reference: cyw43_write_bytes
 func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 	// Debug("WriteBytes addr=", addr, "len=", len(src), "fn=", fn.String())
 	length := uint32(len(src))
@@ -91,7 +96,7 @@ func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 		}
 		readyAttempts := 1000
 		for ; readyAttempts > 0; readyAttempts-- {
-			status, err := d.GetStatus() // TODO: We're getting Status not ready here.
+			status, err := d.GetStatus()
 			if err != nil {
 				return err
 			}
@@ -137,16 +142,19 @@ func (d *Dev) spiWrite(cmd uint32, w []byte) error {
 	return nil
 }
 
+// reference: cyw43_read_reg_u32
 func (d *Dev) Read32(fn Function, addr uint32) (uint32, error) {
 	v, err := d.rr(fn, addr, 4)
 	return v, err
 }
 
+// reference: cyw43_read_reg_u16
 func (d *Dev) Read16(fn Function, addr uint32) (uint16, error) {
 	v, err := d.rr(fn, addr, 2)
 	return uint16(v), err
 }
 
+// reference: cyw43_read_reg_u8
 func (d *Dev) Read8(fn Function, addr uint32) (uint8, error) {
 	v, err := d.rr(fn, addr, 1)
 	return uint8(v), err
@@ -156,10 +164,10 @@ func (d *Dev) Read8(fn Function, addr uint32) (uint8, error) {
 func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	var padding uint32
 	if fn == FuncBackplane {
-		padding = whdBusSPIBackplaneReadPadding
+		padding = whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE
 	}
 	cmd := make_cmd(false, true, fn, addr, size+padding)
-	var buf [4 + whdBusSPIBackplaneReadPadding]byte
+	var buf [4 + whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE]byte
 	d.csLow()
 	err := d.spiRead(cmd, buf[:4+padding], 0)
 	d.csHigh()
@@ -179,6 +187,7 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 	return result, err
 }
 
+// reference: cyw43_read_bytes
 func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 	Debug("read bytes addr=", addr, "len=", len(src), "fn=", fn.String())
 	const maxReadPacket = 2040
@@ -199,7 +208,6 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 		}
 		src = src[:len(src)+4]
 	}
-	// TODO: Use DelayResponse to simulate padding effect.
 	cmd := make_cmd(false, true, fn, addr, length+uint32(padding))
 	d.csLow()
 	err := d.spiRead(cmd, src, uint8(padding))
@@ -252,15 +260,6 @@ func (d *Dev) responseDelay(padding uint8) {
 	for i := uint8(0); i < padding; i++ {
 		d.spi.Transfer(0)
 	}
-}
-
-//go:inline
-func (d *Dev) csPeak() {
-	// d.csHigh()
-	// for i := 0; i < 40; i++ {
-	// 	device.Asm("nop")
-	// }
-	// d.csLow()
 }
 
 //go:inline
@@ -331,7 +330,6 @@ func (d *Dev) Read32S(fn Function, addr uint32) (uint32, error) {
 	}
 	binary.BigEndian.PutUint32(buf[:], swap32(cmd))
 	d.spi.Tx(buf[:], nil)
-	d.csPeak()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}

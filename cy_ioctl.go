@@ -61,6 +61,7 @@ func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
 // Returns a safe to use buffer outside of the bounds of buffers used by Ioctl calls.
 func (d *Dev) offbuf() []byte { return d.auxbuf[:] }
 
+// reference: cyw43_write_iovar_u32
 func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error {
 	Debug("WriteIOVar var=", VAR, "ioctl=", uint8(iface), "val=", val)
 	buf := d.offbuf()
@@ -71,6 +72,7 @@ func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+4])
 }
 
+// reference: cyw43_write_iovar_u32_u32
 func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
 	Debug("WriteIOVar2 var=", VAR, "ioctl=", uint8(iface), "val1=", val0, "val2=", val1)
 	buf := d.offbuf()
@@ -82,40 +84,39 @@ func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint3
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+8])
 }
 
+// reference: cyw43_write_iovar_n
 func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) error {
 	Debug("WriteIOVarN var=", VAR, "ioctl=", uint8(iface), "len=", len(src))
 	iobuf := d.offbuf()
 	if len(VAR)+len(src)+1 > len(iobuf) {
 		return errors.New("buffer too short for IOVarN call")
 	}
-	length := copy(iobuf, VAR)
-	iobuf[length] = 0 // Null terminate the string
+	// Must do some buffer juggling so that
+	// if offbuf is passed in src we do not overwrite the data.
+	length := copy(iobuf[len(VAR)+1:], src)
+	length += copy(iobuf, VAR)
+	iobuf[len(VAR)] = 0 // Null terminate the string
 	length++
-	length += copy(iobuf[length:], src)
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, iobuf[:length])
 }
 
-func (d *Dev) DoIoctl32(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
-	println("DoIoctl32")
-	var buf [4]byte
-	binary.LittleEndian.PutUint32(buf[:], val)
-	return d.doIoctl(kind, iface, cmd, buf[:])
-}
-
+// reference: cyw43_set_ioctl_u32
 func (d *Dev) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
-	println("SetIoctl32")
+	Debug("SetIoctl32")
 	var buf [4]byte
 	binary.LittleEndian.PutUint32(buf[:], val)
 	return d.doIoctl(whd.SDPCM_SET, iface, cmd, buf[:])
 }
 
+// reference: cyw43_get_ioctl_u32
 func (d *Dev) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uint32, error) {
-	println("GetIoctl32")
+	Debug("GetIoctl32")
 	var buf [4]byte
 	err := d.doIoctl(whd.SDPCM_GET, iface, cmd, buf[:])
 	return binary.LittleEndian.Uint32(buf[:4]), err
 }
 
+// reference: cyw43_ll_ioctl
 func (d *Dev) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
 	kind := uint32(0)
 	if cmd&1 != 0 {
@@ -124,6 +125,10 @@ func (d *Dev) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) er
 	return d.doIoctl(kind, iface, cmd>>1, w)
 }
 
+// doIoctl uses Dev's primary buffer to perform ioctl call. Use [Dev.offbuff] for
+// allocations that are passed into doIoctl.
+//
+//	reference: cyw43_do_ioctl
 func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, buf []byte) error {
 	err := d.sendIoctl(kind, iface, cmd, buf)
 	if err != nil {
@@ -149,9 +154,11 @@ func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComman
 			return nil
 
 		case whd.ASYNCEVENT_HEADER:
+			// TODO(soypat): Must handle this for wifi to work. cyw43_cb_process_async_event
 			Debug("ASYNCEVENT not handled")
 		case whd.DATA_HEADER:
-			Debug("CY43 has no ethernet interface")
+			// TODO(soypat): Implement ethernet interface. cyw43_cb_process_ethernet
+			Debug("DATA_HEADER not implemented yet")
 		default:
 			Debug("doIoctl got unexpected packet", header)
 		}
@@ -163,7 +170,7 @@ func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComman
 
 var errDoioctlTimeout = errors.New("doIoctl time out waiting for data")
 
-// sendIoctl is cyw43_send_ioctl in pico-sdk (actually contained in cy43-driver)
+// reference: cyw43_send_ioctl
 func (d *Dev) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
 	Debug("sendIoctl")
 	length := uint32(len(w))
@@ -204,7 +211,7 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPC
 			Debug("bus error condition detected =", uint16(intStat), err)
 		}
 		if intStat != 0 {
-			d.Write16(FuncBus, addrInterrupt, uint16(intStat))
+			d.Write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, uint16(intStat))
 		}
 		if !intStat.IsF2Available() {
 			return 0, 0, badResult, errors.New("sdpcmPoll: F2 unavailable")
@@ -257,10 +264,10 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPC
 	return payloadOffset, plen, header, err
 }
 
-// sendSDPCMCommon is cyw43_sdpcm_send_common in pico-sdk (actually contained in cy43-driver)
-// Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
+// sendSDPCMCommon Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
+//
+//	reference: cyw43_sdpcm_send_common
 func (d *Dev) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
-	// TODO where is cmd used here????
 	Debug("sendSDPCMCommon len=", len(w))
 	if kind != whd.CONTROL_HEADER && kind != whd.DATA_HEADER {
 		return errors.New("unexpected SDPCM kind")
@@ -291,6 +298,7 @@ func (d *Dev) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 	return d.WriteBytes(FuncWLAN, 0, w)
 }
 
+// reference: disable_device_core
 func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	base := coreaddress(coreID)
 	Debug("disable core", coreID, base)
@@ -303,11 +311,10 @@ func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 		return nil
 	}
 	Debug("core not in reset", reg)
-	// TODO
-	// println("core not in reset:", reg)
 	return errors.New("core not in reset")
 }
 
+// reference: reset_device_core
 func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 	err := d.disableDeviceCore(coreID, coreHalt)
 	if err != nil {
@@ -334,6 +341,8 @@ func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 // CoreIsActive returns if the specified core is not in reset.
 // Can be called with CORE_WLAN_ARM and CORE_SOCRAM global constants.
 // It returns true if communications are down (WL_REG_ON at low).
+//
+//	reference: device_core_is_up
 func (d *Dev) CoreIsActive(coreID uint8) bool {
 	base := coreaddress(coreID)
 	reg, _ := d.ReadBackplane(base+whd.AI_IOCTRL_OFFSET, 1)
@@ -345,6 +354,8 @@ func (d *Dev) CoreIsActive(coreID uint8) bool {
 }
 
 // coreaddress returns either WLAN=0x18103000  or  SOCRAM=0x18104000
+//
+//	reference: get_core_address
 func coreaddress(coreID uint8) (v uint32) {
 	switch coreID {
 	case whd.CORE_WLAN_ARM:
@@ -357,6 +368,7 @@ func coreaddress(coreID uint8) (v uint32) {
 	return v
 }
 
+// reference: cyw43_read_backplane
 func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 	Debug("read backplane", addr, size)
 	err := d.setBackplaneWindow(addr)
@@ -377,6 +389,7 @@ func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 	return reg, err
 }
 
+// reference: cyw43_write_backplane
 func (d *Dev) WriteBackplane(addr, size, value uint32) error {
 	Debug("write backplane", addr, "=", value, "size=", int(size))
 	err := d.setBackplaneWindow(addr)
@@ -395,6 +408,7 @@ func (d *Dev) WriteBackplane(addr, size, value uint32) error {
 	return d.setBackplaneWindow(whd.CHIPCOMMON_BASE_ADDRESS)
 }
 
+// reference: cyw43_set_backplane_window
 func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 	const (
 		SDIO_BACKPLANE_ADDRESS_HIGH = 0x1000c
@@ -424,6 +438,7 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 	return nil
 }
 
+// reference: cyw43_download_resource
 func (d *Dev) downloadResource(addr uint32, src []byte) error {
 	Debug("download resource addr=", addr, "len=", len(src))
 	// round up length to simplify download.
@@ -443,18 +458,17 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		if dstAddr&whd.BACKPLANE_ADDR_MASK+uint32(sz) > whd.BACKPLANE_ADDR_MASK+1 {
 			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
 		}
-		// fmt.Println("set backplane window to ", dstAddr, offset)
+
 		err := d.setBackplaneWindow(dstAddr)
 		if err != nil {
 			return err
 		}
 		if offset+sz > len(src) {
-			// fmt.Println("ALLOCA", sz)
 			srcPtr = src[:cap(src)][offset:]
 		} else {
 			srcPtr = src[offset:]
 		}
-		// fmt.Println("write bytes to addr ", dstAddr& whd.BACKPLANE_ADDR_MASK)
+
 		err = d.WriteBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, srcPtr[:sz])
 		if err != nil {
 			return err
@@ -475,18 +489,16 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		if dstAddr&whd.BACKPLANE_ADDR_MASK+uint32(sz) > whd.BACKPLANE_ADDR_MASK+1 {
 			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
 		}
-		// fmt.Println("set backplane window", dstAddr)
 		err := d.setBackplaneWindow(dstAddr)
 		if err != nil {
 			return err
 		}
-		// fmt.Println("read back bytes into buf from ", dstAddr& whd.BACKPLANE_ADDR_MASK)
+
 		err = d.ReadBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, buf[:sz])
 		if err != nil {
 			return err
 		}
 		if offset+sz > len(src) {
-			// fmt.Println("ALLOCA", sz)
 			srcPtr = src[:cap(src)][offset:]
 		} else {
 			srcPtr = src[offset:]
@@ -500,11 +512,12 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 	return nil
 }
 
+// reference: cyw43_ll_bus_sleep and cyw43_ll_bus_sleep_helper
 func (d *Dev) busSleep(canSleep bool) (err error) {
 	if d.busIsUp != canSleep {
 		return nil // Already at desired state.
 	}
-	err = d.ksoSet(!canSleep)
+	err = d.ksoSet(!canSleep) // We use KSO on pico, so no need to do SDIO chip stuff.
 	if err == nil {
 		d.busIsUp = !canSleep
 	}
@@ -512,6 +525,8 @@ func (d *Dev) busSleep(canSleep bool) (err error) {
 }
 
 // ksoSet enable KSO mode (keep SDIO on)
+//
+//	reference: cyw43_kso_set
 func (d *Dev) ksoSet(value bool) error {
 	Debug("ksoSet enable=", value)
 	var writeVal uint8
@@ -548,6 +563,7 @@ func (d *Dev) ksoSet(value bool) error {
 	return errors.New("kso set failed")
 }
 
+// reference: cyw43_clm_load
 func (d *Dev) clmLoad(clm []byte) error {
 	const CLM_CHUNK_LEN = 1024
 	buf := d.buf[whd.SDPCM_HEADER_LEN+16:]
@@ -599,6 +615,8 @@ func (d *Dev) clmLoad(clm []byte) error {
 }
 
 // putMAC gets current MAC address from CYW43439.
+//
+//	reference: cy43_ll_bus_init (end)
 func (d *Dev) putMAC(dst []byte) error {
 	if len(dst) < 6 {
 		panic("dst too short to put MAC")
@@ -629,6 +647,8 @@ var (
 
 // sdpcmProcessRxPacket finds payload in WLAN RxPacket and returns the kind of packet.
 // is sdpcm_process_rx_packet in reference.
+//
+//	reference: sdpcm_process_rx_packet
 func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag whd.SDPCMHeaderType, err error) {
 	const badFlag = 0
 	const sdpcmOffset = 0
