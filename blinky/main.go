@@ -7,6 +7,8 @@ import (
 )
 
 func main() {
+	time.Sleep(3 * time.Second)
+	println("start program")
 	const spiNOPs = 0
 	spi, cs, WL_REG_ON, irq := cyw43439.PicoWSpi(spiNOPs)
 

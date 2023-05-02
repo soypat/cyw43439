@@ -460,12 +460,18 @@ func (d *Dev) downloadResource(addr uint32, src string) error {
 		if err != nil {
 			return err
 		}
+		var n int
 		if offset+sz > len(src) {
-			srcPtr = src[offset:]
+			n = sz
+			buf = [68]byte{}
+			if offset < len(src) {
+				copy(buf[:sz], src[offset:])
+			}
 		} else {
 			srcPtr = src[offset:]
+			n = copy(buf[:sz], srcPtr)
 		}
-		n := copy(buf[:sz], srcPtr)
+
 		err = d.WriteBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, buf[:n])
 		if err != nil {
 			return err

@@ -23,15 +23,22 @@ type Config struct {
 
 func DefaultConfig(enableBT bool) Config {
 	var fw string
+	var fwLen uint32
 	if enableBT {
 		panic("not implemented yet")
 		// fw = wifibtFW[:wifibtFWLen]
 	} else {
-		fw = wifiFW[:wifiFWLen]
+		fwLen = wifiFWLen
+		fw = wifiFW[:]
+	}
+	clmPtr := align32(fwLen, 512)
+	if clmPtr+clmLen > uint32(len(fw)) {
+		println(clmPtr+clmLen, uint32(len(fw)))
+		panic("firmware too small to contain CLM")
 	}
 	return Config{
-		Firmware:        fw,
-		CLM:             GetCLM(fw),
+		Firmware:        fw[:fwLen],
+		CLM:             fw[clmPtr : clmPtr+clmLen],
 		MAC:             []byte{0xfe, 0xed, 0xde, 0xad, 0xbe, 0xef},
 		EnableBluetooth: enableBT,
 	}
@@ -159,6 +166,7 @@ func (Int Interrupts) IsF2Available() bool {
 func GetCLM(firmware string) string {
 	clmAddr := align32(uint32(len(firmware)), 512)
 	if uint32(len(firmware)) < clmAddr+clmLen {
+		println(len(firmware), clmAddr, clmLen, clmAddr+clmLen)
 		panic("firmware slice too small for CLM")
 	}
 	return firmware[clmAddr : clmAddr+clmLen]
