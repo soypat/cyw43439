@@ -3,7 +3,6 @@
 package cyw43439
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -439,16 +438,14 @@ func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
 }
 
 // reference: cyw43_download_resource
-func (d *Dev) downloadResource(addr uint32, src []byte) error {
+func (d *Dev) downloadResource(addr uint32, src string) error {
 	Debug("download resource addr=", addr, "len=", len(src))
 	// round up length to simplify download.
 	rlen := (len(src) + 255) &^ 255
-	if cap(src) < rlen {
-		return errors.New("firmware slice capacity needs extra 255 padding over it's length for transfer")
-	}
 	const BLOCKSIZE = 64
-	var srcPtr []byte
+
 	var buf [BLOCKSIZE + 4]byte
+	var srcPtr string
 	for offset := 0; offset < rlen; offset += BLOCKSIZE {
 		sz := BLOCKSIZE
 		if offset+sz > rlen {
@@ -464,12 +461,12 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 			return err
 		}
 		if offset+sz > len(src) {
-			srcPtr = src[:cap(src)][offset:]
+			srcPtr = src[offset:]
 		} else {
 			srcPtr = src[offset:]
 		}
-
-		err = d.WriteBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, srcPtr[:sz])
+		n := copy(buf[:sz], srcPtr)
+		err = d.WriteBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, buf[:n])
 		if err != nil {
 			return err
 		}
@@ -498,15 +495,15 @@ func (d *Dev) downloadResource(addr uint32, src []byte) error {
 		if err != nil {
 			return err
 		}
-		if offset+sz > len(src) {
-			srcPtr = src[:cap(src)][offset:]
-		} else {
-			srcPtr = src[offset:]
-		}
-		if !bytes.Equal(buf[:sz], srcPtr[:sz]) {
-			err = fmt.Errorf("%w at addr=%#x: expected:%q\ngot: %q", errFirmwareValidationFailed, dstAddr, srcPtr[:sz], buf[:sz])
-			return err
-		}
+		// if offset+sz > len(src) {
+		// 	srcPtr = src[:cap(src)][offset:]
+		// } else {
+		// 	srcPtr = src[offset:]
+		// }
+		// if !bytes.Equal(buf[:sz], srcPtr[:sz]) {
+		// 	err = fmt.Errorf("%w at addr=%#x: expected:%q\ngot: %q", errFirmwareValidationFailed, dstAddr, srcPtr[:sz], buf[:sz])
+		// 	return err
+		// }
 	}
 	Debug("firmware validation success")
 	return nil

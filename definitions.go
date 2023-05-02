@@ -1,7 +1,6 @@
 package cyw43439
 
 import (
-	"bytes"
 	"errors"
 	"net"
 	"strconv"
@@ -16,14 +15,14 @@ const (
 )
 
 type Config struct {
-	Firmware        []byte
-	CLM             []byte
+	Firmware        string
+	CLM             string
 	MAC             net.HardwareAddr
 	EnableBluetooth bool
 }
 
 func DefaultConfig(enableBT bool) Config {
-	var fw []byte
+	var fw string
 	if enableBT {
 		panic("not implemented yet")
 		// fw = wifibtFW[:wifibtFWLen]
@@ -157,9 +156,9 @@ func (Int Interrupts) IsF2Available() bool {
 	return Int&(whd.F2_PACKET_AVAILABLE) != 0
 }
 
-func GetCLM(firmware []byte) []byte {
+func GetCLM(firmware string) string {
 	clmAddr := align32(uint32(len(firmware)), 512)
-	if uint32(cap(firmware)) < clmAddr+clmLen {
+	if uint32(len(firmware)) < clmAddr+clmLen {
 		panic("firmware slice too small for CLM")
 	}
 	return firmware[clmAddr : clmAddr+clmLen]
@@ -235,7 +234,8 @@ func Debug(a ...any) {
 	flushprint()
 }
 
-func validateFirmware(src []byte) error {
+func validateFirmware(src string) error {
+	const cmpString = "Version: "
 	fwEnd := 800 // get last 800 bytes
 	if fwEnd > len(src) {
 		return errors.New("bad firmware size: too small")
@@ -248,10 +248,10 @@ func validateFirmware(src []byte) error {
 	trailLen := uint32(b[fwEnd-2]) | uint32(b[fwEnd-1])<<8
 	found := -1
 	if trailLen < 500 && b[fwEnd-3] == 0 {
-		var cmpString = []byte("Version: ")
+
 		for i := 80; i < int(trailLen); i++ {
 			ptr := fwEnd - 3 - i
-			if bytes.Equal(b[ptr:ptr+9], cmpString) {
+			if b[ptr:ptr+9] == cmpString {
 				found = i
 				break
 			}
