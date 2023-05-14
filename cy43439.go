@@ -79,11 +79,14 @@ type Dev struct {
 	enableStatusWord       bool
 	hadSuccesfulPacket     bool
 	// Max packet size is 2048 bytes.
-	sdpcmTxSequence       uint8
-	sdpcmLastBusCredit    uint8
-	wlanFlowCtl           uint8
+	sdpcmTxSequence    uint8
+	sdpcmLastBusCredit uint8
+	wlanFlowCtl        uint8
+	// 0 == unitialized, 1 == STA, 2 == AP
+	itfState              uint8
 	sdpcmRequestedIoctlID uint16
 	lastInt               uint16
+
 	// The following variables are used to store the last SSID joined
 	// first 4 bytes are length of SSID, stored in little endian.
 	lastSSIDJoined [36]byte
@@ -472,6 +475,44 @@ func flushprint() {
 	}
 }
 
+const (
+	itfNone = iota
+	itfSTA
+	itfAP
+)
+
+func (d *Dev) wifiSetup(itf uint8, up bool, country uint32) (err error) {
+	if !up {
+		if itf == itfAP {
+			return d.wifiAPSetUp(false)
+		}
+		return nil
+	}
+	switch itf {
+	case itfNone:
+		err = d.wifiOn(country)
+		if err != nil {
+			return err
+		}
+		err = d.wifiPM(defaultPM)
+
+	case itfAP:
+		err = d.wifiAPInit()
+	}
+	return err
+}
+
+var defaultPM = pmValue(whd.CYW43_PM2_POWERSAVE_MODE, 200, 1, 1, 10)
+
+//go:inline
+func pmValue(pmMode, pmSleepRetMs, li_beacon_period, li_dtim_period, li_assoc uint32) uint32 {
+	return li_assoc<<20 | // listen interval sent to ap
+		li_dtim_period<<16 |
+		li_beacon_period<<12 |
+		(pmSleepRetMs/10)<<4 | // cyw43_ll_wifi_pm multiplies this by 10
+		pmMode
+}
+
 // reference: cyw43_ll_wifi_on
 func (d *Dev) wifiOn(country uint32) error {
 	buf := d.offbuf()
@@ -583,13 +624,33 @@ func (d *Dev) GetMAC() (mac [6]byte, err error) {
 	return mac, nil
 }
 
+// reference: cyw43_ensure_up
+func (d *Dev) ensureUp() error {
+	return nil
+}
+
+// reference: cyw43_wifi_pm
+func (d *Dev) wifiPM(pm_in uint32) (err error) {
+	err = d.ensureUp()
+	if err != nil {
+		return err
+	}
+	// pm_in: 0x00adbrrm
+	pm := pm_in & 0xf
+	pm_sleep_ret := (pm_in >> 4) & 0xff
+	li_bcn := (pm_in >> 12) & 0xf
+	li_dtim := (pm_in >> 16) & 0xf
+	li_assoc := (pm_in >> 20) & 0xf
+	err = d.wifiPMinternal(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc)
+	return err
+}
+
 // reference: cyw43_ll_wifi_pm
-func (d *Dev) wifiPM(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32) error {
+func (d *Dev) wifiPMinternal(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32) error {
 	// set some power saving parameters
 	// PM1 is very aggressive in power saving and reduces wifi throughput
 	// PM2 only saves power when there is no wifi activity for some time
 	// Value passed to pm2_sleep_ret measured in ms, must be multiple of 10, between 10 and 2000
-
 	if pm_sleep_ret < 1 {
 		pm_sleep_ret = 1
 	} else if pm_sleep_ret > 200 {
@@ -834,8 +895,12 @@ func (d *Dev) wifiRejoin() error {
 	return d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_SSID, d.lastSSIDJoined[:36])
 }
 
+func (d *Dev) wifiAPInit() error {
+	panic("not yet implemented")
+}
+
 // reference: cyw43_ll_wifi_ap_init
-func (d *Dev) wifiAPInit(ssid, key string, auth, channel uint32) (err error) {
+func (d *Dev) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err error) {
 	buf := d.offbuf()
 
 	// Get state of AP.
