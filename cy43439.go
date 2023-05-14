@@ -540,6 +540,25 @@ func (d *Dev) wifiOn(country uint32) error {
 	}
 	time.Sleep(50 * time.Millisecond)
 
+	// Enable multicast ethernet frames on IPv4 mDNS MAC address
+	// (01:00:5e:00:00:fb).
+	// This is needed for mDNS to work.
+	binary.LittleEndian.PutUint32(buf[:4], 1)
+	buf[4] = 0x01
+	buf[5] = 0x00
+	buf[6] = 0x5e
+	buf[7] = 0x00
+	buf[8] = 0x00
+	buf[9] = 0xfb
+	for i := 0; i < 9*6; i++ {
+		buf[10+i] = 0
+	}
+	err = d.WriteIOVarN("mcast_list", whd.WWD_STA_INTERFACE, buf[:4+10*6])
+	if err != nil {
+		return err
+	}
+	time.Sleep(50 * time.Millisecond)
+
 	// Set interface as "up".
 	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_UP, nil)
 	if err != nil {
