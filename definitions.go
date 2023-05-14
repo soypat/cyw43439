@@ -13,6 +13,8 @@ const (
 	verbose_debug     = true
 	initReadback      = false
 	validateDownloads = false
+	// uint32(int32(-1)) = 0xffffffff
+	negative1 uint32 = 0xffffffff
 )
 
 type Config struct {

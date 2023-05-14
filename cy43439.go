@@ -84,8 +84,11 @@ type Dev struct {
 	wlanFlowCtl           uint8
 	sdpcmRequestedIoctlID uint16
 	lastInt               uint16
-	buf                   [2048]byte
-	auxbuf                [2048]byte
+	// The following variables are used to store the last SSID joined
+	// first 4 bytes are length of SSID, stored in little endian.
+	lastSSIDJoined [36]byte
+	buf            [2048]byte
+	auxbuf         [2048]byte
 }
 
 func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
@@ -682,13 +685,13 @@ func (d *Dev) wifiScan(opts *whd.ScanOptions) error {
 }
 
 // reference: cyw43_ll_wifi_join
-func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel int32) (err error) {
-	// var buf [128]byte
+func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint32) (err error) {
+	var buf [128]byte
 	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
 	if err != nil {
 		return err
 	}
-	if authType == -1 {
+	if authType == negative1 {
 		// Auto auth type.
 		if key == "" {
 			// No key given, assume this means open security
@@ -723,8 +726,7 @@ func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel int32
 
 	// set the EAPOL version to whatever the AP is using (-1).
 	Debug("setting sup_wpa2_eapver=-1")
-	neg1 := int32(-1)
-	err = d.WriteIOVar2("bsscfg:sup_wpa2_eapver", whd.WWD_STA_INTERFACE, 0, uint32(neg1))
+	err = d.WriteIOVar2("bsscfg:sup_wpa2_eapver", whd.WWD_STA_INTERFACE, 0, negative1)
 	if err != nil {
 		return err
 	}
@@ -735,6 +737,88 @@ func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel int32
 	if err != nil {
 		return
 	}
-	// TODO: finish port here
-	panic("unimplemented wifiJoin")
+
+	if authType != 0 {
+		// wwd_wifi_set_passphrase
+		binary.LittleEndian.PutUint16(buf[:], uint16(len(key)))
+		binary.LittleEndian.PutUint16(buf[2:], 1)
+		copy(buf[4:], key)
+		time.Sleep(2 * time.Millisecond) // Delay required to allow radio firmware to be ready to receive PMK and avoid intermittent failure
+
+		Debug("setting sup_wpa_pmk ", len(key))
+		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC, buf[:68])
+		if err != nil {
+			return err
+		}
+	}
+
+	// Set infrastructure mode.
+	Debug("setting infra=1")
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_INFRA, 1)
+	if err != nil {
+		return err
+	}
+
+	// Set auth type (open system).
+	Debug("setting auth=0")
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_AUTH, 0)
+	if err != nil {
+		return err
+	}
+
+	// Set WPA auth mode.
+	Debug("setting wpa_auth=", wpa_auth)
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WPA_AUTH, wpa_auth)
+	if err != nil {
+		return err
+	}
+
+	// allow relevant events through:
+	//  EV_SET_SSID=0
+	//  EV_AUTH=3
+	//  EV_DEAUTH_IND=6
+	//  EV_DISASSOC_IND=12
+	//  EV_LINK=16
+	//  EV_PSK_SUP=46
+	//  EV_ESCAN_RESULT=69
+	//  EV_CSA_COMPLETE_IND=80
+	/*
+	   memcpy(buf, "\x00\x00\x00\x00" "\x49\x10\x01\x00\x00\x40\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00", 4 + 18);
+	   cyw43_write_iovar_n(self, "bsscfg:event_msgs", 4 + 18, buf, WWD_STA_INTERFACE);
+	*/
+
+	// Set SSID.
+	Debug("setting ssid=", ssid)
+	binary.LittleEndian.PutUint32(d.lastSSIDJoined[:], uint32(len(ssid)))
+	copy(d.lastSSIDJoined[4:], ssid)
+	if bssid == nil {
+		// Join SSID.
+		return d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_SSID, d.lastSSIDJoined[:36])
+	}
+	// BSSID is not nil so join the AP.
+	Debug("setting bssid=", bssid)
+	for i := 0; i < 4+32+20+14; i++ {
+		buf[i] = 0
+	}
+	copy(buf[:], d.lastSSIDJoined[:])
+	// Scan parameters:
+	buf[36] = 0                                        // Scan type
+	binary.LittleEndian.PutUint32(buf[40:], negative1) // Nprobes.
+	binary.LittleEndian.PutUint32(buf[44:], negative1) // Active time.
+	binary.LittleEndian.PutUint32(buf[48:], negative1) // Passive time.
+	binary.LittleEndian.PutUint32(buf[52:], negative1) // Home time.
+	const (
+		WL_CHANSPEC_BW_20       = 0x1000
+		WL_CHANSPEC_CTL_SB_LLL  = 0x0000
+		WL_CHANSPEC_CTL_SB_NONE = WL_CHANSPEC_CTL_SB_LLL
+		WL_CHANSPEC_BAND_2G     = 0x0000
+	)
+	copy(buf[4+32+20:], bssid[:6])
+	binary.LittleEndian.PutUint32(buf[4+32+20+8:], 1) // Channel spec number.
+	chspec := uint16(channel) | WL_CHANSPEC_BW_20 | WL_CHANSPEC_CTL_SB_NONE | WL_CHANSPEC_BAND_2G
+	binary.LittleEndian.PutUint16(buf[4+32+20+12:], chspec)
+
+	// Join the AP.
+	Debug("join AP")
+	return d.WriteIOVarN("join", whd.WWD_STA_INTERFACE, buf[:4+32+20+14])
 }
