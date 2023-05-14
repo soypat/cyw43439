@@ -792,8 +792,9 @@ func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint3
 	binary.LittleEndian.PutUint32(d.lastSSIDJoined[:], uint32(len(ssid)))
 	copy(d.lastSSIDJoined[4:], ssid)
 	if bssid == nil {
-		// Join SSID.
-		return d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_SSID, d.lastSSIDJoined[:36])
+		// Join SSID. Rejoin uses d.lastSSIDJoined.
+		Debug("join SSID")
+		return d.wifiRejoin()
 	}
 	// BSSID is not nil so join the AP.
 	Debug("setting bssid=", bssid)
@@ -821,4 +822,136 @@ func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint3
 	// Join the AP.
 	Debug("join AP")
 	return d.WriteIOVarN("join", whd.WWD_STA_INTERFACE, buf[:4+32+20+14])
+}
+
+// reference: cyw43_ll_wifi_set_wpa_auth
+func (d *Dev) setWPAAuth() error {
+	return d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WPA_AUTH, whd.CYW43_WPA_AUTH_PSK)
+}
+
+// reference: cyw43_ll_wifi_rejoin
+func (d *Dev) wifiRejoin() error {
+	return d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_SSID, d.lastSSIDJoined[:36])
+}
+
+// reference: cyw43_ll_wifi_ap_init
+func (d *Dev) wifiAPInit(ssid, key string, auth, channel uint32) (err error) {
+	buf := d.offbuf()
+
+	// Get state of AP.
+	// TODO: this can fail with sdpcm status = 0xffffffe2 (NOTASSOCIATED)
+	// in such a case the AP is not up and we should not check the result
+	copy(buf[:], "bss\x00")
+	binary.LittleEndian.PutUint32(buf[4:], uint32(whd.WWD_AP_INTERFACE))
+	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:8])
+	if err != nil {
+		return err
+	}
+	res := binary.LittleEndian.Uint32(buf[:])
+	if res != 0 {
+		// AP is already up.
+		return nil
+	}
+
+	// Set the AMPDU parameter for AP (window size = 2).
+	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_AP_INTERFACE, 2)
+	if err != nil {
+		return err
+	}
+
+	// Set SSID.
+	binary.LittleEndian.PutUint32(buf, uint32(whd.WWD_AP_INTERFACE))
+	binary.LittleEndian.PutUint32(buf[4:], uint32(len(ssid)))
+	for i := 0; i < 32; i++ {
+		buf[8+i] = 0
+	}
+	copy(buf[8:], ssid)
+	err = d.WriteIOVarN("bsscfg:ssid", whd.WWD_AP_INTERFACE, buf[:8+32])
+	if err != nil {
+		return err
+	}
+	// Set channel.
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_CHANNEL, channel)
+	if err != nil {
+		return err
+	}
+	// Set Security type.
+	err = d.WriteIOVar2("bsscfg:wsec", whd.WWD_STA_INTERFACE, uint32(whd.WWD_AP_INTERFACE), auth) // More confusing interface arguments.
+	if err != nil {
+		return err
+	}
+	if auth != whd.CYW43_AUTH_OPEN {
+		// Set WPA/WPA2 auth parameters.
+		var val uint16 = whd.CYW43_WPA_AUTH_PSK
+		if auth != whd.CYW43_AUTH_WPA_TKIP_PSK {
+			val |= whd.CYW43_WPA2_AUTH_PSK
+		}
+		err = d.WriteIOVar2("bsscfg:wpa_auth", whd.WWD_STA_INTERFACE, uint32(whd.WWD_AP_INTERFACE), uint32(val))
+		if err != nil {
+			return err
+		}
+		// Set password.
+		binary.LittleEndian.PutUint16(buf, uint16(len(key)))
+		binary.LittleEndian.PutUint16(buf[2:], 1)
+		for i := 0; i < 64; i++ {
+			buf[i] = 0
+		}
+		copy(buf[4:], key)
+		time.Sleep(2 * time.Millisecond) // WICED has this.
+		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_AP_INTERFACE, whd.WLC_SET_WSEC_PMK, buf[:4+64])
+		if err != nil {
+			return err
+		}
+	}
+
+	// Set GMode to auto (value of 1).
+	err = d.SetIoctl32(whd.WWD_AP_INTERFACE, whd.WLC_SET_GMODE, 1)
+	if err != nil {
+		return err
+	}
+	// Set multicast tx rate to 11Mbps.
+	const rate = 11000000 / 500000
+	err = d.WriteIOVar("2g_mrate", whd.WWD_AP_INTERFACE, rate)
+	if err != nil {
+		return err
+	}
+
+	// Set DTIM period to 1.
+	err = d.SetIoctl32(whd.WWD_AP_INTERFACE, whd.WLC_SET_DTIMPRD, 1)
+	return err
+}
+
+// reference: cyw43_ll_wifi_ap_set_up
+func (d *Dev) wifiAPSetUp(up bool) error {
+	// This line is somewhat confusing. Both the AP and STA interfaces are passed in as arguments,
+	// but the STA interface is the one used to set the AP interface up or down.
+	return d.WriteIOVar2("bss", whd.WWD_STA_INTERFACE, uint32(whd.WWD_AP_INTERFACE), b2u32(up))
+}
+
+// reference: cyw43_ll_wifi_ap_get_stas
+func (d *Dev) wifiAPGetSTAs(macs []byte) (stas uint32, err error) {
+	buf := d.offbuf()
+	copy(buf[:], "maxassoc\x00")
+	binary.LittleEndian.PutUint32(buf[9:], uint32(whd.WWD_AP_INTERFACE))
+	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:9+4])
+	if err != nil {
+		return 0, err
+	}
+	maxAssoc := binary.LittleEndian.Uint32(buf[:])
+	if macs == nil {
+		// Return just the maximum number of STAs
+		return maxAssoc, nil
+	}
+	// Return the maximum number of STAs and the MAC addresses of the STAs.
+	lim := 4 + maxAssoc*6
+	if lim > uint32(len(buf)) {
+		lim = uint32(len(buf))
+	}
+	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_AP_INTERFACE, whd.WLC_GET_ASSOCLIST, buf[:lim])
+	if err != nil {
+		return 0, err
+	}
+	stas = binary.LittleEndian.Uint32(buf[:])
+	copy(macs[:], buf[4:4+stas*6])
+	return stas, err
 }

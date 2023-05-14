@@ -72,7 +72,7 @@ func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+4])
 }
 
-// reference: cyw43_write_iovar_u32_u32
+// reference: cyw43_write_iovar_u32_u32 (const char *var, uint32_t val0, uint32_t val1, uint32_t iface)
 func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
 	Debug("WriteIOVar2 var=", VAR, "ioctl=", uint8(iface), "val1=", val0, "val2=", val1)
 	buf := d.offbuf()
@@ -100,7 +100,7 @@ func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) erro
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, iobuf[:length])
 }
 
-// reference: cyw43_set_ioctl_u32
+// reference: cyw43_set_ioctl_u32 (uint32_t cmd, uint32_t val, uint32_t iface)
 func (d *Dev) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
 	Debug("SetIoctl32")
 	var buf [4]byte
@@ -143,8 +143,17 @@ func (d *Dev) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) er
 // doIoctl uses Dev's primary buffer to perform ioctl call. Use [Dev.offbuff] for
 // allocations that are passed into doIoctl.
 //
-//	reference: cyw43_do_ioctl
+//	reference: cyw43_do_ioctl(uint32_t kind, uint32_t cmd, size_t len, uint8_t *buf, uint32_t iface)
 func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, buf []byte) error {
+	// TODO: once testing is done these checks may be removed.
+	if !iface.IsValid() {
+		return errors.New("invalid ioctl interface")
+	} else if !cmd.IsValid() {
+		return errors.New("invalid ioctl command")
+	} else if kind != whd.SDPCM_GET && kind != whd.SDPCM_SET {
+		return errors.New("invalid ioctl kind")
+	}
+
 	err := d.sendIoctl(kind, iface, cmd, buf)
 	if err != nil {
 		return err

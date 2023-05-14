@@ -143,6 +143,24 @@ const (
 	WWD_P2P_INTERFACE IoctlInterface = 2
 )
 
+func (i IoctlInterface) IsValid() bool {
+	return i <= WWD_P2P_INTERFACE
+}
+
+func (i IoctlInterface) String() (s string) {
+	switch i {
+	case WWD_STA_INTERFACE:
+		s = "sta"
+	case WWD_AP_INTERFACE:
+		s = "ap"
+	case WWD_P2P_INTERFACE:
+		s = "p2p"
+	default:
+		s = "unknown"
+	}
+	return s
+}
+
 type SDPCMHeaderType uint8
 
 // for cyw43_sdpcm_send_common
@@ -170,6 +188,7 @@ func (ht SDPCMHeaderType) String() (s string) {
 	return s
 }
 
+// kinds of ioctl commands.
 const (
 	SDPCM_GET = 0
 	SDPCM_SET = 2
@@ -200,6 +219,15 @@ const (
 	WLC_GET_VAR       SDPCMCommand = 262
 	WLC_SET_WSEC_PMK  SDPCMCommand = 268
 )
+
+func (cmd SDPCMCommand) IsValid() bool {
+	return cmd == WLC_UP || cmd == WLC_SET_INFRA || cmd == WLC_SET_AUTH || cmd == WLC_GET_BSSID ||
+		cmd == WLC_GET_SSID || cmd == WLC_SET_SSID || cmd == WLC_SET_CHANNEL || cmd == WLC_DISASSOC ||
+		cmd == WLC_GET_ANTDIV || cmd == WLC_SET_ANTDIV || cmd == WLC_SET_DTIMPRD || cmd == WLC_GET_PM ||
+		cmd == WLC_SET_PM || cmd == WLC_SET_GMODE || cmd == WLC_SET_WSEC || cmd == WLC_SET_BAND ||
+		cmd == WLC_GET_ASSOCLIST || cmd == WLC_SET_WPA_AUTH || cmd == WLC_SET_VAR || cmd == WLC_GET_VAR ||
+		cmd == WLC_SET_WSEC_PMK
+}
 
 // SDIO bus specifics
 const (
