@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"machine"
 	"time"
+	"unsafe"
 
 	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers"
@@ -566,4 +567,174 @@ func (d *Dev) wifiOn(country uint32) error {
 	}
 	time.Sleep(50 * time.Millisecond)
 	return nil
+}
+
+// reference: cyw43_ll_wifi_get_mac
+func (d *Dev) GetMAC() (mac [6]byte, err error) {
+	buf := d.offbuf()
+	copy(buf, "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00")
+	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:6+14])
+	if err == nil {
+		copy(mac[:], buf[:6])
+	}
+	return mac, nil
+}
+
+// reference: cyw43_ll_wifi_pm
+func (d *Dev) wifiPM(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32) error {
+	// set some power saving parameters
+	// PM1 is very aggressive in power saving and reduces wifi throughput
+	// PM2 only saves power when there is no wifi activity for some time
+	// Value passed to pm2_sleep_ret measured in ms, must be multiple of 10, between 10 and 2000
+
+	if pm_sleep_ret < 1 {
+		pm_sleep_ret = 1
+	} else if pm_sleep_ret > 200 {
+		pm_sleep_ret = 200
+	}
+	err := d.WriteIOVar("pm2_sleep_ret", whd.WWD_STA_INTERFACE, pm_sleep_ret*10)
+	if err != nil {
+		return err
+	}
+
+	// these parameters set beacon intervals and are used to reduce power consumption
+	// while associated to an AP but not doing tx/rx
+	// bcn_li_xxx is what the CYW43x will do; assoc_listen is what is sent to the AP
+	// bcn_li_dtim==0 means use bcn_li_bcn
+	err = d.WriteIOVar("bcn_li_bcn", whd.WWD_STA_INTERFACE, li_bcn)
+	if err != nil {
+		return err
+	}
+	err = d.WriteIOVar("bcn_li_dtim", whd.WWD_STA_INTERFACE, li_dtim)
+	if err != nil {
+		return err
+	}
+	err = d.WriteIOVar("assoc_listen", whd.WWD_STA_INTERFACE, li_assoc)
+	if err != nil {
+		return err
+	}
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_PM, pm)
+	if err != nil {
+		return err
+	}
+
+	// Set GMODE_AUTO
+	buf := d.offbuf()
+	binary.LittleEndian.PutUint32(buf[:4], 1)
+	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_GMODE, buf[:4])
+	if err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint32(buf[:4], 0) // any
+	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_BAND, buf[:4])
+	return err
+}
+
+// reference: cyw43_ll_wifi_get_pm
+func (d *Dev) wifiGetPM() (pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32, err error) {
+	// TODO: implement
+	pm_sleep_ret, err = d.ReadIOVar("pm2_sleep_ret", whd.WWD_STA_INTERFACE)
+	if err != nil {
+		goto reterr
+	}
+	li_bcn, err = d.ReadIOVar("bcn_li_bcn", whd.WWD_STA_INTERFACE)
+	if err != nil {
+		goto reterr
+	}
+	li_dtim, err = d.ReadIOVar("bcn_li_dtim", whd.WWD_STA_INTERFACE)
+	if err != nil {
+		goto reterr
+	}
+	li_assoc, err = d.ReadIOVar("assoc_listen", whd.WWD_STA_INTERFACE)
+	if err != nil {
+		goto reterr
+	}
+	pm, err = d.GetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_GET_PM)
+	if err != nil {
+		goto reterr
+	}
+	return pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc, nil
+reterr:
+	return 0, 0, 0, 0, 0, err
+}
+
+// reference: cyw43_ll_wifi_scan
+func (d *Dev) wifiScan(opts *whd.ScanOptions) error {
+	opts.Version = 1 // ESCAN_REQ_VERSION
+	opts.Action = 1  // WL_SCAN_ACTION_START
+	for i := 0; i < len(opts.BSSID); i++ {
+		opts.BSSID[i] = 0xff
+	}
+	opts.BSSType = 2 // WICED_BSS_TYPE_ANY
+	opts.NProbes = -1
+	opts.ActiveTime = -1
+	opts.PassiveTime = -1
+	opts.HomeTime = -1
+	opts.ChannelNum = 0
+	opts.ChannelList[0] = 0
+	unsafePtr := unsafe.Pointer(opts)
+	if uintptr(unsafePtr)&0x3 != 0 {
+		return errors.New("opts not aligned to 4 bytes")
+	}
+	buf := (*[unsafe.Sizeof(*opts)]byte)(unsafePtr)
+	err := d.WriteIOVarN("escan", whd.WWD_STA_INTERFACE, buf[:])
+	return err
+}
+
+// reference: cyw43_ll_wifi_join
+func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel int32) (err error) {
+	// var buf [128]byte
+	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
+	if err != nil {
+		return err
+	}
+	if authType == -1 {
+		// Auto auth type.
+		if key == "" {
+			// No key given, assume this means open security
+			authType = 0
+		} else {
+			// See WICED_SECURITY_WPA2_MIXED_PSK
+			authType = whd.CYW43_AUTH_WPA2_MIXED_PSK
+		}
+	}
+
+	var wpa_auth uint32
+	if authType == whd.CYW43_AUTH_WPA2_AES_PSK || authType == whd.CYW43_AUTH_WPA2_MIXED_PSK {
+		wpa_auth = whd.CYW43_WPA2_AUTH_PSK
+	} else if authType == whd.CYW43_AUTH_WPA_TKIP_PSK {
+		wpa_auth = whd.CYW43_WPA_AUTH_PSK
+	} else {
+		return errors.New("unsupported auth type")
+	}
+	Debug("Setting wsec=", authType&0xff)
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC, uint32(authType)&0xff)
+	if err != nil {
+		return err
+	}
+
+	// Supplicant variable.
+	wpaSup := b2u32(wpa_auth != 0)
+	Debug("setting up sup_wpa=", wpaSup)
+	err = d.WriteIOVar2("bsscfg:sup_wpa", whd.WWD_STA_INTERFACE, 0, wpaSup)
+	if err != nil {
+		return err
+	}
+
+	// set the EAPOL version to whatever the AP is using (-1).
+	Debug("setting sup_wpa2_eapver=-1")
+	neg1 := int32(-1)
+	err = d.WriteIOVar2("bsscfg:sup_wpa2_eapver", whd.WWD_STA_INTERFACE, 0, uint32(neg1))
+	if err != nil {
+		return err
+	}
+
+	// wwd_wifi_set_supplicant_eapol_key_timeout
+	Debug("setting sup_wpa_tm=0x9c4")
+	err = d.WriteIOVar2("bsscfg:sup_wpa_tmo", whd.WWD_STA_INTERFACE, 0, 0x9c4)
+	if err != nil {
+		return
+	}
+	// TODO: finish port here
+	panic("unimplemented wifiJoin")
 }

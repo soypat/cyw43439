@@ -116,6 +116,21 @@ func (d *Dev) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uint32
 	return binary.LittleEndian.Uint32(buf[:4]), err
 }
 
+// reference: cyw43_read_iovar_u32
+func (d *Dev) ReadIOVar(VAR string, iface whd.IoctlInterface) (uint32, error) {
+	Debug("ReadIOVar var=", VAR, "ioctl=", uint8(iface))
+	buf := d.offbuf()
+	length := copy(buf, VAR)
+	buf[length] = 0 // Null terminate the string
+	length++
+	binary.LittleEndian.PutUint32(buf[length:], 0)
+	err := d.doIoctl(whd.SDPCM_GET, iface, whd.WLC_GET_VAR, buf[:length+4])
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(buf[:4]), nil
+}
+
 // reference: cyw43_ll_ioctl
 func (d *Dev) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
 	kind := uint32(0)
