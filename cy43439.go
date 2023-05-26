@@ -59,7 +59,7 @@ func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 }
 
 // reference: cyw43_ll_t
-type Dev struct {
+type Device struct {
 	spi drivers.SPI
 	// Chip select pin. Driven LOW during SPI transaction.
 
@@ -94,12 +94,12 @@ type Dev struct {
 	auxbuf         [2048]byte
 }
 
-func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
+func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
 	SD := machine.NoPin
 	if sharedDATA && sharedSD != machine.NoPin {
 		SD = sharedSD // Pico W special case.
 	}
-	return &Dev{
+	return &Device{
 		spi:                    spi,
 		cs:                     cs,
 		wlRegOn:                wlRegOn,
@@ -112,7 +112,7 @@ func NewDev(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Dev {
 }
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
-func (d *Dev) Init(cfg Config) (err error) {
+func (d *Device) Init(cfg Config) (err error) {
 	if cfg.MAC != nil && len(cfg.MAC) != 6 {
 		return errors.New("bad MAC address")
 	}
@@ -412,20 +412,20 @@ f2ready:
 	return err
 }
 
-func (d *Dev) GetStatus() (Status, error) {
+func (d *Device) GetStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, whd.SPI_STATUS_REGISTER)
 	Debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
 }
 
-func (d *Dev) ClearStatus() (Status, error) {
+func (d *Device) ClearStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, whd.SPI_STATUS_REGISTER)
 	d.Write32(FuncBus, whd.SPI_STATUS_REGISTER, 0)
 	Debug("read SPI Bus status:", Status(busStatus).String())
 	return Status(busStatus), err
 }
 
-func (d *Dev) GetInterrupts() (Interrupts, error) {
+func (d *Device) GetInterrupts() (Interrupts, error) {
 	reg, err := d.Read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
 	if err == nil {
 		d.lastInt = reg
@@ -433,7 +433,7 @@ func (d *Dev) GetInterrupts() (Interrupts, error) {
 	return Interrupts(reg), err
 }
 
-func (d *Dev) ClearInterrupts() error {
+func (d *Device) ClearInterrupts() error {
 	const dataUnavail = 0x1
 	spiIntStatus, err := d.Read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
 	if err != nil || spiIntStatus&dataUnavail == 0 {
@@ -450,7 +450,7 @@ func (d *Dev) ClearInterrupts() error {
 	return err
 }
 
-func (d *Dev) Reset() {
+func (d *Device) Reset() {
 	d.wlRegOn.Low()
 	time.Sleep(20 * time.Millisecond)
 	d.wlRegOn.High()
@@ -459,7 +459,7 @@ func (d *Dev) Reset() {
 }
 
 //go:inline
-func (d *Dev) GPIOSetup() {
+func (d *Device) GPIOSetup() {
 	d.wlRegOn.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -481,7 +481,7 @@ const (
 	itfAP
 )
 
-func (d *Dev) wifiSetup(itf uint8, up bool, country uint32) (err error) {
+func (d *Device) wifiSetup(itf uint8, up bool, country uint32) (err error) {
 	if !up {
 		if itf == itfAP {
 			return d.wifiAPSetUp(false)
@@ -514,7 +514,7 @@ func pmValue(pmMode, pmSleepRetMs, li_beacon_period, li_dtim_period, li_assoc ui
 }
 
 // reference: cyw43_ll_wifi_on
-func (d *Dev) wifiOn(country uint32) error {
+func (d *Device) wifiOn(country uint32) error {
 	buf := d.offbuf()
 	copy(buf, "country\x00")
 	binary.LittleEndian.PutUint32(buf[:8], country&0xff_ff)
@@ -614,7 +614,7 @@ func (d *Dev) wifiOn(country uint32) error {
 }
 
 // reference: cyw43_ll_wifi_get_mac
-func (d *Dev) GetMAC() (mac [6]byte, err error) {
+func (d *Device) GetMAC() (mac [6]byte, err error) {
 	buf := d.offbuf()
 	copy(buf, "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00")
 	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:6+14])
@@ -625,12 +625,12 @@ func (d *Dev) GetMAC() (mac [6]byte, err error) {
 }
 
 // reference: cyw43_ensure_up
-func (d *Dev) ensureUp() error {
+func (d *Device) ensureUp() error {
 	return nil
 }
 
 // reference: cyw43_wifi_pm
-func (d *Dev) wifiPM(pm_in uint32) (err error) {
+func (d *Device) wifiPM(pm_in uint32) (err error) {
 	err = d.ensureUp()
 	if err != nil {
 		return err
@@ -646,7 +646,7 @@ func (d *Dev) wifiPM(pm_in uint32) (err error) {
 }
 
 // reference: cyw43_ll_wifi_pm
-func (d *Dev) wifiPMinternal(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32) error {
+func (d *Device) wifiPMinternal(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32) error {
 	// set some power saving parameters
 	// PM1 is very aggressive in power saving and reduces wifi throughput
 	// PM2 only saves power when there is no wifi activity for some time
@@ -695,7 +695,7 @@ func (d *Dev) wifiPMinternal(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32)
 }
 
 // reference: cyw43_ll_wifi_get_pm
-func (d *Dev) wifiGetPM() (pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32, err error) {
+func (d *Device) wifiGetPM() (pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32, err error) {
 	// TODO: implement
 	pm_sleep_ret, err = d.ReadIOVar("pm2_sleep_ret", whd.WWD_STA_INTERFACE)
 	if err != nil {
@@ -723,7 +723,7 @@ reterr:
 }
 
 // reference: cyw43_ll_wifi_scan
-func (d *Dev) wifiScan(opts *whd.ScanOptions) error {
+func (d *Device) wifiScan(opts *whd.ScanOptions) error {
 	opts.Version = 1 // ESCAN_REQ_VERSION
 	opts.Action = 1  // WL_SCAN_ACTION_START
 	for i := 0; i < len(opts.BSSID); i++ {
@@ -746,7 +746,7 @@ func (d *Dev) wifiScan(opts *whd.ScanOptions) error {
 }
 
 // reference: cyw43_ll_wifi_join
-func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint32) (err error) {
+func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint32) (err error) {
 	var buf [128]byte
 	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
 	if err != nil {
@@ -886,21 +886,21 @@ func (d *Dev) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint3
 }
 
 // reference: cyw43_ll_wifi_set_wpa_auth
-func (d *Dev) setWPAAuth() error {
+func (d *Device) setWPAAuth() error {
 	return d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WPA_AUTH, whd.CYW43_WPA_AUTH_PSK)
 }
 
 // reference: cyw43_ll_wifi_rejoin
-func (d *Dev) wifiRejoin() error {
+func (d *Device) wifiRejoin() error {
 	return d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_SSID, d.lastSSIDJoined[:36])
 }
 
-func (d *Dev) wifiAPInit() error {
+func (d *Device) wifiAPInit() error {
 	panic("not yet implemented")
 }
 
 // reference: cyw43_ll_wifi_ap_init
-func (d *Dev) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err error) {
+func (d *Device) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err error) {
 	buf := d.offbuf()
 
 	// Get state of AP.
@@ -987,14 +987,14 @@ func (d *Dev) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err er
 }
 
 // reference: cyw43_ll_wifi_ap_set_up
-func (d *Dev) wifiAPSetUp(up bool) error {
+func (d *Device) wifiAPSetUp(up bool) error {
 	// This line is somewhat confusing. Both the AP and STA interfaces are passed in as arguments,
 	// but the STA interface is the one used to set the AP interface up or down.
 	return d.WriteIOVar2("bss", whd.WWD_STA_INTERFACE, uint32(whd.WWD_AP_INTERFACE), b2u32(up))
 }
 
 // reference: cyw43_ll_wifi_ap_get_stas
-func (d *Dev) wifiAPGetSTAs(macs []byte) (stas uint32, err error) {
+func (d *Device) wifiAPGetSTAs(macs []byte) (stas uint32, err error) {
 	buf := d.offbuf()
 	copy(buf[:], "maxassoc\x00")
 	binary.LittleEndian.PutUint32(buf[9:], uint32(whd.WWD_AP_INTERFACE))

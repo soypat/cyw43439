@@ -18,24 +18,24 @@ var endian binary.ByteOrder = binary.LittleEndian
 
 var ErrDataNotAvailable = errors.New("requested data not available")
 
-func (d *Dev) Write32(fn Function, addr, val uint32) error {
+func (d *Device) Write32(fn Function, addr, val uint32) error {
 	err := d.wr(fn, addr, 4, uint32(val))
 	return err
 }
 
 // reference: cyw43_write_reg_u16
-func (d *Dev) Write16(fn Function, addr uint32, val uint16) error {
+func (d *Device) Write16(fn Function, addr uint32, val uint16) error {
 	err := d.wr(fn, addr, 2, uint32(val))
 	return err
 }
 
 // reference: cyw43_write_reg_u8
-func (d *Dev) Write8(fn Function, addr uint32, val uint8) error {
+func (d *Device) Write8(fn Function, addr uint32, val uint8) error {
 	err := d.wr(fn, addr, 1, uint32(val))
 	return err
 }
 
-func (d *Dev) wr(fn Function, addr, size, val uint32) error {
+func (d *Device) wr(fn Function, addr, size, val uint32) error {
 	var buf [4]byte
 	cmd := make_cmd(true, true, fn, addr, size)
 	if fn == FuncBackplane {
@@ -79,7 +79,7 @@ func (d *Dev) wr(fn Function, addr, size, val uint32) error {
 }
 
 // reference: cyw43_write_bytes
-func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
+func (d *Device) WriteBytes(fn Function, addr uint32, src []byte) error {
 	// Debug("WriteBytes addr=", addr, "len=", len(src), "fn=", fn.String())
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3
@@ -117,7 +117,7 @@ func (d *Dev) WriteBytes(fn Function, addr uint32, src []byte) error {
 }
 
 // spiWrite performs the gSPI Write action. Does not control CS pin.
-func (d *Dev) spiWrite(cmd uint32, w []byte) error {
+func (d *Device) spiWrite(cmd uint32, w []byte) error {
 	var buf [4]byte
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -143,25 +143,25 @@ func (d *Dev) spiWrite(cmd uint32, w []byte) error {
 }
 
 // reference: cyw43_read_reg_u32
-func (d *Dev) Read32(fn Function, addr uint32) (uint32, error) {
+func (d *Device) Read32(fn Function, addr uint32) (uint32, error) {
 	v, err := d.rr(fn, addr, 4)
 	return v, err
 }
 
 // reference: cyw43_read_reg_u16
-func (d *Dev) Read16(fn Function, addr uint32) (uint16, error) {
+func (d *Device) Read16(fn Function, addr uint32) (uint16, error) {
 	v, err := d.rr(fn, addr, 2)
 	return uint16(v), err
 }
 
 // reference: cyw43_read_reg_u8
-func (d *Dev) Read8(fn Function, addr uint32) (uint8, error) {
+func (d *Device) Read8(fn Function, addr uint32) (uint8, error) {
 	v, err := d.rr(fn, addr, 1)
 	return uint8(v), err
 }
 
 // rr reads a register and returns the result and an error if there was one.
-func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
+func (d *Device) rr(fn Function, addr, size uint32) (uint32, error) {
 	var padding uint32
 	if fn == FuncBackplane {
 		padding = whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE
@@ -188,7 +188,7 @@ func (d *Dev) rr(fn Function, addr, size uint32) (uint32, error) {
 }
 
 // reference: cyw43_read_bytes
-func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
+func (d *Device) ReadBytes(fn Function, addr uint32, src []byte) error {
 	Debug("read bytes addr=", addr, "len=", len(src), "fn=", fn.String())
 	const maxReadPacket = 2040
 	length := uint32(len(src))
@@ -216,7 +216,7 @@ func (d *Dev) ReadBytes(fn Function, addr uint32, src []byte) error {
 }
 
 // spiRead performs the gSPI Read action.
-func (d *Dev) spiRead(cmd uint32, r []byte, padding uint8) error {
+func (d *Device) spiRead(cmd uint32, r []byte, padding uint8) error {
 	var buf [4]byte
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -243,19 +243,19 @@ func (d *Dev) spiRead(cmd uint32, r []byte, padding uint8) error {
 }
 
 //go:inline
-func (d *Dev) csHigh() {
+func (d *Device) csHigh() {
 	d.cs.High()
 	machine.GPIO1.High()
 }
 
 //go:inline
-func (d *Dev) csLow() {
+func (d *Device) csLow() {
 	d.cs.Low()
 	machine.GPIO1.Low()
 }
 
 //go:inline
-func (d *Dev) responseDelay(padding uint8) {
+func (d *Device) responseDelay(padding uint8) {
 	// Wait for response.
 	for i := uint8(0); i < padding; i++ {
 		d.spi.Transfer(0)
@@ -285,7 +285,7 @@ func swap32(b uint32) uint32 {
 }
 
 // Write32S writes register and swaps big-endian 16bit word length. Used only at initialization.
-func (d *Dev) Write32S(fn Function, addr, val uint32) error {
+func (d *Device) Write32S(fn Function, addr, val uint32) error {
 	cmd := make_cmd(true, true, fn, addr, 4)
 	var buf [4]byte
 	d.csLow()
@@ -318,7 +318,7 @@ func (d *Dev) Write32S(fn Function, addr, val uint32) error {
 }
 
 // Read32S reads register and swaps big-endian 16bit word length. Used only at initialization.
-func (d *Dev) Read32S(fn Function, addr uint32) (uint32, error) {
+func (d *Device) Read32S(fn Function, addr uint32) (uint32, error) {
 	if fn == FuncBackplane {
 		panic("backplane not implemented for rrS")
 	}

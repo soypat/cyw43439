@@ -26,7 +26,7 @@ func TestShellmode() {
 	}
 	println("replicating SPI transactions on GPIOs (SDO,SDI,SCK,CS)=", mockSDO, mockSDI, mockSCK, mockCS)
 	spi.Configure()
-	dev := cyw43439.NewDev(spi, cs, wlreg, irq, irq)
+	dev := cyw43439.NewDevice(spi, cs, wlreg, irq, irq)
 	dev.GPIOSetup()
 	var _commandBuf [128]byte
 	for {
