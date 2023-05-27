@@ -8,20 +8,20 @@ import (
 	"tinygo.org/x/drivers"
 )
 
-func (d *Dev) NetConnect() error {
+func (d *Device) NetConnect() error {
 	return drivers.ErrNotSupported
 }
 
-func (d *Dev) NetDisconnect() {
+func (d *Device) NetDisconnect() {
 }
 
-func (d *Dev) NetNotify(cb func(drivers.NetlinkEvent)) {
+func (d *Device) NetNotify(cb func(drivers.NetlinkEvent)) {
 }
 
-func (d *Dev) GetHardwareAddr() (net.HardwareAddr, error) {
+func (d *Device) GetHardwareAddr() (net.HardwareAddr, error) {
 	return net.HardwareAddr{}, drivers.ErrNotSupported
 }
 
-func (d *Dev) GetIPAddr() (net.IP, error) {
+func (d *Device) GetIPAddr() (net.IP, error) {
 	return net.IP{}, drivers.ErrNotSupported
 }
