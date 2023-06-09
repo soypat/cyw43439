@@ -34,6 +34,10 @@ import (
 	"tinygo.org/x/drivers"
 )
 
+var _debug debug = debugBasic
+
+//var _debug debug = debugBasic | debugTxRx
+//var _debug debug = debugBasic | debugTxRx | debugSpi
 
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
