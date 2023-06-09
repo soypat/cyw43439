@@ -621,7 +621,7 @@ func (d *Device) GetMAC() (mac [6]byte, err error) {
 	if err == nil {
 		copy(mac[:], buf[:6])
 	}
-	return mac, nil
+	return
 }
 
 // reference: cyw43_ensure_up
