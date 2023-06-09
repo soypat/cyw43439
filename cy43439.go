@@ -93,7 +93,8 @@ type Device struct {
 	buf            [2048]byte
 	auxbuf         [2048]byte
 
-	mac net.HardwareAddr
+	mac       net.HardwareAddr
+	fwVersion string
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
@@ -115,7 +116,7 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
-	err = validateFirmware(cfg.Firmware)
+	d.fwVersion, err = GetFWVersion(cfg.Firmware)
 	if err != nil {
 		return err
 	}

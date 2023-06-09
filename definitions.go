@@ -235,39 +235,20 @@ func Debug(a ...any) {
 	flushprint()
 }
 
-func validateFirmware(src []byte) error {
-	fwEnd := 800 // get last 800 bytes
-	if fwEnd > len(src) {
-		return errors.New("bad firmware size: too small")
+func GetFWVersion(src []byte) (string, error) {
+	begin := bytes.LastIndex(src, []byte("Version: "))
+	if begin == -1 {
+		return "", errors.New("FW version not found")
 	}
-
-	// First we validate the firmware by looking for the Version string:
-	b := src[len(src)-fwEnd:]
-	// get length of trailer.
-	fwEnd -= 16 // skip DVID trailer.
-	trailLen := uint32(b[fwEnd-2]) | uint32(b[fwEnd-1])<<8
-	found := -1
-	if trailLen < 500 && b[fwEnd-3] == 0 {
-		var cmpString = []byte("Version: ")
-		for i := 80; i < int(trailLen); i++ {
-			ptr := fwEnd - 3 - i
-			if bytes.Equal(b[ptr:ptr+9], cmpString) {
-				found = i
-				break
-			}
-		}
+	end := bytes.Index(src[begin:], []byte{0})
+	if end == -1 {
+		return "", errors.New("FW version not found")
 	}
-	if found == -1 {
-		return errors.New("could not find valid firmware")
-	}
+	fwVersion := string(src[begin : begin+end])
 	if verbose_debug {
-		i := 0
-		ptrstart := fwEnd - 3 - found
-		for ; b[ptrstart+i] != 0; i++ {
-		}
-		Debug("got version", string(b[ptrstart:ptrstart+i-1]))
+		Debug("got version", fwVersion)
 	}
-	return nil
+	return fwVersion, nil
 }
 
 type _integer = interface {
