@@ -103,14 +103,10 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 		SD = sharedSD // Pico W special case.
 	}
 	return &Device{
-		spi:                    spi,
-		cs:                     cs,
-		wlRegOn:                wlRegOn,
-		sharedSD:               SD,
-		ResponseDelayByteCount: 0,
-		enableStatusWord:       false,
-		currentBackplaneWindow: 0,
-		busIsUp:                false,
+		spi:          spi,
+		cs:           cs,
+		wlRegOn:      wlRegOn,
+		sharedSD:     SD,
 	}
 }
 
