@@ -20,7 +20,6 @@ const (
 type Config struct {
 	Firmware        []byte
 	CLM             []byte
-	MAC             net.HardwareAddr
 	EnableBluetooth bool
 }
 
@@ -35,7 +34,6 @@ func DefaultConfig(enableBT bool) Config {
 	return Config{
 		Firmware:        fw,
 		CLM:             GetCLM(fw),
-		MAC:             []byte{0xfe, 0xed, 0xde, 0xad, 0xbe, 0xef},
 		EnableBluetooth: enableBT,
 	}
 }

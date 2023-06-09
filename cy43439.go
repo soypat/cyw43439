@@ -92,6 +92,8 @@ type Device struct {
 	lastSSIDJoined [36]byte
 	buf            [2048]byte
 	auxbuf         [2048]byte
+
+	mac net.HardwareAddr
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
@@ -113,9 +115,6 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
-	if cfg.MAC != nil && len(cfg.MAC) != 6 {
-		return errors.New("bad MAC address")
-	}
 	err = validateFirmware(cfg.Firmware)
 	if err != nil {
 		return err
@@ -403,13 +402,13 @@ f2ready:
 	if err != nil {
 		return err
 	}
-	// var defaultMAC = [6]byte{0x00, 0xA0, 0x50, 0xb5, 0x59, 0x5e}
-	if cfg.MAC == nil {
-		// Do not check if MAC address is set in OTP.
-		return nil
+	mac, err := d.GetMAC()
+	if err != nil {
+		return err
 	}
-	err = d.WriteIOVarN("cur_etheraddr", whd.WWD_STA_INTERFACE, cfg.MAC)
-	return err
+	d.mac = mac[:]
+
+	return nil
 }
 
 func (d *Device) GetStatus() (Status, error) {
@@ -611,6 +610,10 @@ func (d *Device) wifiOn(country uint32) error {
 	}
 	time.Sleep(50 * time.Millisecond)
 	return nil
+}
+
+func (d *Device) SetMAC(mac [6]byte) error {
+	return d.WriteIOVarN("cur_etheraddr", whd.WWD_STA_INTERFACE, mac[:])
 }
 
 // reference: cyw43_ll_wifi_get_mac
