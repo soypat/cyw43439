@@ -27,17 +27,25 @@ import (
 	"errors"
 	"fmt"
 	"machine"
+	"net"
+	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers"
+	"tinygo.org/x/drivers/netlink"
 )
 
 var _debug debug = debugBasic
 
 //var _debug debug = debugBasic | debugTxRx
 //var _debug debug = debugBasic | debugTxRx | debugSpi
+
+var (
+	version    = "0.0.1"
+	driverName = "Infineon cyw43439 Wifi network device driver (cyw43439)"
+)
 
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
@@ -98,21 +106,60 @@ type Device struct {
 	buf            [2048]byte
 	auxbuf         [2048]byte
 
-	mac       net.HardwareAddr
-	fwVersion string
+	params *netlink.ConnectParams
+
+	recvEth  func([]byte) error
+	notifyCb func(netlink.Event)
+
+	mu           sync.Mutex
+	mac          net.HardwareAddr
+	fwVersion    string
+	netConnected bool
+	driverShown  bool
+	deviceShown  bool
+	killWatchdog chan bool
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
+
 	SD := machine.NoPin
 	if sharedDATA && sharedSD != machine.NoPin {
 		SD = sharedSD // Pico W special case.
 	}
+
 	return &Device{
 		spi:          spi,
 		cs:           cs,
 		wlRegOn:      wlRegOn,
 		sharedSD:     SD,
+		killWatchdog: make(chan bool),
 	}
+}
+
+// ref: void cyw43_arch_enable_sta_mode()
+func (d *Device) enableStaMode() error {
+
+	// cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, true, cyw43_arch_get_country_code())
+
+	if err := d.Init(DefaultConfig(false)); err != nil {
+		return err
+	}
+
+	if err := d.wifiOn(whd.CountryCode(d.params.Country, 0)); err != nil {
+		return err
+	}
+
+	return d.wifiPM(defaultPM)
+}
+
+// ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
+func (d *Device) wifiConnectTimeout() error {
+	timeout := d.params.ConnectTimeout
+	if timeout == 0 {
+		timeout = netlink.DefaultConnectTimeout
+	}
+	_ = timeout
+	return nil
 }
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
@@ -452,6 +499,7 @@ func (d *Device) ClearInterrupts() error {
 }
 
 func (d *Device) Reset() {
+	// Reset and power up the WL chip
 	d.wlRegOn.Low()
 	time.Sleep(20 * time.Millisecond)
 	d.wlRegOn.High()

@@ -3,7 +3,6 @@ package cyw43439
 import (
 	"bytes"
 	"errors"
-	"net"
 	"strconv"
 
 	"github.com/soypat/cyw43439/whd"
