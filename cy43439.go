@@ -451,11 +451,10 @@ f2ready:
 	if err != nil {
 		return err
 	}
-	mac, err := d.GetMAC()
+	d.mac, err = d.getMAC()
 	if err != nil {
 		return err
 	}
-	d.mac = mac[:]
 
 	return nil
 }
@@ -662,17 +661,14 @@ func (d *Device) wifiOn(country uint32) error {
 	return nil
 }
 
-func (d *Device) SetMAC(mac [6]byte) error {
-	return d.WriteIOVarN("cur_etheraddr", whd.WWD_STA_INTERFACE, mac[:])
-}
-
 // reference: cyw43_ll_wifi_get_mac
-func (d *Device) GetMAC() (mac [6]byte, err error) {
+func (d *Device) getMAC() (mac []byte, err error) {
+	mac = make([]byte, 6)
 	buf := d.offbuf()
 	copy(buf, "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00")
 	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:6+14])
 	if err == nil {
-		copy(mac[:], buf[:6])
+		copy(mac, buf[:6])
 	}
 	return
 }

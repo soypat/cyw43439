@@ -185,7 +185,7 @@ func (d *Device) NetNotify(cb func(netlink.Event)) {
 }
 
 func (d *Device) GetHardwareAddr() (net.HardwareAddr, error) {
-	return d.mac, nil
+	return append(net.HardwareAddr{}, d.mac[:]...), nil
 }
 
 func (d *Device) SendEth(pkt []byte) error {
