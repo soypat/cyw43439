@@ -164,7 +164,7 @@ func (d *Device) wifiConnectTimeout() error {
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
-	d.fwVersion, err = GetFWVersion(cfg.Firmware)
+	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
 		return err
 	}

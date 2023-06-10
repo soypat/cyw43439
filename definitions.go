@@ -234,7 +234,7 @@ func Debug(a ...any) {
 	flushprint()
 }
 
-func GetFWVersion(src []byte) (string, error) {
+func getFWVersion(src []byte) (string, error) {
 	begin := bytes.LastIndex(src, []byte("Version: "))
 	if begin == -1 {
 		return "", errors.New("FW version not found")
