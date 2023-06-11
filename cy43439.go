@@ -153,13 +153,45 @@ func (d *Device) enableStaMode(country uint32) error {
 }
 
 // ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
-func (d *Device) wifiConnectTimeout() error {
-	timeout := d.params.ConnectTimeout
-	if timeout == 0 {
-		timeout = netlink.DefaultConnectTimeout
+func (d *Device) wifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
+
+	start := time.Now()
+
+	if err := d.wifiConnect(ssid, pass, auth); err != nil {
+		return err
 	}
-	_ = timeout
-	return nil
+
+	for {
+		status := d.wifiConnectStatus()
+		switch status {
+		case whd.CYW43_LINK_UP:
+			return nil
+		case whd.CYW43_LINK_NONET, whd.CYW43_LINK_JOIN:
+			if err := d.wifiConnect(ssid, pass, auth); err != nil {
+				return err
+			}
+		case whd.CYW43_LINK_BADAUTH:
+			return netlink.ErrAuthFailure
+		}
+		if time.Since(start) > timeout {
+			return netlink.ErrConnectTimeout
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// ref: int cyw43_arch_wifi_connect_bssid_async(const char *ssid, const uint8_t *bssid, const char *pw, uint32_t auth)
+func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
+	if pass == "" {
+		auth = whd.CYW43_AUTH_OPEN
+	}
+	return d.wifiJoin(ssid, pass, nil, auth, whd.CYW43_CHANNEL_NONE)
+}
+
+// ref: int cyw43_wifi_link_status(cyw43_t *self, int itf)
+func (d *Device) wifiConnectStatus() int32 {
+	// TODO: finish; for now return link DOWN so connect times out
+	return whd.CYW43_LINK_DOWN
 }
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)

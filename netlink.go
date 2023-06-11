@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers/netlink"
 )
 
@@ -42,11 +43,28 @@ func (d *Device) connectToAP() error {
 		return netlink.ErrMissingSSID
 	}
 
+	timeout := d.params.ConnectTimeout
+	if timeout == 0 {
+		timeout = netlink.DefaultConnectTimeout
+	}
+
+	var auth uint32
+	switch d.params.AuthType {
+	case netlink.AuthTypeWPA2:
+		auth = whd.CYW43_AUTH_WPA2_AES_PSK
+	case netlink.AuthTypeOpen:
+		auth = whd.CYW43_AUTH_OPEN
+	case netlink.AuthTypeWPA:
+		auth = whd.CYW43_AUTH_WPA_TKIP_PSK
+	case netlink.AuthTypeWPA2Mixed:
+		auth = whd.CYW43_AUTH_WPA2_MIXED_PSK
+	}
+
 	if debugging(debugBasic) {
 		fmt.Printf("Connecting to Wifi SSID '%s'...", d.params.Ssid)
 	}
 
-	err := d.wifiConnectTimeout()
+	err := d.wifiConnectTimeout(d.params.Ssid, d.params.Passphrase, auth, timeout)
 	if err != nil {
 		if debugging(debugBasic) {
 			fmt.Printf("FAILED (%s)\r\n", err.Error())
