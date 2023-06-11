@@ -833,16 +833,6 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	if err != nil {
 		return err
 	}
-	if authType == negative1 {
-		// Auto auth type.
-		if key == "" {
-			// No key given, assume this means open security
-			authType = 0
-		} else {
-			// See WICED_SECURITY_WPA2_MIXED_PSK
-			authType = whd.CYW43_AUTH_WPA2_MIXED_PSK
-		}
-	}
 
 	var wpa_auth uint32
 	if authType == whd.CYW43_AUTH_WPA2_AES_PSK || authType == whd.CYW43_AUTH_WPA2_MIXED_PSK {
