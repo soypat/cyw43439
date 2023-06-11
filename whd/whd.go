@@ -537,3 +537,17 @@ const (
 	CYW43_PM1_POWERSAVE_MODE = 1 ///< Powersave mode on specified interface without regard for throughput reduction
 	CYW43_PM2_POWERSAVE_MODE = 2 ///< Powersave mode on specified interface with High throughput
 )
+
+// Link status
+const (
+	CYW43_LINK_DOWN    = 0  ///< link is down
+	CYW43_LINK_JOIN    = 1  ///< Connected to wifi
+	CYW43_LINK_NOIP    = 2  ///< Connected to wifi, but no IP address
+	CYW43_LINK_UP      = 3  ///< Connect to wifi with an IP address
+	CYW43_LINK_FAIL    = -1 ///< Connection failed
+	CYW43_LINK_NONET   = -2 ///< No matching SSID found (could be out of range, or down)
+	CYW43_LINK_BADAUTH = -3 ///< Authenticatation failure
+)
+
+// To indicate no specific channel when calling cyw43_ll_wifi_join with bssid specified
+const CYW43_CHANNEL_NONE = 0xffffffff ///< No Channel specified (use the AP's channel)
