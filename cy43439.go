@@ -137,7 +137,7 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 }
 
 // ref: void cyw43_arch_enable_sta_mode()
-func (d *Device) enableStaMode() error {
+func (d *Device) enableStaMode(country uint32) error {
 
 	// cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, true, cyw43_arch_get_country_code())
 
@@ -145,7 +145,7 @@ func (d *Device) enableStaMode() error {
 		return err
 	}
 
-	if err := d.wifiOn(whd.CountryCode(d.params.Country, 0)); err != nil {
+	if err := d.wifiOn(country); err != nil {
 		return err
 	}
 

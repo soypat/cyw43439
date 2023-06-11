@@ -74,7 +74,8 @@ func (d *Device) showIP() {
 
 func (d *Device) netConnect(reset bool) error {
 	if reset {
-		if err := d.enableStaMode(); err != nil {
+		country := whd.CountryCode(d.params.Country, 0)
+		if err := d.enableStaMode(country); err != nil {
 			return err
 		}
 	}
