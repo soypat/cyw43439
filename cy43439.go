@@ -27,11 +27,24 @@ import (
 	"errors"
 	"fmt"
 	"machine"
+	"net"
+	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers"
+	"tinygo.org/x/drivers/netlink"
+)
+
+var _debug debug = debugBasic
+
+//var _debug debug = debugBasic | debugTxRx
+//var _debug debug = debugBasic | debugTxRx | debugSpi
+
+var (
+	version    = "0.0.1"
+	driverName = "Infineon cyw43439 Wifi network device driver (cyw43439)"
 )
 
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
@@ -92,31 +105,98 @@ type Device struct {
 	lastSSIDJoined [36]byte
 	buf            [2048]byte
 	auxbuf         [2048]byte
+
+	params *netlink.ConnectParams
+
+	recvEth  func([]byte) error
+	notifyCb func(netlink.Event)
+
+	mu           sync.Mutex
+	mac          net.HardwareAddr
+	fwVersion    string
+	netConnected bool
+	driverShown  bool
+	deviceShown  bool
+	killWatchdog chan bool
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
+
 	SD := machine.NoPin
 	if sharedDATA && sharedSD != machine.NoPin {
 		SD = sharedSD // Pico W special case.
 	}
+
 	return &Device{
-		spi:                    spi,
-		cs:                     cs,
-		wlRegOn:                wlRegOn,
-		sharedSD:               SD,
-		ResponseDelayByteCount: 0,
-		enableStatusWord:       false,
-		currentBackplaneWindow: 0,
-		busIsUp:                false,
+		spi:          spi,
+		cs:           cs,
+		wlRegOn:      wlRegOn,
+		sharedSD:     SD,
+		killWatchdog: make(chan bool),
 	}
+}
+
+// ref: void cyw43_arch_enable_sta_mode()
+func (d *Device) enableStaMode(country uint32) error {
+
+	// cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, true, cyw43_arch_get_country_code())
+
+	if err := d.Init(DefaultConfig(false)); err != nil {
+		return err
+	}
+
+	if err := d.wifiOn(country); err != nil {
+		return err
+	}
+
+	return d.wifiPM(defaultPM)
+}
+
+// ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
+func (d *Device) wifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
+
+	start := time.Now()
+
+	if err := d.wifiConnect(ssid, pass, auth); err != nil {
+		return err
+	}
+
+	for {
+		status := d.wifiConnectStatus()
+		switch status {
+		case whd.CYW43_LINK_UP:
+			return nil
+		case whd.CYW43_LINK_NONET, whd.CYW43_LINK_JOIN:
+			if err := d.wifiConnect(ssid, pass, auth); err != nil {
+				return err
+			}
+		case whd.CYW43_LINK_BADAUTH:
+			return netlink.ErrAuthFailure
+		}
+		if time.Since(start) > timeout {
+			return netlink.ErrConnectTimeout
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// ref: int cyw43_arch_wifi_connect_bssid_async(const char *ssid, const uint8_t *bssid, const char *pw, uint32_t auth)
+func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
+	if pass == "" {
+		auth = whd.CYW43_AUTH_OPEN
+	}
+	return d.wifiJoin(ssid, pass, nil, auth, whd.CYW43_CHANNEL_NONE)
+}
+
+// ref: int cyw43_wifi_link_status(cyw43_t *self, int itf)
+func (d *Device) wifiConnectStatus() int32 {
+	// TODO: finish; for now return link DOWN so connect times out
+	return whd.CYW43_LINK_DOWN
 }
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
-	if cfg.MAC != nil && len(cfg.MAC) != 6 {
-		return errors.New("bad MAC address")
-	}
-	err = validateFirmware(cfg.Firmware)
+	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
 		return err
 	}
@@ -403,13 +483,12 @@ f2ready:
 	if err != nil {
 		return err
 	}
-	// var defaultMAC = [6]byte{0x00, 0xA0, 0x50, 0xb5, 0x59, 0x5e}
-	if cfg.MAC == nil {
-		// Do not check if MAC address is set in OTP.
-		return nil
+	d.mac, err = d.getMAC()
+	if err != nil {
+		return err
 	}
-	err = d.WriteIOVarN("cur_etheraddr", whd.WWD_STA_INTERFACE, cfg.MAC)
-	return err
+
+	return nil
 }
 
 func (d *Device) GetStatus() (Status, error) {
@@ -451,6 +530,7 @@ func (d *Device) ClearInterrupts() error {
 }
 
 func (d *Device) Reset() {
+	// Reset and power up the WL chip
 	d.wlRegOn.Low()
 	time.Sleep(20 * time.Millisecond)
 	d.wlRegOn.High()
@@ -614,14 +694,15 @@ func (d *Device) wifiOn(country uint32) error {
 }
 
 // reference: cyw43_ll_wifi_get_mac
-func (d *Device) GetMAC() (mac [6]byte, err error) {
+func (d *Device) getMAC() (mac []byte, err error) {
+	mac = make([]byte, 6)
 	buf := d.offbuf()
 	copy(buf, "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00")
 	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:6+14])
 	if err == nil {
-		copy(mac[:], buf[:6])
+		copy(mac, buf[:6])
 	}
-	return mac, nil
+	return
 }
 
 // reference: cyw43_ensure_up
@@ -751,16 +832,6 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
 	if err != nil {
 		return err
-	}
-	if authType == negative1 {
-		// Auto auth type.
-		if key == "" {
-			// No key given, assume this means open security
-			authType = 0
-		} else {
-			// See WICED_SECURITY_WPA2_MIXED_PSK
-			authType = whd.CYW43_AUTH_WPA2_MIXED_PSK
-		}
 	}
 
 	var wpa_auth uint32
