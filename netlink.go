@@ -58,6 +58,8 @@ func (d *Device) connectToAP() error {
 		auth = whd.CYW43_AUTH_WPA_TKIP_PSK
 	case netlink.AuthTypeWPA2Mixed:
 		auth = whd.CYW43_AUTH_WPA2_MIXED_PSK
+	default:
+		panic("ConnectToAP: Unknown AuthType")
 	}
 
 	if debugging(debugBasic) {
