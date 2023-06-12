@@ -166,7 +166,8 @@ func (d *Device) wifiConnectTimeout(ssid, pass string, auth uint32, timeout time
 		switch status {
 		case whd.CYW43_LINK_UP:
 			return nil
-		case whd.CYW43_LINK_NONET, whd.CYW43_LINK_JOIN:
+		case whd.CYW43_LINK_NONET:
+			// If there was no network, keep trying
 			if err := d.wifiConnect(ssid, pass, auth); err != nil {
 				return err
 			}
