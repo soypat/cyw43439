@@ -213,6 +213,6 @@ func (d *Device) SendEth(pkt []byte) error {
 	return netlink.ErrNotSupported
 }
 
-func (d *Device) RecvEthFunc(cb func(pkt []byte) error) {
-	d.recvEth = cb
+func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
+	d.recvEth = handler
 }
