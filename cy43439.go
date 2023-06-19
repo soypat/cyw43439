@@ -598,13 +598,13 @@ func pmValue(pmMode, pmSleepRetMs, li_beacon_period, li_dtim_period, li_assoc ui
 func (d *Device) wifiOn(country uint32) error {
 	buf := d.offbuf()
 	copy(buf, "country\x00")
-	binary.LittleEndian.PutUint32(buf[:8], country&0xff_ff)
+	binary.LittleEndian.PutUint32(buf[8:12], country&0xff_ff)
 	if country>>16 == 0 {
-		binary.LittleEndian.PutUint32(buf[:12], 4294967295)
+		binary.LittleEndian.PutUint32(buf[12:16], 0xffffffff)
 	} else {
-		binary.LittleEndian.PutUint32(buf[:12], country>>16)
+		binary.LittleEndian.PutUint32(buf[12:16], country>>16)
 	}
-	binary.LittleEndian.PutUint32(buf[:16], country&0xff_ff)
+	binary.LittleEndian.PutUint32(buf[16:20], country&0xff_ff)
 	err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:20])
 	if err != nil {
 		return err
