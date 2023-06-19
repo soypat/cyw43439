@@ -68,6 +68,7 @@ func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 		SDO:   DATA_OUT,
 		Delay: delay,
 	}
+	spi.Configure()
 	return spi, CS, WL_REG_ON, IRQ
 }
 
