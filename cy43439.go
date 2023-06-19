@@ -656,6 +656,11 @@ func (d *Device) wifiOn(country uint32) error {
 	// This delay is needed for the WLAN chip to do some processing, otherwise
 	// SDIOIT/OOB WL_HOST_WAKE IRQs in bus-sleep mode do no work correctly.
 	time.Sleep(150 * time.Millisecond) // TODO(soypat): Not critical: rewrite to only sleep if 150ms did not elapse since startup.
+
+	/*
+
+	Disable this code chunk for now as it doesn't appear in the C trace
+
 	const (
 		msg    = "bsscfg:event_msgs\x00"
 		msgLen = len(msg)
@@ -697,6 +702,7 @@ func (d *Device) wifiOn(country uint32) error {
 	if err != nil {
 		return err
 	}
+	*/
 	time.Sleep(50 * time.Millisecond)
 
 	// Set interface as "up".
