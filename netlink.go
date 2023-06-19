@@ -158,6 +158,10 @@ func (d *Device) NetConnect(params *netlink.ConnectParams) error {
 		return netlink.ErrConnectModeNoGood
 	}
 
+	if params.Country == "" {
+		params.Country = "XX"
+	}
+
 	d.params = params
 
 	d.showDriver()
