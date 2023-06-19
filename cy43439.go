@@ -879,8 +879,9 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	}
 
 	// wwd_wifi_set_supplicant_eapol_key_timeout
-	Debug("setting sup_wpa_tm=0x9c4")
-	err = d.WriteIOVar2("bsscfg:sup_wpa_tmo", whd.WWD_STA_INTERFACE, 0, 0x9c4)
+	const CYW_EAPOL_KEY_TIMEOUT = 5000
+	Debug("setting sup_wpa_tm=5000")
+	err = d.WriteIOVar2("bsscfg:sup_wpa_tmo", whd.WWD_STA_INTERFACE, 0, CYW_EAPOL_KEY_TIMEOUT)
 	if err != nil {
 		return
 	}
