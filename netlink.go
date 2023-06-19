@@ -1,3 +1,5 @@
+//go:build tinygo
+
 // Netlink implmentation of cyw43439
 
 package cyw43439
