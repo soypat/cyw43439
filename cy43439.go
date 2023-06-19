@@ -893,8 +893,8 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		copy(buf[4:], key)
 		time.Sleep(2 * time.Millisecond) // Delay required to allow radio firmware to be ready to receive PMK and avoid intermittent failure
 
-		Debug("setting sup_wpa_pmk ", len(key))
-		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC, buf[:68])
+		Debug("setting wsec_pmk ", len(key))
+		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC_PMK, buf[:68])
 		if err != nil {
 			return err
 		}
