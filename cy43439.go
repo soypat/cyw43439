@@ -47,6 +47,13 @@ var (
 	driverName = "Infineon cyw43439 Wifi network device driver (cyw43439)"
 )
 
+const (
+	mockSDI = machine.GPIO4
+	mockCS  = machine.GPIO1
+	mockSCK = machine.GPIO2
+	mockSDO = machine.GPIO3
+)
+
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
 	const (
@@ -67,6 +74,12 @@ func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 		SDI:   DATA_IN,
 		SDO:   DATA_OUT,
 		Delay: delay,
+	}
+	spi.MockTo = &SPIbb{
+		SCK:   mockSCK,
+		SDI:   mockSDI,
+		SDO:   mockSDO,
+		Delay: 10,
 	}
 	spi.Configure()
 	return spi, CS, WL_REG_ON, IRQ
