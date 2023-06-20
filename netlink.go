@@ -1,3 +1,5 @@
+//go:build tinygo
+
 // Netlink implmentation of cyw43439
 
 package cyw43439
@@ -58,13 +60,15 @@ func (d *Device) connectToAP() error {
 		auth = whd.CYW43_AUTH_WPA_TKIP_PSK
 	case netlink.AuthTypeWPA2Mixed:
 		auth = whd.CYW43_AUTH_WPA2_MIXED_PSK
+	default:
+		panic("ConnectToAP: Unknown AuthType")
 	}
 
 	if debugging(debugBasic) {
 		fmt.Printf("Connecting to Wifi SSID '%s'...", d.params.Ssid)
 	}
 
-	err := d.wifiConnectTimeout(d.params.Ssid, d.params.Passphrase, auth, timeout)
+	err := d.WifiConnectTimeout(d.params.Ssid, d.params.Passphrase, auth, timeout)
 	if err != nil {
 		if debugging(debugBasic) {
 			fmt.Printf("FAILED (%s)\r\n", err.Error())
@@ -93,7 +97,7 @@ func (d *Device) showIP() {
 func (d *Device) netConnect(reset bool) error {
 	if reset {
 		country := whd.CountryCode(d.params.Country, 0)
-		if err := d.enableStaMode(country); err != nil {
+		if err := d.EnableStaMode(country); err != nil {
 			return err
 		}
 	}
@@ -154,6 +158,10 @@ func (d *Device) NetConnect(params *netlink.ConnectParams) error {
 		return netlink.ErrConnectModeNoGood
 	}
 
+	if params.Country == "" {
+		params.Country = "XX"
+	}
+
 	d.params = params
 
 	d.showDriver()
@@ -211,6 +219,6 @@ func (d *Device) SendEth(pkt []byte) error {
 	return netlink.ErrNotSupported
 }
 
-func (d *Device) RecvEthFunc(cb func(pkt []byte) error) {
-	d.recvEth = cb
+func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
+	d.recvEth = handler
 }

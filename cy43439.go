@@ -47,6 +47,13 @@ var (
 	driverName = "Infineon cyw43439 Wifi network device driver (cyw43439)"
 )
 
+const (
+	mockSDI = machine.GPIO4
+	mockCS  = machine.GPIO1
+	mockSCK = machine.GPIO2
+	mockSDO = machine.GPIO3
+)
+
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
 	const (
@@ -68,6 +75,13 @@ func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 		SDO:   DATA_OUT,
 		Delay: delay,
 	}
+	spi.MockTo = &SPIbb{
+		SCK:   mockSCK,
+		SDI:   mockSDI,
+		SDO:   mockSDO,
+		Delay: 10,
+	}
+	spi.Configure()
 	return spi, CS, WL_REG_ON, IRQ
 }
 
@@ -137,7 +151,7 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 }
 
 // ref: void cyw43_arch_enable_sta_mode()
-func (d *Device) enableStaMode(country uint32) error {
+func (d *Device) EnableStaMode(country uint32) error {
 
 	// cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, true, cyw43_arch_get_country_code())
 
@@ -153,7 +167,7 @@ func (d *Device) enableStaMode(country uint32) error {
 }
 
 // ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
-func (d *Device) wifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
+func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
 
 	start := time.Now()
 
@@ -166,7 +180,8 @@ func (d *Device) wifiConnectTimeout(ssid, pass string, auth uint32, timeout time
 		switch status {
 		case whd.CYW43_LINK_UP:
 			return nil
-		case whd.CYW43_LINK_NONET, whd.CYW43_LINK_JOIN:
+		case whd.CYW43_LINK_NONET:
+			// If there was no network, keep trying
 			if err := d.wifiConnect(ssid, pass, auth); err != nil {
 				return err
 			}
@@ -597,13 +612,13 @@ func pmValue(pmMode, pmSleepRetMs, li_beacon_period, li_dtim_period, li_assoc ui
 func (d *Device) wifiOn(country uint32) error {
 	buf := d.offbuf()
 	copy(buf, "country\x00")
-	binary.LittleEndian.PutUint32(buf[:8], country&0xff_ff)
+	binary.LittleEndian.PutUint32(buf[8:12], country&0xff_ff)
 	if country>>16 == 0 {
-		binary.LittleEndian.PutUint32(buf[:12], 4294967295)
+		binary.LittleEndian.PutUint32(buf[12:16], 0xffffffff)
 	} else {
-		binary.LittleEndian.PutUint32(buf[:12], country>>16)
+		binary.LittleEndian.PutUint32(buf[12:16], country>>16)
 	}
-	binary.LittleEndian.PutUint32(buf[:16], country&0xff_ff)
+	binary.LittleEndian.PutUint32(buf[16:20], country&0xff_ff)
 	err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:20])
 	if err != nil {
 		return err
@@ -641,6 +656,11 @@ func (d *Device) wifiOn(country uint32) error {
 	// This delay is needed for the WLAN chip to do some processing, otherwise
 	// SDIOIT/OOB WL_HOST_WAKE IRQs in bus-sleep mode do no work correctly.
 	time.Sleep(150 * time.Millisecond) // TODO(soypat): Not critical: rewrite to only sleep if 150ms did not elapse since startup.
+
+	/*
+
+	Disable this code chunk for now as it doesn't appear in the C trace
+
 	const (
 		msg    = "bsscfg:event_msgs\x00"
 		msgLen = len(msg)
@@ -682,6 +702,7 @@ func (d *Device) wifiOn(country uint32) error {
 	if err != nil {
 		return err
 	}
+	*/
 	time.Sleep(50 * time.Millisecond)
 
 	// Set interface as "up".
@@ -864,8 +885,9 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	}
 
 	// wwd_wifi_set_supplicant_eapol_key_timeout
-	Debug("setting sup_wpa_tm=0x9c4")
-	err = d.WriteIOVar2("bsscfg:sup_wpa_tmo", whd.WWD_STA_INTERFACE, 0, 0x9c4)
+	const CYW_EAPOL_KEY_TIMEOUT = 5000
+	Debug("setting sup_wpa_tm=5000")
+	err = d.WriteIOVar2("bsscfg:sup_wpa_tmo", whd.WWD_STA_INTERFACE, 0, CYW_EAPOL_KEY_TIMEOUT)
 	if err != nil {
 		return
 	}
@@ -877,8 +899,8 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		copy(buf[4:], key)
 		time.Sleep(2 * time.Millisecond) // Delay required to allow radio firmware to be ready to receive PMK and avoid intermittent failure
 
-		Debug("setting sup_wpa_pmk ", len(key))
-		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC, buf[:68])
+		Debug("setting wsec_pmk ", len(key))
+		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC_PMK, buf[:68])
 		if err != nil {
 			return err
 		}
