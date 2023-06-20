@@ -151,7 +151,7 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 }
 
 // ref: void cyw43_arch_enable_sta_mode()
-func (d *Device) enableStaMode(country uint32) error {
+func (d *Device) EnableStaMode(country uint32) error {
 
 	// cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, true, cyw43_arch_get_country_code())
 
@@ -167,7 +167,7 @@ func (d *Device) enableStaMode(country uint32) error {
 }
 
 // ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
-func (d *Device) wifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
+func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
 
 	start := time.Now()
 

@@ -68,7 +68,7 @@ func (d *Device) connectToAP() error {
 		fmt.Printf("Connecting to Wifi SSID '%s'...", d.params.Ssid)
 	}
 
-	err := d.wifiConnectTimeout(d.params.Ssid, d.params.Passphrase, auth, timeout)
+	err := d.WifiConnectTimeout(d.params.Ssid, d.params.Passphrase, auth, timeout)
 	if err != nil {
 		if debugging(debugBasic) {
 			fmt.Printf("FAILED (%s)\r\n", err.Error())
@@ -97,7 +97,7 @@ func (d *Device) showIP() {
 func (d *Device) netConnect(reset bool) error {
 	if reset {
 		country := whd.CountryCode(d.params.Country, 0)
-		if err := d.enableStaMode(country); err != nil {
+		if err := d.EnableStaMode(country); err != nil {
 			return err
 		}
 	}
