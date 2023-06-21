@@ -551,3 +551,9 @@ const (
 
 // To indicate no specific channel when calling cyw43_ll_wifi_join with bssid specified
 const CYW43_CHANNEL_NONE = 0xffffffff ///< No Channel specified (use the AP's channel)
+
+// Network interface types
+const (
+	CYW43_ITF_STA = 0
+	CYW43_ITF_AP  = 1
+)

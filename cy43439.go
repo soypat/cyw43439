@@ -163,7 +163,13 @@ func (d *Device) EnableStaMode(country uint32) error {
 		return err
 	}
 
-	return d.wifiPM(defaultPM)
+	if err := d.wifiPM(defaultPM); err != nil {
+		return err
+	}
+
+	d.itfState = whd.CYW43_ITF_STA
+
+	return nil
 }
 
 // ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
