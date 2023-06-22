@@ -96,8 +96,12 @@ func (d *Device) showIP() {
 
 func (d *Device) netConnect(reset bool) error {
 	if reset {
-		country := whd.CountryCode(d.params.Country, 0)
-		if err := d.EnableStaMode(country); err != nil {
+		country := d.params.Country
+		if country == "" {
+			country = "XX"
+		}
+		code := whd.CountryCode(country, 0)
+		if err := d.EnableStaMode(code); err != nil {
 			return err
 		}
 	}
@@ -156,10 +160,6 @@ func (d *Device) NetConnect(params *netlink.ConnectParams) error {
 	case netlink.ConnectModeSTA:
 	default:
 		return netlink.ErrConnectModeNoGood
-	}
-
-	if params.Country == "" {
-		params.Country = "XX"
 	}
 
 	d.params = params

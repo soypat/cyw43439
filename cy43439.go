@@ -111,6 +111,7 @@ type Device struct {
 	wlanFlowCtl        uint8
 	// 0 == unitialized, 1 == STA, 2 == AP
 	itfState              uint8
+	wifiJoinState         uint32
 	sdpcmRequestedIoctlID uint16
 	lastInt               uint16
 
@@ -163,7 +164,13 @@ func (d *Device) EnableStaMode(country uint32) error {
 		return err
 	}
 
-	return d.wifiPM(defaultPM)
+	if err := d.wifiPM(defaultPM); err != nil {
+		return err
+	}
+
+	d.itfState = whd.CYW43_ITF_STA
+
+	return nil
 }
 
 // ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
@@ -176,7 +183,7 @@ func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time
 	}
 
 	for {
-		status := d.wifiConnectStatus()
+		status := d.wifiLinkStatus()
 		switch status {
 		case whd.CYW43_LINK_UP:
 			return nil
@@ -200,12 +207,36 @@ func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
 	if pass == "" {
 		auth = whd.CYW43_AUTH_OPEN
 	}
-	return d.wifiJoin(ssid, pass, nil, auth, whd.CYW43_CHANNEL_NONE)
+	err := d.wifiJoin(ssid, pass, nil, auth, whd.CYW43_CHANNEL_NONE)
+	if err != nil {
+		return err
+	}
+        // Wait for responses: EV_AUTH, EV_LINK, EV_SET_SSID, EV_PSK_SUP
+        // Will get EV_DEAUTH_IND if password is invalid
+	d.wifiJoinState = whd.WIFI_JOIN_STATE_ACTIVE
+        if (auth == whd.CYW43_AUTH_OPEN) {
+            // For open security we don't need EV_PSK_SUP, so set that flag indicator now
+            d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
+        }
+	return nil
 }
 
 // ref: int cyw43_wifi_link_status(cyw43_t *self, int itf)
-func (d *Device) wifiConnectStatus() int32 {
-	// TODO: finish; for now return link DOWN so connect times out
+func (d *Device) wifiLinkStatus() int32 {
+	switch d.itfState {
+	case whd.CYW43_ITF_STA:
+		s := d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK
+		switch s {
+		case whd.WIFI_JOIN_STATE_ACTIVE:
+			return whd.CYW43_LINK_JOIN
+		case whd.WIFI_JOIN_STATE_FAIL:
+			return whd.CYW43_LINK_FAIL
+		case whd.WIFI_JOIN_STATE_NONET:
+			return whd.CYW43_LINK_NONET
+		case whd.WIFI_JOIN_STATE_BADAUTH:
+			return whd.CYW43_LINK_BADAUTH
+		}
+	}
 	return whd.CYW43_LINK_DOWN
 }
 

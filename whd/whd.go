@@ -551,3 +551,22 @@ const (
 
 // To indicate no specific channel when calling cyw43_ll_wifi_join with bssid specified
 const CYW43_CHANNEL_NONE = 0xffffffff ///< No Channel specified (use the AP's channel)
+
+// Network interface types
+const (
+	CYW43_ITF_STA = 0
+	CYW43_ITF_AP  = 1
+)
+
+// Bits 0-3 are an enumeration, while bits 8-11 are flags.
+const (
+	WIFI_JOIN_STATE_KIND_MASK = 0x000f
+	WIFI_JOIN_STATE_ACTIVE    = 0x0001
+	WIFI_JOIN_STATE_FAIL      = 0x0002
+	WIFI_JOIN_STATE_NONET     = 0x0003
+	WIFI_JOIN_STATE_BADAUTH   = 0x0004
+	WIFI_JOIN_STATE_AUTH      = 0x0200
+	WIFI_JOIN_STATE_LINK      = 0x0400
+	WIFI_JOIN_STATE_KEYED     = 0x0800
+	WIFI_JOIN_STATE_ALL       = 0x0e01
+)
