@@ -19,6 +19,23 @@ When CY43439 boots it is in:
   - Little-Endian byte order
   - 16 bit word length mode
   - Big-Endian bit order (most common in SPI and other protocols)
+
+# Notes on Locking
+
+The driver has a single lock (d.mu) used to protect concurrent accesses to
+hardware, specifically SPI transactions, where an SPI transaction comprises
+multiple individual, but coordinated, register read and write operations.
+
+There are three paths in the driver where we need to provide mutual exclusion
+to hardware:
+
+  1. Tx send (via SendEth)
+  2. Queuing Ioctl (via sendIoctl)
+  3. Async packet processing  (via poll), handling:
+	Rx packets
+	Async events (link status change, etc)
+	Ioctl completions
+
 */
 package cyw43439
 

@@ -215,6 +215,7 @@ func (d *Device) GetHardwareAddr() (net.HardwareAddr, error) {
 }
 
 func (d *Device) SendEth(pkt []byte) error {
+	// TODO hold d.mu.Lock when acessing hardware to queue Tx
 	return netlink.ErrNotSupported
 }
 

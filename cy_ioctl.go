@@ -756,8 +756,9 @@ func (d *Device) processAsyncEvent(ev whd.AsyncEvent) error {
 	case whd.CYW43_EV_ESCAN_RESULT:
 		// TODO
 	case whd.CYW43_EV_DISASSOC:
-		go d.notifyDown()
 		d.wifiJoinState = whd.WIFI_JOIN_STATE_DOWN
+		// We're under Lock, so async notify link DOWN using goroutine
+		go d.notifyDown()
 	case whd.CYW43_EV_PRUNE:
 		// TODO
 	case whd.CYW43_EV_SET_SSID:
