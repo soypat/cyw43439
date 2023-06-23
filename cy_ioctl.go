@@ -223,14 +223,15 @@ func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMC
 // sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
 // payload, length of the payload and the header type. Is cyw43_ll_sdpcm_poll_device in reference.
 func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
-	const badResult = 0
+	// First check the SDIO interrupt line to see if the WLAN notified us
+	const badHeader = whd.UNKNOWN_HEADER
 	noPacketSuccess := !d.hadSuccesfulPacket
 	if noPacketSuccess && !d.wlRegOn.Get() {
-		return 0, 0, badResult, errors.New("sdpcmPoll yield fault")
+		return 0, 0, badHeader, errors.New("sdpcmPoll yield fault")
 	}
 	err = d.busSleep(false)
 	if err != nil {
-		return 0, 0, badResult, err
+		return 0, 0, badHeader, err
 	}
 	if noPacketSuccess {
 		// Clear interrupt status so that HOST_WAKE/SDIO line is cleared
@@ -244,7 +245,7 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 			d.Write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, uint16(intStat))
 		}
 		if !intStat.IsF2Available() {
-			return 0, 0, badResult, errors.New("sdpcmPoll: F2 unavailable")
+			return 0, 0, badHeader, errors.New("sdpcmPoll: F2 unavailable")
 		}
 	}
 	const (
@@ -262,23 +263,23 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 		}
 	}
 	if status == 0xFFFFFFFF || err != nil {
-		return 0, 0, badResult, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
+		return 0, 0, badHeader, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
 	}
 	if !status.GSPIPacketAvailable() {
 		Debug("no packet")
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll: no packet")
+		return 0, 0, badHeader, errors.New("sdpcmPoll: no packet")
 	}
 	bytesPending := status.F2PacketLength()
 	if bytesPending == 0 || bytesPending > linkMTU-gspiPacketOverhead || status.IsUnderflow() {
 		Debug("SPI invalid bytes pending", bytesPending)
 		d.Write8(FuncBackplane, whd.SPI_FRAME_CONTROL, 1)
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll: invalid bytes pending")
+		return 0, 0, badHeader, errors.New("sdpcmPoll: invalid bytes pending")
 	}
 	err = d.ReadBytes(FuncWLAN, 0, buf[:bytesPending])
 	if err != nil {
-		return 0, 0, badResult, err
+		return 0, 0, badHeader, err
 	}
 	hdr0 := binary.LittleEndian.Uint16(buf[:])
 	hdr1 := binary.LittleEndian.Uint16(buf[2:])
@@ -286,15 +287,14 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 		// no packets.
 		Debug("no packet:zero size header")
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll:zero header")
+		return 0, 0, badHeader, errors.New("sdpcmPoll:zero header")
 	}
 	d.hadSuccesfulPacket = true
 	if hdr0^hdr1 != 0xffff {
 		Debug("header xor mismatch h[0]=", hdr0, "h[1]=", hdr1)
-		return 0, 0, badResult, errors.New("sdpcmPoll:header mismatch")
+		return 0, 0, badHeader, errors.New("sdpcmPoll:header mismatch")
 	}
-	payloadOffset, plen, header, err = d.sdpcmProcessRxPacket(buf)
-	return payloadOffset, plen, header, err
+	return d.sdpcmProcessRxPacket(buf[:bytesPending])
 }
 
 // sendSDPCMCommon Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
@@ -682,15 +682,14 @@ var (
 // is sdpcm_process_rx_packet in reference.
 //
 //	reference: sdpcm_process_rx_packet
-func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag whd.SDPCMHeaderType, err error) {
-	const badFlag = 0
-	const sdpcmOffset = 0
-	hdr := whd.DecodeSDPCMHeader(buf[sdpcmOffset:])
+func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
+	const badHeader = whd.UNKNOWN_HEADER
+	hdr := whd.DecodeSDPCMHeader(buf)
 	switch {
 	case hdr.Size != ^hdr.SizeCom&0xffff:
-		return 0, 0, badFlag, err2InvalidPacket
+		return 0, 0, badHeader, err2InvalidPacket
 	case hdr.Size < whd.SDPCM_HEADER_LEN:
-		return 0, 0, badFlag, err3PacketTooSmall
+		return 0, 0, badHeader, err3PacketTooSmall
 	}
 	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
 		Debug("WLAN: changed flow control", d.wlanFlowCtl, hdr.WirelessFlowCtl)
@@ -705,21 +704,21 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, f
 		}
 	}
 	if hdr.Size == whd.SDPCM_HEADER_LEN {
-		return 0, 0, badFlag, err4IgnoreControlPacket // Flow ctl packet with no data.
+		return 0, 0, badHeader, err4IgnoreControlPacket // Flow ctl packet with no data.
 	}
 
 	payloadOffset = uint32(hdr.HeaderLength)
-	headerFlag := hdr.Type()
-	switch headerFlag {
+	headerType := hdr.Type()
+	switch headerType {
 	case whd.CONTROL_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
 		if hdr.Size < totalHeaderSize {
-			return 0, 0, badFlag, err5IgnoreSmallControlPacket
+			return 0, 0, badHeader, err5IgnoreSmallControlPacket
 		}
 		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
 		id := ioctlHeader.ID()
 		if id != d.sdpcmRequestedIoctlID {
-			return 0, 0, badFlag, err6IgnoreWrongIDPacket
+			return 0, 0, badHeader, err6IgnoreWrongIDPacket
 		}
 		payloadOffset += whd.IOCTL_HEADER_LEN
 		plen = uint32(hdr.Size) - payloadOffset
@@ -728,7 +727,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, f
 	case whd.DATA_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, err7IgnoreSmallDataPacket
+			return 0, 0, badHeader, err7IgnoreSmallDataPacket
 		}
 
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
@@ -739,28 +738,27 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, f
 	case whd.ASYNCEVENT_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, err8IgnoreTooSmallAsyncPacket
+			return 0, 0, badHeader, err8IgnoreTooSmallAsyncPacket
 		}
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
 		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
 		plen = uint32(hdr.Size) - payloadOffset
 		payload := buf[payloadOffset:]
-		// payload is actually an ethernet packet with type 0x886c.
+		// Check payload is actually an ethernet packet with type 0x886c.
 		if !(payload[12] == 0x88 && payload[13] == 0x6c) {
 			// ethernet packet doesn't have the correct type.
 			// Note - this happens during startup but appears to be expected
-			// return 0, 0, badFlag, Err9WrongPayloadType
-			err = err9WrongPayloadType
+			return 0, 0, badHeader, err9WrongPayloadType
 		}
 		// Check the Broadcom OUI.
 		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
-			return 0, 0, badFlag, err10IncorrectOUI
+			return 0, 0, badHeader, err10IncorrectOUI
 		}
 		plen = plen - 24
 		payloadOffset = payloadOffset + 24
 	default:
 		// Unknown Header.
-		return 0, 0, badFlag, err11UnknownHeader
+		return 0, 0, badHeader, err11UnknownHeader
 	}
-	return payloadOffset, plen, headerFlag, err
+	return payloadOffset, plen, headerType, err
 }
