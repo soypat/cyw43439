@@ -138,6 +138,22 @@ func (aev *AsyncEvent) EventScanResult() *EventScanResult {
 	return &aev.u
 }
 
+var asyncEventNames = map[uint32]string{
+	CYW43_EV_SET_SSID:         "SET_SSID",
+	CYW43_EV_JOIN:             "JOIN",
+	CYW43_EV_AUTH:             "AUTH",
+	CYW43_EV_DEAUTH_IND:       "DEAUTH_IND",
+	CYW43_EV_ASSOC:            "ASSOC",
+	CYW43_EV_DISASSOC:         "DISASSOC",
+	CYW43_EV_DISASSOC_IND:     "DISASSOC_IND",
+	CYW43_EV_LINK:             "LINK",
+	CYW43_EV_PSK_SUP:          "PSK_SUP",
+	CYW43_EV_ESCAN_RESULT:     "ESCAN_RESULT",
+	CYW43_EV_CSA_COMPLETE_IND: "CSA_COMPLETE_IND",
+	CYW43_EV_ASSOC_REQ_IE:     "ASSOC_REQ_IE",
+	CYW43_EV_ASSOC_RESP_IE:    "ASSOC_RESP_IE",
+}
+
 type evscanresult struct {
 	Version      uint32  // 1
 	Length       uint32  // 2
