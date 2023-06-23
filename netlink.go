@@ -80,9 +80,7 @@ func (d *Device) connectToAP() error {
 		fmt.Printf("CONNECTED\r\n")
 	}
 
-	if d.notifyCb != nil {
-		d.notifyCb(netlink.EventNetUp)
-	}
+	d.notifyUp()
 
 	return nil
 }
@@ -137,9 +135,7 @@ func (d *Device) watchdog() {
 				if debugging(debugBasic) {
 					fmt.Printf("Watchdog: Wifi NOT CONNECTED, trying again...\r\n")
 				}
-				if d.notifyCb != nil {
-					d.notifyCb(netlink.EventNetDown)
-				}
+				d.notifyDown()
 				d.netConnect(false)
 			}
 			d.mu.Unlock()
@@ -202,8 +198,18 @@ func (d *Device) NetDisconnect() {
 		fmt.Printf("\r\nDisconnected from Wifi\r\n\r\n")
 	}
 
+	d.notifyDown()
+}
+
+func (d *Device) notifyDown() {
 	if d.notifyCb != nil {
 		d.notifyCb(netlink.EventNetDown)
+	}
+}
+
+func (d *Device) notifyUp() {
+	if d.notifyCb != nil {
+		d.notifyCb(netlink.EventNetUp)
 	}
 }
 
