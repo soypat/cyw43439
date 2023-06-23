@@ -113,6 +113,7 @@ type AsyncEvent struct {
 	Reason    uint32
 	_         [30]byte
 	Interface uint8
+	_         uint8
 	u         EventScanResult
 }
 
