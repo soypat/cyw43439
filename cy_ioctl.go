@@ -251,6 +251,9 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 	var status Status = 0xFFFFFFFF
 	for i := 0; i < 1000 && status == 0xFFFFFFFF; i++ {
 		status, err = d.GetStatus()
+		if err != nil {
+			break
+		}
 	}
 	if status == 0xFFFFFFFF || err != nil {
 		return 0, 0, badResult, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
