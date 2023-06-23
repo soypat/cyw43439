@@ -255,7 +255,7 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 	if status == 0xFFFFFFFF || err != nil {
 		return 0, 0, badResult, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
 	}
-	if !status.F2PacketAvailable() {
+	if !status.GSPIPacketAvailable() {
 		Debug("no packet")
 		d.hadSuccesfulPacket = false
 		return 0, 0, badResult, errors.New("sdpcmPoll: no packet")
