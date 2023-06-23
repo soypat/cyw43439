@@ -197,6 +197,10 @@ var errDoioctlTimeout = errors.New("doIoctl time out waiting for data")
 // reference: cyw43_send_ioctl
 func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
 	Debug("sendIoctl")
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	length := uint32(len(w))
 	if uint32(len(d.buf)) < whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length {
 		return errors.New("ioctl buffer too large for sending")

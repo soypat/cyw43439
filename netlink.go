@@ -130,7 +130,6 @@ func (d *Device) watchdog() {
 		case <-d.killWatchdog:
 			return
 		case <-ticker.C:
-			d.mu.Lock()
 			if d.networkDown() {
 				if debugging(debugBasic) {
 					fmt.Printf("Watchdog: Wifi NOT CONNECTED, trying again...\r\n")
@@ -138,15 +137,11 @@ func (d *Device) watchdog() {
 				d.notifyDown()
 				d.netConnect(false)
 			}
-			d.mu.Unlock()
 		}
 	}
 }
 
 func (d *Device) NetConnect(params *netlink.ConnectParams) error {
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	if d.netConnected {
 		return netlink.ErrConnected
@@ -179,9 +174,6 @@ func (d *Device) netDisconnect() {
 }
 
 func (d *Device) NetDisconnect() {
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	if !d.netConnected {
 		return
