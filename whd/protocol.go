@@ -169,7 +169,7 @@ type evscanresult struct {
 type EventScanResult struct {
 	_ [5]uint32
 	// Access point MAC address.
-	BSSID [8]uint8
+	BSSID [6]uint8
 	_     [2]uint16
 	// Length of access point name.
 	SSIDLength uint8
