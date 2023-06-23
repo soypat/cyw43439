@@ -133,11 +133,11 @@ func (d *Device) ReadIOVar(VAR string, iface whd.IoctlInterface) (uint32, error)
 
 // reference: cyw43_ll_ioctl
 func (d *Device) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
-	kind := uint32(0)
+	kind := whd.SDPCM_GET
 	if cmd&1 != 0 {
-		kind = 2
+		kind = whd.SDPCM_SET
 	}
-	return d.doIoctl(kind, iface, cmd>>1, w)
+	return d.doIoctl(uint32(kind), iface, cmd>>1, w)
 }
 
 // doIoctl uses Device's primary buffer to perform ioctl call. Use [Dev.offbuff] for
