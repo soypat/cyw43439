@@ -762,3 +762,74 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 	}
 	return payloadOffset, plen, headerType, err
 }
+
+// ref: void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev)
+func (d *Device) processAsyncEvent(ev whd.AsyncEvent) error {
+	fmt.Printf("AsyncEvent: %+v\r\n", ev)
+	switch ev.EventType {
+	case whd.CYW43_EV_ESCAN_RESULT:
+		// TODO
+	case whd.CYW43_EV_DISASSOC:
+		go d.notifyDown()
+		d.wifiJoinState = whd.WIFI_JOIN_STATE_DOWN
+	case whd.CYW43_EV_PRUNE:
+		// TODO
+	case whd.CYW43_EV_SET_SSID:
+		switch {
+		case ev.Status == 0:
+			// Success setting SSID
+		case ev.Status == 3 && ev.Reason == 0:
+			// No matching SSID found (could be out of range, or down)
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_NONET
+		default:
+			// Other failure setting SSID
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_FAIL
+		}
+	case whd.CYW43_EV_AUTH:
+		switch ev.Status {
+		case 0:
+			if (d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK) ==
+				whd.WIFI_JOIN_STATE_BADAUTH {
+				// A good-auth follows a bad-auth, so change
+				// the join state back to active.
+				d.wifiJoinState = (d.wifiJoinState & ^uint32(whd.WIFI_JOIN_STATE_KIND_MASK)) |
+					whd.WIFI_JOIN_STATE_ACTIVE
+			}
+			d.wifiJoinState |= whd.WIFI_JOIN_STATE_AUTH
+		case 6:
+			// Unsolicited auth packet, ignore it
+		default:
+			// Cannot authenticate
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
+		}
+	case whd.CYW43_EV_DEAUTH_IND:
+		// TODO
+	case whd.CYW43_EV_LINK:
+		if ev.Status == 0 {
+			if (ev.Flags & 1) != 0 {
+				// Link is UP
+				d.wifiJoinState |= whd.WIFI_JOIN_STATE_LINK
+				// TODO missing some stuff
+			}
+		}
+	case whd.CYW43_EV_PSK_SUP:
+		switch {
+		case ev.Status == 6:
+			// WLC_SUP_KEYED
+			d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
+		case (ev.Status == 4 || ev.Status == 8 || ev.Status == 10) && ev.Reason == 15:
+			// TODO
+		default:
+			// PSK_SUP failure
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
+		}
+	}
+
+	if d.wifiJoinState == whd.WIFI_JOIN_STATE_ALL {
+		// STA connected
+		d.wifiJoinState = whd.WIFI_JOIN_STATE_ACTIVE
+		// TODO notify link UP
+	}
+
+	return nil
+}
