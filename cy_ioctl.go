@@ -229,11 +229,13 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 		return 0, 0, badResult, err
 	}
 	if noPacketSuccess {
+		// Clear interrupt status so that HOST_WAKE/SDIO line is cleared
 		lastInt := d.lastInt
 		intStat, err := d.GetInterrupts()
-		if err != nil || lastInt != uint16(intStat) && intStat.IsBusOverflowedOrUnderflowed() {
+		if err != nil || lastInt != intStat && intStat.IsBusOverflowedOrUnderflowed() {
 			Debug("bus error condition detected =", uint16(intStat), err)
 		}
+		d.lastInt = intStat
 		if intStat != 0 {
 			d.Write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, uint16(intStat))
 		}

@@ -113,7 +113,7 @@ type Device struct {
 	itfState              uint8
 	wifiJoinState         uint32
 	sdpcmRequestedIoctlID uint16
-	lastInt               uint16
+	lastInt               Interrupts
 
 	// The following variables are used to store the last SSID joined
 	// first 4 bytes are length of SSID, stored in little endian.
@@ -552,9 +552,6 @@ func (d *Device) ClearStatus() (Status, error) {
 
 func (d *Device) GetInterrupts() (Interrupts, error) {
 	reg, err := d.Read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
-	if err == nil {
-		d.lastInt = reg
-	}
 	return Interrupts(reg), err
 }
 
