@@ -23,6 +23,7 @@ When CY43439 boots it is in:
 package cyw43439
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -133,6 +134,8 @@ type Device struct {
 	driverShown  bool
 	deviceShown  bool
 	killWatchdog chan bool
+	pollCancel   func()
+	ctrlCh       chan []byte
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
@@ -148,13 +151,12 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 		wlRegOn:      wlRegOn,
 		sharedSD:     SD,
 		killWatchdog: make(chan bool),
+		ctrlCh:       make(chan []byte),
 	}
 }
 
 // ref: void cyw43_arch_enable_sta_mode()
 func (d *Device) EnableStaMode(country uint32) error {
-
-	// cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, true, cyw43_arch_get_country_code())
 
 	if err := d.Init(DefaultConfig(false)); err != nil {
 		return err
@@ -240,8 +242,87 @@ func (d *Device) wifiLinkStatus() int32 {
 	return whd.CYW43_LINK_DOWN
 }
 
+func (d *Device) handleAsyncEvent(payload []byte) error {
+	as, err := whd.ParseAsyncEvent(payload)
+	if err != nil {
+		return err
+	}
+	return d.processAsyncEvent(as)
+}
+
+// ref: void cyw43_ll_process_packets(cyw43_ll_t *self_in)
+func (d *Device) processPackets() error {
+	println("PROCESS PACKETS")
+	for {
+		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
+		Debug("processPackets:sdpcmPoll conclude payloadoffset=", int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
+		if err != nil {
+			return err
+		}
+		payload := d.buf[payloadOffset : payloadOffset+plen]
+		switch header {
+		case whd.CONTROL_HEADER:
+			d.ctrlCh <- payload
+		case whd.ASYNCEVENT_HEADER:
+			if err := d.handleAsyncEvent(payload); err != nil {
+				return err
+			}
+		case whd.DATA_HEADER:
+			// TODO(soypat): Implement ethernet interface. cyw43_cb_process_ethernet
+			Debug("DATA_HEADER not implemented yet")
+		default:
+			Debug("doIoctl got unexpected packet", header)
+		}
+	}
+	return nil
+}
+
+// ref: bool cyw43_ll_has_work(cyw43_ll_t *self_in)
+func (d *Device) hasWork() bool {
+	return d.wlRegOn.Get()
+}
+
+// ref: void cyw43_poll_func(void)
+func (d *Device) poll() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.hasWork() {
+		if err := d.processPackets(); err != nil {
+			println("POLLING ERROR:", err.Error())
+		}
+	}
+	// TODO check for other pending work (pend_rejoin, etc)
+}
+
+// ref: void cyw43_schedule_internal_poll_dispatch(__unused void (*func)(void))
+func (d *Device) pollStart() {
+	if d.pollCancel != nil {
+		return
+	}
+	println("STARTING POLLING")
+	ctx, cancel := context.WithCancel(context.Background())
+	d.pollCancel = cancel
+	go func() {
+		for ctx.Err() == nil {
+			d.poll()
+			time.Sleep(5 * time.Millisecond)
+		}
+		d.pollCancel = nil
+	}()
+}
+
+func (d *Device) pollStop() {
+	if d.pollCancel != nil {
+		println("CANCEL POLLING")
+		d.pollCancel()
+	}
+}
+
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
+
+	d.pollStop()
+
 	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
 		return err
@@ -513,6 +594,12 @@ f2ready:
 	if err != nil {
 		return err
 	}
+
+	//
+	// Start async polling to service ioctls, events, and data
+	//
+
+	d.pollStart()
 
 	// Load CLM data. It's right after main firmware
 	Debug("prepare to flash CLM")

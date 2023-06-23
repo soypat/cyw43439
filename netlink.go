@@ -171,6 +171,7 @@ func (d *Device) NetConnect(params *netlink.ConnectParams) error {
 }
 
 func (d *Device) netDisconnect() {
+	d.pollStop()
 }
 
 func (d *Device) NetDisconnect() {

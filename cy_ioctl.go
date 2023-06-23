@@ -158,41 +158,27 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 	if err != nil {
 		return err
 	}
-	start := time.Now()
-	const ioctlTimeout = 50 * time.Millisecond
-	const maxRetries = 3
-	for retries := 0; time.Since(start) < ioctlTimeout || retries < maxRetries; retries++ {
-		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		Debug("doIoctl:sdpcmPoll conclude payloadoffset=", int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
-		// The "wrong payload type" appears to happen during startup. See sdpcmProcessRxPacket
-		if err != nil && !errors.Is(err, err9WrongPayloadType) {
-			continue
-		}
-		payload := d.buf[payloadOffset : payloadOffset+plen]
-		switch header {
-		case whd.CONTROL_HEADER:
-			n := copy(buf[:], payload)
-			if uint32(n) != plen {
-				return errors.New("not enough space on ioctl buffer for control header copy")
-			}
-			return nil
 
-		case whd.ASYNCEVENT_HEADER:
-			// TODO(soypat): Must handle this for wifi to work. cyw43_cb_process_async_event
-			Debug("ASYNCEVENT not handled")
-		case whd.DATA_HEADER:
-			// TODO(soypat): Implement ethernet interface. cyw43_cb_process_ethernet
-			Debug("DATA_HEADER not implemented yet")
-		default:
-			Debug("doIoctl got unexpected packet", header)
+	timeout := time.NewTicker(50 * time.Millisecond)
+
+	for {
+		select {
+		case <-timeout.C:
+			return errDoIoctlTimeout
+		case ctrlHdr := <-d.ctrlCh:
+			if len(buf) < len(ctrlHdr) {
+				return errDoIoctlNoSpace
+			}
+			copy(buf[:], ctrlHdr)
+			return nil
 		}
-		time.Sleep(time.Millisecond)
 	}
-	Debug("todo")
-	return errDoioctlTimeout
+
+	return nil
 }
 
-var errDoioctlTimeout = errors.New("doIoctl time out waiting for data")
+var errDoIoctlNoSpace = errors.New("not enough space on ioctl buffer for control header copy")
+var errDoIoctlTimeout = errors.New("doIoctl time out waiting for data")
 
 // reference: cyw43_send_ioctl
 func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
