@@ -22,21 +22,20 @@ When CY43439 boots it is in:
 
 # Notes on Locking
 
-The driver has a single lock (d.mu) used to protect concurrent accesses to
-hardware, specifically SPI transactions, where an SPI transaction comprises
-multiple individual, but coordinated, register read and write operations.
+The driver has a single lock (d.hw) protecting concurrent accesses to hardware,
+specifically SPI transactions, where an SPI transaction comprises multiple
+individual, but coordinated, register reads and writes.
 
 There are three paths in the driver where we need to provide mutual exclusion
-to hardware:
+access to hardware:
 
-  1. Tx send (via SendEth)
-  2. Queuing Ioctl (via sendIoctl)
-  3. Async packet processing  (via poll), handling:
-	Rx packets
-	Async events (link status change, etc)
-	Ioctl completions
-
+  1. Tx send (via sendEthernet)
+  2. Ioctl (via doIoctl)
+  3. Async packet processing (via poll), handling:
+       Rx packets
+       Async events (link status change, etc)
 */
+
 package cyw43439
 
 import (
@@ -144,7 +143,7 @@ type Device struct {
 	recvEth  func([]byte) error
 	notifyCb func(netlink.Event)
 
-	mu           sync.Mutex
+	hw           sync.Mutex
 	mac          net.HardwareAddr
 	fwVersion    string
 	netConnected bool
@@ -305,8 +304,8 @@ func (d *Device) hasWork() bool {
 
 // ref: void cyw43_poll_func(void)
 func (d *Device) poll() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.hw.Lock()
+	defer d.hw.Unlock()
 	if d.hasWork() {
 		if err := d.processPackets(); err != nil {
 			println("POLLING ERROR:", err.Error())

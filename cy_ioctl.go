@@ -154,6 +154,9 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 		return errors.New("invalid ioctl kind")
 	}
 
+	d.hw.Lock()
+	defer d.hw.Unlock()
+
 	err := d.sendIoctl(kind, iface, cmd, buf)
 	if err != nil {
 		return err
@@ -183,9 +186,6 @@ var errDoIoctlTimeout = errors.New("doIoctl time out waiting for data")
 // reference: cyw43_send_ioctl
 func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
 	Debug("sendIoctl")
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	length := uint32(len(w))
 	if uint32(len(d.buf)) < whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length {
