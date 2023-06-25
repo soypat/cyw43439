@@ -296,7 +296,11 @@ func (d *Device) processPackets() error {
 
 // ref: bool cyw43_ll_has_work(cyw43_ll_t *self_in)
 func (d *Device) hasWork() bool {
-	return d.wlRegOn.Get()
+	// TODO reading d.irq.Get() always returns ifalse, so something is
+	// wrong.  Return true for now to keep polling active and allow async
+	// event and Rx data proecssing.
+	return true
+	//return d.irq.Get()
 }
 
 // ref: void cyw43_poll_func(void)
