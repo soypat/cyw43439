@@ -295,6 +295,8 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 	return d.sdpcmProcessRxPacket(buf[:bytesPending])
 }
 
+var errSendSDPCMTimeout = errors.New("sendSDPCMCommon time out waiting for data")
+
 // sendSDPCMCommon Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
 //
 //	reference: cyw43_sdpcm_send_common
@@ -307,6 +309,43 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 	if err != nil {
 		return err
 	}
+
+	/*
+
+	// TODO: I've coded this up, but it is causing a timeout so something is
+	// TODO: wrong or got lost in translation...needs investigation.
+
+	// Wait until we are allowed to send Credits are 8-bit unsigned
+	// integers that roll over, so we are stalled while they are equal
+
+	start := time.Now()
+	timeout := 1000 * time.Millisecond
+
+	for d.wlanFlowCtl != 0 || d.sdpcmLastBusCredit == d.sdpcmTxSequence {
+		if time.Since(start) > timeout {
+			return errSendSDPCMTimeout
+		}
+		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
+		Debug("sendSDPCMCommon:sdpcmPoll conclude payloadoffset=",
+			int(payloadOffset), "plen=", int(plen), "header=",
+			header.String(), err)
+		payload := d.buf[payloadOffset:payloadOffset+plen]
+		switch {
+		case err != nil:
+			break
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			// Don't proccess it due to possible reentrancy
+			// issues (eg sending another ETH as part of
+			// the reception)
+		default:
+			Debug("got unexpected packet", header)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	*/
+
 	headerLength := uint8(whd.SDPCM_HEADER_LEN)
 	if kind == whd.DATA_HEADER {
 		headerLength += 2
