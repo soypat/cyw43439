@@ -71,6 +71,14 @@ const (
 	mockSDO = machine.GPIO3
 )
 
+const (
+	pktQSize = 2
+	// TODO want more that 2 pkts in Q but there is no space left in RAM
+	// TODO need PR#2 to reduce RAM
+	//pktQSize = 32
+	pktMaxSize = 14 + 1500
+)
+
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
 	const (
@@ -141,6 +149,7 @@ type Device struct {
 	params *netlink.ConnectParams
 
 	recvEth  func([]byte) error
+	recvPktQ chan([]byte)
 	notifyCb func(netlink.Event)
 
 	hw           sync.Mutex
@@ -166,6 +175,7 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 		cs:           cs,
 		wlRegOn:      wlRegOn,
 		sharedSD:     SD,
+		recvPktQ:     make(chan []byte, pktQSize),
 		killWatchdog: make(chan bool),
 		ctrlCh:       make(chan []byte),
 	}
@@ -266,6 +276,19 @@ func (d *Device) handleAsyncEvent(payload []byte) error {
 	return d.processAsyncEvent(as)
 }
 
+func (d *Device) allocRecvPktQ() {
+
+	// Allocate queue of recv pkts, each pkt large enough to hold a
+	// full-sized Ethernet pkt.  Pkts on the queue are not-active and are
+	// owned by the driver.  Pkts off the queue are active and owned by the
+	// stack.
+
+	for len(d.recvPktQ) < cap(d.recvPktQ) {
+		pkt := make([]byte, 0, pktMaxSize)
+		d.recvPktQ <- pkt
+	}
+}
+
 // ref: void cyw43_ll_process_packets(cyw43_ll_t *self_in)
 func (d *Device) processPackets() error {
 	println("PROCESS PACKETS")
@@ -341,6 +364,7 @@ func (d *Device) pollStop() {
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
 
+	d.allocRecvPktQ()
 
 	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
