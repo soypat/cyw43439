@@ -162,22 +162,34 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 		return err
 	}
 
-	timeout := time.NewTicker(50 * time.Millisecond)
+	start := time.Now()
+	timeout := 500 * time.Millisecond
 
-	for {
-		select {
-		case <-timeout.C:
-			return errDoIoctlTimeout
-		case ctrlHdr := <-d.ctrlCh:
-			if len(buf) < len(ctrlHdr) {
+	for time.Since(start) < timeout {
+		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
+		Debug("doIoctl:sdpcmPoll conclude payloadoffset=",
+			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
+		payload := d.buf[payloadOffset:payloadOffset+plen]
+		switch {
+		case err != nil:
+			break
+		case header == whd.CONTROL_HEADER:
+			n := copy(buf, payload)
+			if uint32(n) != plen {
 				return errDoIoctlNoSpace
 			}
-			copy(buf[:], ctrlHdr)
 			return nil
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			d.processEthernet(payload)
+		default:
+			Debug("got unexpected packet", header)
 		}
+		time.Sleep(time.Millisecond)
 	}
 
-	return nil
+	return errDoIoctlTimeout
 }
 
 var errDoIoctlNoSpace = errors.New("not enough space on ioctl buffer for control header copy")

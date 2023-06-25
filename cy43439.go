@@ -160,7 +160,6 @@ type Device struct {
 	deviceShown  bool
 	killWatchdog chan bool
 	pollCancel   func()
-	ctrlCh       chan []byte
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
@@ -177,7 +176,6 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 		sharedSD:     SD,
 		recvPktQ:     make(chan []byte, pktQSize),
 		killWatchdog: make(chan bool),
-		ctrlCh:       make(chan []byte),
 	}
 }
 
