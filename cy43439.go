@@ -380,6 +380,17 @@ func (d *Device) pollStop() {
 	}
 }
 
+// ref: int cyw43_ll_send_ethernet(cyw43_ll_t *self_in, int itf, size_t len, const void *buf, bool is_pbuf)
+func (d *Device) sendEthernet(buf []byte) error {
+
+	d.hw.Lock()
+	defer d.hw.Unlock()
+
+	// TODO finish
+
+	return nil
+}
+
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
 
