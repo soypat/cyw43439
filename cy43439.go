@@ -341,7 +341,6 @@ func (d *Device) pollStop() {
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
 
-	d.pollStop()
 
 	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
@@ -615,12 +614,6 @@ f2ready:
 		return err
 	}
 
-	//
-	// Start async polling to service ioctls, events, and data
-	//
-
-	d.pollStart()
-
 	// Load CLM data. It's right after main firmware
 	Debug("prepare to flash CLM")
 	err = d.clmLoad(cfg.CLM)
@@ -640,6 +633,8 @@ f2ready:
 	if err != nil {
 		return err
 	}
+
+	d.pollStart()
 
 	return nil
 }
