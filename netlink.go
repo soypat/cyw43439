@@ -222,3 +222,7 @@ func (d *Device) SendEth(pkt []byte) error {
 func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
 	d.recvEth = handler
 }
+
+func (d *Device) RecvEthReturn(pkt []byte) {
+	d.recvPktQ <- pkt
+}

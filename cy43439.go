@@ -289,31 +289,54 @@ func (d *Device) allocRecvPktQ() {
 	}
 }
 
+// ref: void cyw43_cb_process_ethernet(void *cb_data, int itf, size_t len, const uint8_t *buf)
+func (d *Device) processEthernet(payload []byte) error {
+
+	println("processEthernet")
+	if d.recvEth == nil {
+		// drop packet
+		return nil
+	}
+
+	// Pop a pkt off of the queue and copy the payload into the pkt,
+	// freeing up the payload backing for the next receive.  Send the pkt
+	// up the stack.  Later, the stack will return the pkt and pushed back
+	// onto the queue.
+
+	if len(d.recvPktQ) == 0 {
+		// no pkt available, drop
+		println("DROPPING PKT")
+		return nil
+	}
+
+	pkt := <-d.recvPktQ
+	n := copy(pkt[:cap(pkt)], payload)
+	if err := d.recvEth(pkt[:n]); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 // ref: void cyw43_ll_process_packets(cyw43_ll_t *self_in)
-func (d *Device) processPackets() error {
-	println("PROCESS PACKETS")
+func (d *Device) processPackets() {
 	for {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		Debug("processPackets:sdpcmPoll conclude payloadoffset=", int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
-		if err != nil {
-			return err
-		}
-		payload := d.buf[payloadOffset : payloadOffset+plen]
-		switch header {
-		case whd.CONTROL_HEADER:
-			d.ctrlCh <- payload
-		case whd.ASYNCEVENT_HEADER:
-			if err := d.handleAsyncEvent(payload); err != nil {
-				return err
-			}
-		case whd.DATA_HEADER:
-			// TODO(soypat): Implement ethernet interface. cyw43_cb_process_ethernet
-			Debug("DATA_HEADER not implemented yet")
+		Debug("processPackets:sdpcmPoll conclude payloadoffset=",
+			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
+		payload := d.buf[payloadOffset:payloadOffset+plen]
+		switch {
+		case err != nil:
+			// no packet or flow control
+			return
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			d.processEthernet(payload)
 		default:
-			Debug("doIoctl got unexpected packet", header)
+			Debug("got unexpected packet", header)
 		}
 	}
-	return nil
 }
 
 // ref: bool cyw43_ll_has_work(cyw43_ll_t *self_in)
@@ -330,9 +353,7 @@ func (d *Device) poll() {
 	d.hw.Lock()
 	defer d.hw.Unlock()
 	if d.hasWork() {
-		if err := d.processPackets(); err != nil {
-			println("POLLING ERROR:", err.Error())
-		}
+		d.processPackets()
 	}
 	// TODO check for other pending work (pend_rejoin, etc)
 }
