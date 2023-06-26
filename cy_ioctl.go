@@ -13,7 +13,7 @@ import (
 	"github.com/soypat/cyw43439/whd"
 )
 
-func (d *Dev) LED() Pin {
+func (d *Device) LED() Pin {
 	const RaspberryPiPicoWOnboardLED = 0
 	return Pin{
 		pin: RaspberryPiPicoWOnboardLED,
@@ -22,7 +22,7 @@ func (d *Dev) LED() Pin {
 }
 
 type Pin struct {
-	d   *Dev
+	d   *Device
 	pin uint8
 }
 
@@ -43,7 +43,7 @@ const (
 	ioctlHeaderSize = 16 // unsafe.Sizeof(ioctlHeader{})
 )
 
-func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
+func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	Debug("gpioset", int(wlGPIO), "value=", value)
 	if wlGPIO >= 3 {
 		panic("GPIO out of range 0..2")
@@ -58,10 +58,10 @@ func (d *Dev) GPIOSet(wlGPIO uint8, value bool) (err error) {
 }
 
 // Returns a safe to use buffer outside of the bounds of buffers used by Ioctl calls.
-func (d *Dev) offbuf() []byte { return d.auxbuf[:] }
+func (d *Device) offbuf() []byte { return d.auxbuf[:] }
 
 // reference: cyw43_write_iovar_u32
-func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error {
+func (d *Device) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error {
 	Debug("WriteIOVar var=", VAR, "ioctl=", uint8(iface), "val=", val)
 	buf := d.offbuf()
 	length := copy(buf, VAR)
@@ -71,8 +71,8 @@ func (d *Dev) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, buf[:length+4])
 }
 
-// reference: cyw43_write_iovar_u32_u32
-func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
+// reference: cyw43_write_iovar_u32_u32 (const char *var, uint32_t val0, uint32_t val1, uint32_t iface)
+func (d *Device) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
 	Debug("WriteIOVar2 var=", VAR, "ioctl=", uint8(iface), "val1=", val0, "val2=", val1)
 	buf := d.offbuf()
 	length := copy(buf, VAR)
@@ -84,7 +84,7 @@ func (d *Dev) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint3
 }
 
 // reference: cyw43_write_iovar_n
-func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) error {
+func (d *Device) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) error {
 	Debug("WriteIOVarN var=", VAR, "ioctl=", uint8(iface), "len=", len(src))
 	iobuf := d.offbuf()
 	if len(VAR)+len(src)+1 > len(iobuf) {
@@ -99,8 +99,8 @@ func (d *Dev) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) erro
 	return d.doIoctl(whd.SDPCM_SET, iface, whd.WLC_SET_VAR, iobuf[:length])
 }
 
-// reference: cyw43_set_ioctl_u32
-func (d *Dev) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
+// reference: cyw43_set_ioctl_u32 (uint32_t cmd, uint32_t val, uint32_t iface)
+func (d *Device) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
 	Debug("SetIoctl32")
 	var buf [4]byte
 	binary.LittleEndian.PutUint32(buf[:], val)
@@ -108,70 +108,97 @@ func (d *Dev) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uin
 }
 
 // reference: cyw43_get_ioctl_u32
-func (d *Dev) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uint32, error) {
+func (d *Device) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uint32, error) {
 	Debug("GetIoctl32")
 	var buf [4]byte
 	err := d.doIoctl(whd.SDPCM_GET, iface, cmd, buf[:])
 	return binary.LittleEndian.Uint32(buf[:4]), err
 }
 
-// reference: cyw43_ll_ioctl
-func (d *Dev) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
-	kind := uint32(0)
-	if cmd&1 != 0 {
-		kind = 2
+// reference: cyw43_read_iovar_u32
+func (d *Device) ReadIOVar(VAR string, iface whd.IoctlInterface) (uint32, error) {
+	Debug("ReadIOVar var=", VAR, "ioctl=", uint8(iface))
+	buf := d.offbuf()
+	length := copy(buf, VAR)
+	buf[length] = 0 // Null terminate the string
+	length++
+	binary.LittleEndian.PutUint32(buf[length:], 0)
+	err := d.doIoctl(whd.SDPCM_GET, iface, whd.WLC_GET_VAR, buf[:length+4])
+	if err != nil {
+		return 0, err
 	}
-	return d.doIoctl(kind, iface, cmd>>1, w)
+	return binary.LittleEndian.Uint32(buf[:4]), nil
 }
 
-// doIoctl uses Dev's primary buffer to perform ioctl call. Use [Dev.offbuff] for
+// reference: cyw43_ioctl/cyw43_ll_ioctl
+func (d *Device) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
+
+	d.lock()
+	defer d.unlock()
+
+	kind := whd.SDPCM_GET
+	if cmd&1 != 0 {
+		kind = whd.SDPCM_SET
+	}
+	return d.doIoctl(uint32(kind), iface, cmd>>1, w)
+}
+
+// doIoctl uses Device's primary buffer to perform ioctl call. Use [Dev.offbuff] for
 // allocations that are passed into doIoctl.
 //
-//	reference: cyw43_do_ioctl
-func (d *Dev) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, buf []byte) error {
+//	reference: cyw43_do_ioctl(uint32_t kind, uint32_t cmd, size_t len, uint8_t *buf, uint32_t iface)
+func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, buf []byte) error {
+	// TODO: once testing is done these checks may be removed.
+	if !iface.IsValid() {
+		return errors.New("invalid ioctl interface")
+	} else if !cmd.IsValid() {
+		return errors.New("invalid ioctl command")
+	} else if kind != whd.SDPCM_GET && kind != whd.SDPCM_SET {
+		return errors.New("invalid ioctl kind")
+	}
+
 	err := d.sendIoctl(kind, iface, cmd, buf)
 	if err != nil {
 		return err
 	}
+
 	start := time.Now()
-	const ioctlTimeout = 50 * time.Millisecond
-	const maxRetries = 3
-	for retries := 0; time.Since(start) < ioctlTimeout || retries < maxRetries; retries++ {
+	timeout := 500 * time.Millisecond
+
+	for time.Since(start) < timeout {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		Debug("doIoctl:sdpcmPoll conclude payloadoffset=", int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
-		// The "wrong payload type" appears to happen during startup. See sdpcmProcessRxPacket
-		if err != nil && !errors.Is(err, err9WrongPayloadType) {
-			continue
-		}
-		payload := d.buf[payloadOffset : payloadOffset+plen]
-		switch header {
-		case whd.CONTROL_HEADER:
-			n := copy(buf[:], payload)
+		Debug("doIoctl:sdpcmPoll conclude payloadoffset=",
+			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
+		payload := d.buf[payloadOffset:payloadOffset+plen]
+		switch {
+		case err != nil:
+			break
+		case header == whd.CONTROL_HEADER:
+			n := copy(buf, payload)
 			if uint32(n) != plen {
-				return errors.New("not enough space on ioctl buffer for control header copy")
+				return errDoIoctlNoSpace
 			}
 			return nil
-
-		case whd.ASYNCEVENT_HEADER:
-			// TODO(soypat): Must handle this for wifi to work. cyw43_cb_process_async_event
-			Debug("ASYNCEVENT not handled")
-		case whd.DATA_HEADER:
-			// TODO(soypat): Implement ethernet interface. cyw43_cb_process_ethernet
-			Debug("DATA_HEADER not implemented yet")
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			d.processEthernet(payload)
 		default:
-			Debug("doIoctl got unexpected packet", header)
+			Debug("got unexpected packet", header)
 		}
 		time.Sleep(time.Millisecond)
 	}
-	Debug("todo")
-	return errDoioctlTimeout
+
+	return errDoIoctlTimeout
 }
 
-var errDoioctlTimeout = errors.New("doIoctl time out waiting for data")
+var errDoIoctlNoSpace = errors.New("not enough space on ioctl buffer for control header copy")
+var errDoIoctlTimeout = errors.New("doIoctl time out waiting for data")
 
 // reference: cyw43_send_ioctl
-func (d *Dev) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
+func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
 	Debug("sendIoctl")
+
 	length := uint32(len(w))
 	if uint32(len(d.buf)) < whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length {
 		return errors.New("ioctl buffer too large for sending")
@@ -193,27 +220,30 @@ func (d *Dev) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMComm
 
 // sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
 // payload, length of the payload and the header type. Is cyw43_ll_sdpcm_poll_device in reference.
-func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
-	const badResult = 0
+func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
+	// First check the SDIO interrupt line to see if the WLAN notified us
+	const badHeader = whd.UNKNOWN_HEADER
 	noPacketSuccess := !d.hadSuccesfulPacket
 	if noPacketSuccess && !d.wlRegOn.Get() {
-		return 0, 0, badResult, errors.New("sdpcmPoll yield fault")
+		return 0, 0, badHeader, errors.New("sdpcmPoll yield fault")
 	}
 	err = d.busSleep(false)
 	if err != nil {
-		return 0, 0, badResult, err
+		return 0, 0, badHeader, err
 	}
 	if noPacketSuccess {
+		// Clear interrupt status so that HOST_WAKE/SDIO line is cleared
 		lastInt := d.lastInt
 		intStat, err := d.GetInterrupts()
-		if err != nil || lastInt != uint16(intStat) && intStat.IsBusOverflowedOrUnderflowed() {
+		if err != nil || lastInt != intStat && intStat.IsBusOverflowedOrUnderflowed() {
 			Debug("bus error condition detected =", uint16(intStat), err)
 		}
+		d.lastInt = intStat
 		if intStat != 0 {
 			d.Write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, uint16(intStat))
 		}
 		if !intStat.IsF2Available() {
-			return 0, 0, badResult, errors.New("sdpcmPoll: F2 unavailable")
+			return 0, 0, badHeader, errors.New("sdpcmPoll: F2 unavailable")
 		}
 	}
 	const (
@@ -226,25 +256,28 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPC
 	var status Status = 0xFFFFFFFF
 	for i := 0; i < 1000 && status == 0xFFFFFFFF; i++ {
 		status, err = d.GetStatus()
+		if err != nil {
+			break
+		}
 	}
 	if status == 0xFFFFFFFF || err != nil {
-		return 0, 0, badResult, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
+		return 0, 0, badHeader, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
 	}
-	if !status.F2PacketAvailable() {
+	if !status.GSPIPacketAvailable() {
 		Debug("no packet")
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll: no packet")
+		return 0, 0, badHeader, errors.New("sdpcmPoll: no packet")
 	}
 	bytesPending := status.F2PacketLength()
 	if bytesPending == 0 || bytesPending > linkMTU-gspiPacketOverhead || status.IsUnderflow() {
 		Debug("SPI invalid bytes pending", bytesPending)
 		d.Write8(FuncBackplane, whd.SPI_FRAME_CONTROL, 1)
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll: invalid bytes pending")
+		return 0, 0, badHeader, errors.New("sdpcmPoll: invalid bytes pending")
 	}
 	err = d.ReadBytes(FuncWLAN, 0, buf[:bytesPending])
 	if err != nil {
-		return 0, 0, badResult, err
+		return 0, 0, badHeader, err
 	}
 	hdr0 := binary.LittleEndian.Uint16(buf[:])
 	hdr1 := binary.LittleEndian.Uint16(buf[2:])
@@ -252,21 +285,22 @@ func (d *Dev) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPC
 		// no packets.
 		Debug("no packet:zero size header")
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll:zero header")
+		return 0, 0, badHeader, errors.New("sdpcmPoll:zero header")
 	}
 	d.hadSuccesfulPacket = true
 	if hdr0^hdr1 != 0xffff {
 		Debug("header xor mismatch h[0]=", hdr0, "h[1]=", hdr1)
-		return 0, 0, badResult, errors.New("sdpcmPoll:header mismatch")
+		return 0, 0, badHeader, errors.New("sdpcmPoll:header mismatch")
 	}
-	payloadOffset, plen, header, err = d.sdpcmProcessRxPacket(buf)
-	return payloadOffset, plen, header, err
+	return d.sdpcmProcessRxPacket(buf[:bytesPending])
 }
+
+var errSendSDPCMTimeout = errors.New("sendSDPCMCommon time out waiting for data")
 
 // sendSDPCMCommon Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
 //
 //	reference: cyw43_sdpcm_send_common
-func (d *Dev) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
+func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 	Debug("sendSDPCMCommon len=", len(w))
 	if kind != whd.CONTROL_HEADER && kind != whd.DATA_HEADER {
 		return errors.New("unexpected SDPCM kind")
@@ -275,6 +309,43 @@ func (d *Dev) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 	if err != nil {
 		return err
 	}
+
+	/*
+
+	// TODO: I've coded this up, but it is causing a timeout so something is
+	// TODO: wrong or got lost in translation...needs investigation.
+
+	// Wait until we are allowed to send Credits are 8-bit unsigned
+	// integers that roll over, so we are stalled while they are equal
+
+	start := time.Now()
+	timeout := 1000 * time.Millisecond
+
+	for d.wlanFlowCtl != 0 || d.sdpcmLastBusCredit == d.sdpcmTxSequence {
+		if time.Since(start) > timeout {
+			return errSendSDPCMTimeout
+		}
+		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
+		Debug("sendSDPCMCommon:sdpcmPoll conclude payloadoffset=",
+			int(payloadOffset), "plen=", int(plen), "header=",
+			header.String(), err)
+		payload := d.buf[payloadOffset:payloadOffset+plen]
+		switch {
+		case err != nil:
+			break
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			// Don't proccess it due to possible reentrancy
+			// issues (eg sending another ETH as part of
+			// the reception)
+		default:
+			Debug("got unexpected packet", header)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	*/
+
 	headerLength := uint8(whd.SDPCM_HEADER_LEN)
 	if kind == whd.DATA_HEADER {
 		headerLength += 2
@@ -298,7 +369,7 @@ func (d *Dev) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 }
 
 // reference: disable_device_core
-func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
+func (d *Device) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	base := coreaddress(coreID)
 	Debug("disable core", coreID, base)
 	d.ReadBackplane(base+whd.AI_RESETCTRL_OFFSET, 1)
@@ -314,7 +385,7 @@ func (d *Dev) disableDeviceCore(coreID uint8, coreHalt bool) error {
 }
 
 // reference: reset_device_core
-func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
+func (d *Device) resetDeviceCore(coreID uint8, coreHalt bool) error {
 	err := d.disableDeviceCore(coreID, coreHalt)
 	if err != nil {
 		return err
@@ -342,7 +413,7 @@ func (d *Dev) resetDeviceCore(coreID uint8, coreHalt bool) error {
 // It returns true if communications are down (WL_REG_ON at low).
 //
 //	reference: device_core_is_up
-func (d *Dev) CoreIsActive(coreID uint8) bool {
+func (d *Device) CoreIsActive(coreID uint8) bool {
 	base := coreaddress(coreID)
 	reg, _ := d.ReadBackplane(base+whd.AI_IOCTRL_OFFSET, 1)
 	if reg&(whd.SICF_FGC|whd.SICF_CLOCK_EN) != whd.SICF_CLOCK_EN {
@@ -368,7 +439,7 @@ func coreaddress(coreID uint8) (v uint32) {
 }
 
 // reference: cyw43_read_backplane
-func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
+func (d *Device) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 	Debug("read backplane", addr, size)
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
@@ -389,7 +460,7 @@ func (d *Dev) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 }
 
 // reference: cyw43_write_backplane
-func (d *Dev) WriteBackplane(addr, size, value uint32) error {
+func (d *Device) WriteBackplane(addr, size, value uint32) error {
 	Debug("write backplane", addr, "=", value, "size=", int(size))
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
@@ -408,7 +479,7 @@ func (d *Dev) WriteBackplane(addr, size, value uint32) error {
 }
 
 // reference: cyw43_set_backplane_window
-func (d *Dev) setBackplaneWindow(addr uint32) (err error) {
+func (d *Device) setBackplaneWindow(addr uint32) (err error) {
 	const (
 		SDIO_BACKPLANE_ADDRESS_HIGH = 0x1000c
 		SDIO_BACKPLANE_ADDRESS_MID  = 0x1000b
@@ -516,7 +587,7 @@ func (d *Dev) downloadResource(addr uint32, src string) error {
 }
 
 // reference: cyw43_ll_bus_sleep and cyw43_ll_bus_sleep_helper
-func (d *Dev) busSleep(canSleep bool) (err error) {
+func (d *Device) busSleep(canSleep bool) (err error) {
 	if d.busIsUp != canSleep {
 		return nil // Already at desired state.
 	}
@@ -530,7 +601,7 @@ func (d *Dev) busSleep(canSleep bool) (err error) {
 // ksoSet enable KSO mode (keep SDIO on)
 //
 //	reference: cyw43_kso_set
-func (d *Dev) ksoSet(value bool) error {
+func (d *Device) ksoSet(value bool) error {
 	Debug("ksoSet enable=", value)
 	var writeVal uint8
 	if value {
@@ -567,7 +638,7 @@ func (d *Dev) ksoSet(value bool) error {
 }
 
 // reference: cyw43_clm_load
-func (d *Dev) clmLoad(clm []byte) error {
+func (d *Device) clmLoad(clm []byte) error {
 	const CLM_CHUNK_LEN = 1024
 	buf := d.buf[whd.SDPCM_HEADER_LEN+16:]
 	clmLen := uint16(len(clm))
@@ -620,7 +691,7 @@ func (d *Dev) clmLoad(clm []byte) error {
 // putMAC gets current MAC address from CYW43439.
 //
 //	reference: cy43_ll_bus_init (end)
-func (d *Dev) putMAC(dst []byte) error {
+func (d *Device) putMAC(dst []byte) error {
 	if len(dst) < 6 {
 		panic("dst too short to put MAC")
 	}
@@ -652,15 +723,14 @@ var (
 // is sdpcm_process_rx_packet in reference.
 //
 //	reference: sdpcm_process_rx_packet
-func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag whd.SDPCMHeaderType, err error) {
-	const badFlag = 0
-	const sdpcmOffset = 0
-	hdr := whd.DecodeSDPCMHeader(buf[sdpcmOffset:])
+func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
+	const badHeader = whd.UNKNOWN_HEADER
+	hdr := whd.DecodeSDPCMHeader(buf)
 	switch {
 	case hdr.Size != ^hdr.SizeCom&0xffff:
-		return 0, 0, badFlag, err2InvalidPacket
+		return 0, 0, badHeader, err2InvalidPacket
 	case hdr.Size < whd.SDPCM_HEADER_LEN:
-		return 0, 0, badFlag, err3PacketTooSmall
+		return 0, 0, badHeader, err3PacketTooSmall
 	}
 	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
 		Debug("WLAN: changed flow control", d.wlanFlowCtl, hdr.WirelessFlowCtl)
@@ -675,21 +745,21 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 		}
 	}
 	if hdr.Size == whd.SDPCM_HEADER_LEN {
-		return 0, 0, badFlag, err4IgnoreControlPacket // Flow ctl packet with no data.
+		return 0, 0, badHeader, err4IgnoreControlPacket // Flow ctl packet with no data.
 	}
 
 	payloadOffset = uint32(hdr.HeaderLength)
-	headerFlag := hdr.Type()
-	switch headerFlag {
+	headerType := hdr.Type()
+	switch headerType {
 	case whd.CONTROL_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
 		if hdr.Size < totalHeaderSize {
-			return 0, 0, badFlag, err5IgnoreSmallControlPacket
+			return 0, 0, badHeader, err5IgnoreSmallControlPacket
 		}
 		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
 		id := ioctlHeader.ID()
 		if id != d.sdpcmRequestedIoctlID {
-			return 0, 0, badFlag, err6IgnoreWrongIDPacket
+			return 0, 0, badHeader, err6IgnoreWrongIDPacket
 		}
 		payloadOffset += whd.IOCTL_HEADER_LEN
 		plen = uint32(hdr.Size) - payloadOffset
@@ -698,7 +768,7 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 	case whd.DATA_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, err7IgnoreSmallDataPacket
+			return 0, 0, badHeader, err7IgnoreSmallDataPacket
 		}
 
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
@@ -709,28 +779,98 @@ func (d *Dev) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag
 	case whd.ASYNCEVENT_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, err8IgnoreTooSmallAsyncPacket
+			return 0, 0, badHeader, err8IgnoreTooSmallAsyncPacket
 		}
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
 		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
 		plen = uint32(hdr.Size) - payloadOffset
 		payload := buf[payloadOffset:]
-		// payload is actually an ethernet packet with type 0x886c.
+		// Check payload is actually an ethernet packet with type 0x886c.
 		if !(payload[12] == 0x88 && payload[13] == 0x6c) {
 			// ethernet packet doesn't have the correct type.
 			// Note - this happens during startup but appears to be expected
-			// return 0, 0, badFlag, Err9WrongPayloadType
-			err = err9WrongPayloadType
+			return 0, 0, badHeader, err9WrongPayloadType
 		}
 		// Check the Broadcom OUI.
 		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
-			return 0, 0, badFlag, err10IncorrectOUI
+			return 0, 0, badHeader, err10IncorrectOUI
 		}
 		plen = plen - 24
 		payloadOffset = payloadOffset + 24
 	default:
 		// Unknown Header.
-		return 0, 0, badFlag, err11UnknownHeader
+		return 0, 0, badHeader, err11UnknownHeader
 	}
-	return payloadOffset, plen, headerFlag, err
+	return payloadOffset, plen, headerType, err
+}
+
+// ref: void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev)
+func (d *Device) processAsyncEvent(ev whd.AsyncEvent) error {
+	fmt.Printf("AsyncEvent: %+v\r\n", ev)
+	switch ev.EventType {
+	case whd.CYW43_EV_ESCAN_RESULT:
+		// TODO
+	case whd.CYW43_EV_DISASSOC:
+		d.wifiJoinState = whd.WIFI_JOIN_STATE_DOWN
+		d.notifyDown()
+	case whd.CYW43_EV_PRUNE:
+		// TODO
+	case whd.CYW43_EV_SET_SSID:
+		switch {
+		case ev.Status == 0:
+			// Success setting SSID
+		case ev.Status == 3 && ev.Reason == 0:
+			// No matching SSID found (could be out of range, or down)
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_NONET
+		default:
+			// Other failure setting SSID
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_FAIL
+		}
+	case whd.CYW43_EV_AUTH:
+		switch ev.Status {
+		case 0:
+			if (d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK) ==
+				whd.WIFI_JOIN_STATE_BADAUTH {
+				// A good-auth follows a bad-auth, so change
+				// the join state back to active.
+				d.wifiJoinState = (d.wifiJoinState & ^uint32(whd.WIFI_JOIN_STATE_KIND_MASK)) |
+					whd.WIFI_JOIN_STATE_ACTIVE
+			}
+			d.wifiJoinState |= whd.WIFI_JOIN_STATE_AUTH
+		case 6:
+			// Unsolicited auth packet, ignore it
+		default:
+			// Cannot authenticate
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
+		}
+	case whd.CYW43_EV_DEAUTH_IND:
+		// TODO
+	case whd.CYW43_EV_LINK:
+		if ev.Status == 0 {
+			if (ev.Flags & 1) != 0 {
+				// Link is UP
+				d.wifiJoinState |= whd.WIFI_JOIN_STATE_LINK
+				// TODO missing some stuff
+			}
+		}
+	case whd.CYW43_EV_PSK_SUP:
+		switch {
+		case ev.Status == 6:
+			// WLC_SUP_KEYED
+			d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
+		case (ev.Status == 4 || ev.Status == 8 || ev.Status == 10) && ev.Reason == 15:
+			// TODO
+		default:
+			// PSK_SUP failure
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
+		}
+	}
+
+	if d.wifiJoinState == whd.WIFI_JOIN_STATE_ALL {
+		// STA connected
+		d.wifiJoinState = whd.WIFI_JOIN_STATE_ACTIVE
+		// TODO notify link UP
+	}
+
+	return nil
 }

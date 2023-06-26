@@ -2,7 +2,6 @@ package cyw43439
 
 import (
 	"errors"
-	"net"
 	"strconv"
 
 	"github.com/soypat/cyw43439/whd"
@@ -12,6 +11,8 @@ const (
 	verbose_debug     = true
 	initReadback      = false
 	validateDownloads = false
+	// uint32(int32(-1)) = 0xffffffff
+	negative1 uint32 = 0xffffffff
 )
 
 type Config struct {
@@ -268,14 +269,11 @@ func validateFirmware(src string) error {
 	if found == -1 {
 		return errors.New("could not find valid firmware")
 	}
+	fwVersion := string(src[begin : begin+end])
 	if verbose_debug {
-		i := 0
-		ptrstart := fwEnd - 3 - found
-		for ; b[ptrstart+i] != 0; i++ {
-		}
-		Debug("got version", string(b[ptrstart:ptrstart+i-1]))
+		Debug("got version", fwVersion)
 	}
-	return nil
+	return fwVersion, nil
 }
 
 type _integer = interface {
@@ -294,4 +292,14 @@ func min[T _integer](a, b T) T {
 		return a
 	}
 	return b
+}
+
+func (d *Device) lock() {
+	Debug("LOCKING")
+	d.hw.Lock()
+}
+
+func (d *Device) unlock() {
+	d.hw.Unlock()
+	Debug("UNLOCKED")
 }

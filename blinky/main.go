@@ -12,7 +12,7 @@ func main() {
 	const spiNOPs = 0
 	spi, cs, WL_REG_ON, irq := cyw43439.PicoWSpi(spiNOPs)
 
-	dev := cyw43439.NewDev(spi, cs, WL_REG_ON, irq, irq)
+	dev := cyw43439.NewDevice(spi, cs, WL_REG_ON, irq, irq)
 	err := dev.Init(cyw43439.DefaultConfig(false))
 	if err != nil {
 		panic(err.Error())

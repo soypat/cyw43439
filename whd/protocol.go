@@ -113,28 +113,48 @@ type AsyncEvent struct {
 	Reason    uint32
 	_         [30]byte
 	Interface uint8
+	_         uint8
 	u         EventScanResult
 }
 
 // reference: cyw43_ll_parse_async_event
-func ParseAsyncEvent(buf []byte) (as AsyncEvent, err error) {
-	if len(buf) < int(unsafe.Sizeof(as)) {
-		return as, errors.New("buffer too small to parse async event")
+func ParseAsyncEvent(buf []byte) (ev AsyncEvent, err error) {
+	if len(buf) < 48 {
+		return ev, errors.New("buffer too small to parse async event")
 	}
-	as.Flags = binary.BigEndian.Uint16(buf[2:])
-	as.EventType = binary.BigEndian.Uint32(buf[4:])
-	as.Status = binary.BigEndian.Uint32(buf[8:])
-	as.Reason = binary.BigEndian.Uint32(buf[12:])
+	ev.Flags = binary.BigEndian.Uint16(buf[2:])
+	ev.EventType = binary.BigEndian.Uint32(buf[4:])
+	ev.Status = binary.BigEndian.Uint32(buf[8:])
+	ev.Reason = binary.BigEndian.Uint32(buf[12:])
 	const ifaceOffset = 12 + 4 + 30
-	as.Interface = buf[ifaceOffset]
-	if as.EventType == CYW43_EV_ESCAN_RESULT {
-		as.u, err = ParseScanResult(buf[48:])
+	ev.Interface = buf[ifaceOffset]
+	if ev.EventType == CYW43_EV_ESCAN_RESULT && ev.Status == CYW43_STATUS_PARTIAL {
+		if len(buf) < int(unsafe.Sizeof(ev)) {
+			return ev, errors.New("buffer too small to parse scan results")
+		}
+		ev.u, err = ParseScanResult(buf[48:])
 	}
-	return as, err
+	return ev, err
 }
 
-func (aev *AsyncEvent) EventScanResult() *EventScanResult {
-	return &aev.u
+var asyncEventNames = map[uint32]string{
+	CYW43_EV_SET_SSID:         "SET_SSID",
+	CYW43_EV_JOIN:             "JOIN",
+	CYW43_EV_AUTH:             "AUTH",
+	CYW43_EV_DEAUTH_IND:       "DEAUTH_IND",
+	CYW43_EV_ASSOC:            "ASSOC",
+	CYW43_EV_DISASSOC:         "DISASSOC",
+	CYW43_EV_DISASSOC_IND:     "DISASSOC_IND",
+	CYW43_EV_LINK:             "LINK",
+	CYW43_EV_PSK_SUP:          "PSK_SUP",
+	CYW43_EV_ESCAN_RESULT:     "ESCAN_RESULT",
+	CYW43_EV_CSA_COMPLETE_IND: "CSA_COMPLETE_IND",
+	CYW43_EV_ASSOC_REQ_IE:     "ASSOC_REQ_IE",
+	CYW43_EV_ASSOC_RESP_IE:    "ASSOC_RESP_IE",
+}
+
+func (ev *AsyncEvent) EventScanResult() *EventScanResult {
+	return &ev.u
 }
 
 type evscanresult struct {
@@ -168,7 +188,7 @@ type evscanresult struct {
 type EventScanResult struct {
 	_ [5]uint32
 	// Access point MAC address.
-	BSSID [8]uint8
+	BSSID [6]uint8
 	_     [2]uint16
 	// Length of access point name.
 	SSIDLength uint8

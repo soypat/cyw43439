@@ -1,4 +1,5 @@
 // package whd implements Cypress' Wifi Host Driver controller interface API.
+// It also contains values common to the cy43 driver.
 
 package whd
 
@@ -142,6 +143,24 @@ const (
 	WWD_P2P_INTERFACE IoctlInterface = 2
 )
 
+func (i IoctlInterface) IsValid() bool {
+	return i <= WWD_P2P_INTERFACE
+}
+
+func (i IoctlInterface) String() (s string) {
+	switch i {
+	case WWD_STA_INTERFACE:
+		s = "sta"
+	case WWD_AP_INTERFACE:
+		s = "ap"
+	case WWD_P2P_INTERFACE:
+		s = "p2p"
+	default:
+		s = "unknown"
+	}
+	return s
+}
+
 type SDPCMHeaderType uint8
 
 // for cyw43_sdpcm_send_common
@@ -149,6 +168,7 @@ const (
 	CONTROL_HEADER    SDPCMHeaderType = 0
 	ASYNCEVENT_HEADER SDPCMHeaderType = 1
 	DATA_HEADER       SDPCMHeaderType = 2
+	UNKNOWN_HEADER    SDPCMHeaderType = 0xff
 
 	CDCF_IOC_ID_SHIFT = 16
 	CDCF_IOC_ID_MASK  = 0xffff0000
@@ -164,11 +184,12 @@ func (ht SDPCMHeaderType) String() (s string) {
 	case DATA_HEADER:
 		s = "data"
 	default:
-		s = "unknown"
+		s = "UNKNOWN"
 	}
 	return s
 }
 
+// kinds of ioctl commands.
 const (
 	SDPCM_GET = 0
 	SDPCM_SET = 2
@@ -199,6 +220,15 @@ const (
 	WLC_GET_VAR       SDPCMCommand = 262
 	WLC_SET_WSEC_PMK  SDPCMCommand = 268
 )
+
+func (cmd SDPCMCommand) IsValid() bool {
+	return cmd == WLC_UP || cmd == WLC_SET_INFRA || cmd == WLC_SET_AUTH || cmd == WLC_GET_BSSID ||
+		cmd == WLC_GET_SSID || cmd == WLC_SET_SSID || cmd == WLC_SET_CHANNEL || cmd == WLC_DISASSOC ||
+		cmd == WLC_GET_ANTDIV || cmd == WLC_SET_ANTDIV || cmd == WLC_SET_DTIMPRD || cmd == WLC_GET_PM ||
+		cmd == WLC_SET_PM || cmd == WLC_SET_GMODE || cmd == WLC_SET_WSEC || cmd == WLC_SET_BAND ||
+		cmd == WLC_GET_ASSOCLIST || cmd == WLC_SET_WPA_AUTH || cmd == WLC_SET_VAR || cmd == WLC_GET_VAR ||
+		cmd == WLC_SET_WSEC_PMK
+}
 
 // SDIO bus specifics
 const (
@@ -367,19 +397,178 @@ const (
 
 // Async events, event_type field
 const (
-	CYW43_EV_SET_SSID         = (0)
-	CYW43_EV_JOIN             = (1)
-	CYW43_EV_AUTH             = (3)
-	CYW43_EV_DEAUTH           = (5)
-	CYW43_EV_DEAUTH_IND       = (6)
-	CYW43_EV_ASSOC            = (7)
-	CYW43_EV_DISASSOC         = (11)
-	CYW43_EV_DISASSOC_IND     = (12)
-	CYW43_EV_LINK             = (16)
-	CYW43_EV_PRUNE            = (23)
-	CYW43_EV_PSK_SUP          = (46)
-	CYW43_EV_ESCAN_RESULT     = (69)
-	CYW43_EV_CSA_COMPLETE_IND = (80)
-	CYW43_EV_ASSOC_REQ_IE     = (87)
-	CYW43_EV_ASSOC_RESP_IE    = (88)
+	CYW43_EV_SET_SSID         = 0
+	CYW43_EV_JOIN             = 1
+	CYW43_EV_AUTH             = 3
+	CYW43_EV_DEAUTH           = 5
+	CYW43_EV_DEAUTH_IND       = 6
+	CYW43_EV_ASSOC            = 7
+	CYW43_EV_DISASSOC         = 11
+	CYW43_EV_DISASSOC_IND     = 12
+	CYW43_EV_LINK             = 16
+	CYW43_EV_PRUNE            = 23
+	CYW43_EV_PSK_SUP          = 46
+	CYW43_EV_ESCAN_RESULT     = 69
+	CYW43_EV_CSA_COMPLETE_IND = 80
+	CYW43_EV_ASSOC_REQ_IE     = 87
+	CYW43_EV_ASSOC_RESP_IE    = 88
+)
+
+// IOCTL commands
+const (
+	CYW43_IOCTL_GET_SSID     = 0x32
+	CYW43_IOCTL_GET_CHANNEL  = 0x3a
+	CYW43_IOCTL_SET_DISASSOC = 0x69
+	CYW43_IOCTL_GET_ANTDIV   = 0x7e
+	CYW43_IOCTL_SET_ANTDIV   = 0x81
+	CYW43_IOCTL_SET_MONITOR  = 0xd9
+	CYW43_IOCTL_GET_VAR      = 0x20c
+	CYW43_IOCTL_SET_VAR      = 0x20f
+)
+
+// Event status values
+const (
+	CYW43_STATUS_SUCCESS     = 0
+	CYW43_STATUS_FAIL        = 1
+	CYW43_STATUS_TIMEOUT     = 2
+	CYW43_STATUS_NO_NETWORKS = 3
+	CYW43_STATUS_ABORT       = 4
+	CYW43_STATUS_NO_ACK      = 5
+	CYW43_STATUS_UNSOLICITED = 6
+	CYW43_STATUS_ATTEMPT     = 7
+	CYW43_STATUS_PARTIAL     = 8
+	CYW43_STATUS_NEWSCAN     = 9
+	CYW43_STATUS_NEWASSOC    = 10
+)
+
+// Values used for STA and AP auth settings
+const (
+	CYW43_SUP_DISCONNECTED       = 0                          // Disconnected
+	CYW43_SUP_CONNECTING         = 1                          // Connecting
+	CYW43_SUP_IDREQUIRED         = 2                          // ID Required
+	CYW43_SUP_AUTHENTICATING     = 3                          // Authenticating
+	CYW43_SUP_AUTHENTICATED      = 4                          // Authenticated
+	CYW43_SUP_KEYXCHANGE         = 5                          // Key Exchange
+	CYW43_SUP_KEYED              = 6                          // Key Exchanged
+	CYW43_SUP_TIMEOUT            = 7                          // Timeout
+	CYW43_SUP_LAST_BASIC_STATE   = 8                          // Last Basic State
+	CYW43_SUP_KEYXCHANGE_WAIT_M1 = CYW43_SUP_AUTHENTICATED    // Waiting to receive handshake msg M1
+	CYW43_SUP_KEYXCHANGE_PREP_M2 = CYW43_SUP_KEYXCHANGE       // Preparing to send handshake msg M2
+	CYW43_SUP_KEYXCHANGE_WAIT_M3 = CYW43_SUP_LAST_BASIC_STATE // Waiting to receive handshake msg M3
+	CYW43_SUP_KEYXCHANGE_PREP_M4 = 9                          // Preparing to send handshake msg M4
+	CYW43_SUP_KEYXCHANGE_WAIT_G1 = 10                         // Waiting to receive handshake msg G1
+	CYW43_SUP_KEYXCHANGE_PREP_G2 = 11                         // Preparing to send handshake msg G2
+)
+
+// Values for AP auth setting
+const (
+	CYW43_REASON_INITIAL_ASSOC    = 0 // initial assoc
+	CYW43_REASON_LOW_RSSI         = 1 // roamed due to low RSSI
+	CYW43_REASON_DEAUTH           = 2 // roamed due to DEAUTH indication
+	CYW43_REASON_DISASSOC         = 3 // roamed due to DISASSOC indication
+	CYW43_REASON_BCNS_LOST        = 4 // roamed due to lost beacons
+	CYW43_REASON_FAST_ROAM_FAILED = 5 // roamed due to fast roam failure
+	CYW43_REASON_DIRECTED_ROAM    = 6 // roamed due to request by AP
+	CYW43_REASON_TSPEC_REJECTED   = 7 // roamed due to TSPEC rejection
+	CYW43_REASON_BETTER_AP        = 8 // roamed due to finding better AP
+)
+
+// prune reason codes
+const (
+	CYW43_REASON_PRUNE_ENCR_MISMATCH   = 1  // encryption mismatch
+	CYW43_REASON_PRUNE_BCAST_BSSID     = 2  // AP uses a broadcast BSSID
+	CYW43_REASON_PRUNE_MAC_DENY        = 3  // STA's MAC addr is in AP's MAC deny list
+	CYW43_REASON_PRUNE_MAC_NA          = 4  // STA's MAC addr is not in AP's MAC allow list
+	CYW43_REASON_PRUNE_REG_PASSV       = 5  // AP not allowed due to regulatory restriction
+	CYW43_REASON_PRUNE_SPCT_MGMT       = 6  // AP does not support STA locale spectrum mgmt
+	CYW43_REASON_PRUNE_RADAR           = 7  // AP is on a radar channel of STA locale
+	CYW43_REASON_RSN_MISMATCH          = 8  // STA does not support AP's RSN
+	CYW43_REASON_PRUNE_NO_COMMON_RATES = 9  // No rates in common with AP
+	CYW43_REASON_PRUNE_BASIC_RATES     = 10 // STA does not support all basic rates of BSS
+	CYW43_REASON_PRUNE_CCXFAST_PREVAP  = 11 // CCX FAST ROAM: prune previous AP
+	CYW43_REASON_PRUNE_CIPHER_NA       = 12 // BSS's cipher not supported
+	CYW43_REASON_PRUNE_KNOWN_STA       = 13 // AP is already known to us as a STA
+	CYW43_REASON_PRUNE_CCXFAST_DROAM   = 14 // CCX FAST ROAM: prune unqualified AP
+	CYW43_REASON_PRUNE_WDS_PEER        = 15 // AP is already known to us as a WDS peer
+	CYW43_REASON_PRUNE_QBSS_LOAD       = 16 // QBSS LOAD - AAC is too low
+	CYW43_REASON_PRUNE_HOME_AP         = 17 // prune home AP
+	CYW43_REASON_PRUNE_AP_BLOCKED      = 18 // prune blocked AP
+	CYW43_REASON_PRUNE_NO_DIAG_SUPPORT = 19 // prune due to diagnostic mode not supported
+)
+
+// WPA failure reason codes carried in the WLC_E_PSK_SUP event
+const (
+	CYW43_REASON_SUP_OTHER            = 0  // Other reason
+	CYW43_REASON_SUP_DECRYPT_KEY_DATA = 1  // Decryption of key data failed
+	CYW43_REASON_SUP_BAD_UCAST_WEP128 = 2  // Illegal use of ucast WEP128
+	CYW43_REASON_SUP_BAD_UCAST_WEP40  = 3  // Illegal use of ucast WEP40
+	CYW43_REASON_SUP_UNSUP_KEY_LEN    = 4  // Unsupported key length
+	CYW43_REASON_SUP_PW_KEY_CIPHER    = 5  // Unicast cipher mismatch in pairwise key
+	CYW43_REASON_SUP_MSG3_TOO_MANY_IE = 6  // WPA IE contains > 1 RSN IE in key msg 3
+	CYW43_REASON_SUP_MSG3_IE_MISMATCH = 7  // WPA IE mismatch in key message 3
+	CYW43_REASON_SUP_NO_INSTALL_FLAG  = 8  // INSTALL flag unset in 4-way msg
+	CYW43_REASON_SUP_MSG3_NO_GTK      = 9  // encapsulated GTK missing from msg 3
+	CYW43_REASON_SUP_GRP_KEY_CIPHER   = 10 // Multicast cipher mismatch in group key
+	CYW43_REASON_SUP_GRP_MSG1_NO_GTK  = 11 // encapsulated GTK missing from group msg 1
+	CYW43_REASON_SUP_GTK_DECRYPT_FAIL = 12 // GTK decrypt failure
+	CYW43_REASON_SUP_SEND_FAIL        = 13 // message send failure
+	CYW43_REASON_SUP_DEAUTH           = 14 // received FC_DEAUTH
+	CYW43_REASON_SUP_WPA_PSK_TMO      = 15 // WPA PSK 4-way handshake timeout
+)
+
+// Values used for STA and AP auth settings
+const (
+	CYW43_WPA_AUTH_PSK  = 0x0004
+	CYW43_WPA2_AUTH_PSK = 0x0080
+)
+
+// # Authorization types
+//
+// Used when setting up an access point, or connecting to an access point
+const (
+	CYW43_AUTH_OPEN           = 0          ///< No authorisation required (open)
+	CYW43_AUTH_WPA_TKIP_PSK   = 0x00200002 ///< WPA authorisation
+	CYW43_AUTH_WPA2_AES_PSK   = 0x00400004 ///< WPA2 authorisation (preferred)
+	CYW43_AUTH_WPA2_MIXED_PSK = 0x00400006 ///< WPA2/WPA mixed authorisation
+)
+
+// Power save mode paramter passed to cyw43_ll_wifi_pm
+const (
+	CYW43_NO_POWERSAVE_MODE  = 0 ///< No Powersave mode
+	CYW43_PM1_POWERSAVE_MODE = 1 ///< Powersave mode on specified interface without regard for throughput reduction
+	CYW43_PM2_POWERSAVE_MODE = 2 ///< Powersave mode on specified interface with High throughput
+)
+
+// Link status
+const (
+	CYW43_LINK_DOWN    = 0  ///< link is down
+	CYW43_LINK_JOIN    = 1  ///< Connected to wifi
+	CYW43_LINK_NOIP    = 2  ///< Connected to wifi, but no IP address
+	CYW43_LINK_UP      = 3  ///< Connect to wifi with an IP address
+	CYW43_LINK_FAIL    = -1 ///< Connection failed
+	CYW43_LINK_NONET   = -2 ///< No matching SSID found (could be out of range, or down)
+	CYW43_LINK_BADAUTH = -3 ///< Authenticatation failure
+)
+
+// To indicate no specific channel when calling cyw43_ll_wifi_join with bssid specified
+const CYW43_CHANNEL_NONE = 0xffffffff ///< No Channel specified (use the AP's channel)
+
+// Network interface types
+const (
+	CYW43_ITF_STA = 0
+	CYW43_ITF_AP  = 1
+)
+
+// Bits 0-3 are an enumeration, while bits 8-11 are flags.
+const (
+	WIFI_JOIN_STATE_KIND_MASK = 0x000f
+	WIFI_JOIN_STATE_DOWN      = 0x0000
+	WIFI_JOIN_STATE_ACTIVE    = 0x0001
+	WIFI_JOIN_STATE_FAIL      = 0x0002
+	WIFI_JOIN_STATE_NONET     = 0x0003
+	WIFI_JOIN_STATE_BADAUTH   = 0x0004
+	WIFI_JOIN_STATE_AUTH      = 0x0200
+	WIFI_JOIN_STATE_LINK      = 0x0400
+	WIFI_JOIN_STATE_KEYED     = 0x0800
+	WIFI_JOIN_STATE_ALL       = 0x0e01
 )
