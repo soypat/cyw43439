@@ -19,21 +19,6 @@ When CY43439 boots it is in:
   - Little-Endian byte order
   - 16 bit word length mode
   - Big-Endian bit order (most common in SPI and other protocols)
-
-# Notes on Locking
-
-The driver has a single lock (d.hw) protecting concurrent accesses to hardware,
-specifically SPI transactions, where an SPI transaction comprises multiple
-individual, but coordinated, register reads and writes.
-
-There are three paths in the driver where we need to provide mutual exclusion
-access to hardware:
-
-  1. Tx send (via sendEthernet)
-  2. Ioctl (via doIoctl)
-  3. Async packet processing (via poll), handling:
-       Rx packets
-       Async events (link status change, etc)
 */
 
 package cyw43439
@@ -220,6 +205,10 @@ func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time
 
 // ref: int cyw43_arch_wifi_connect_bssid_async(const char *ssid, const uint8_t *bssid, const char *pw, uint32_t auth)
 func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
+
+	d.lock()
+	defer d.unlock()
+
 	if pass == "" {
 		auth = whd.CYW43_AUTH_OPEN
 	}
@@ -239,6 +228,10 @@ func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
 
 // ref: int cyw43_wifi_link_status(cyw43_t *self, int itf)
 func (d *Device) wifiLinkStatus() int32 {
+
+	d.lock()
+	defer d.unlock()
+
 	switch d.itfState {
 	case whd.CYW43_ITF_STA:
 		s := d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK
@@ -310,8 +303,10 @@ func (d *Device) hasWork() bool {
 
 // ref: void cyw43_poll_func(void)
 func (d *Device) poll() {
-	d.hw.Lock()
-	defer d.hw.Unlock()
+
+	d.lock()
+	defer d.unlock()
+
 	if d.hasWork() {
 		d.processPackets()
 	}
@@ -345,8 +340,8 @@ func (d *Device) pollStop() {
 // ref: int cyw43_ll_send_ethernet(cyw43_ll_t *self_in, int itf, size_t len, const void *buf, bool is_pbuf)
 func (d *Device) sendEthernet(buf []byte) error {
 
-	d.hw.Lock()
-	defer d.hw.Unlock()
+	d.lock()
+	defer d.unlock()
 
 	// TODO finish
 
@@ -355,6 +350,9 @@ func (d *Device) sendEthernet(buf []byte) error {
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
+
+	d.lock()
+	defer d.unlock()
 
 	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
@@ -754,6 +752,10 @@ func pmValue(pmMode, pmSleepRetMs, li_beacon_period, li_dtim_period, li_assoc ui
 
 // reference: cyw43_ll_wifi_on
 func (d *Device) wifiOn(country uint32) error {
+
+	d.lock()
+	defer d.unlock()
+
 	buf := d.offbuf()
 	copy(buf, "country\x00")
 	binary.LittleEndian.PutUint32(buf[8:12], country&0xff_ff)
@@ -877,6 +879,10 @@ func (d *Device) ensureUp() error {
 
 // reference: cyw43_wifi_pm
 func (d *Device) wifiPM(pm_in uint32) (err error) {
+
+	d.lock()
+	defer d.unlock()
+
 	err = d.ensureUp()
 	if err != nil {
 		return err

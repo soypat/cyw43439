@@ -131,8 +131,12 @@ func (d *Device) ReadIOVar(VAR string, iface whd.IoctlInterface) (uint32, error)
 	return binary.LittleEndian.Uint32(buf[:4]), nil
 }
 
-// reference: cyw43_ll_ioctl
+// reference: cyw43_ioctl/cyw43_ll_ioctl
 func (d *Device) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
+
+	d.lock()
+	defer d.unlock()
+
 	kind := whd.SDPCM_GET
 	if cmd&1 != 0 {
 		kind = whd.SDPCM_SET
@@ -153,9 +157,6 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 	} else if kind != whd.SDPCM_GET && kind != whd.SDPCM_SET {
 		return errors.New("invalid ioctl kind")
 	}
-
-	d.hw.Lock()
-	defer d.hw.Unlock()
 
 	err := d.sendIoctl(kind, iface, cmd, buf)
 	if err != nil {
