@@ -34,9 +34,9 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/soypat/cyw43439/internal/netlink"
 	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers"
-	"tinygo.org/x/drivers/netlink"
 )
 
 var _debug debug = debugBasic
@@ -216,13 +216,13 @@ func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
 	if err != nil {
 		return err
 	}
-        // Wait for responses: EV_AUTH, EV_LINK, EV_SET_SSID, EV_PSK_SUP
-        // Will get EV_DEAUTH_IND if password is invalid
+	// Wait for responses: EV_AUTH, EV_LINK, EV_SET_SSID, EV_PSK_SUP
+	// Will get EV_DEAUTH_IND if password is invalid
 	d.wifiJoinState = whd.WIFI_JOIN_STATE_ACTIVE
-        if (auth == whd.CYW43_AUTH_OPEN) {
-            // For open security we don't need EV_PSK_SUP, so set that flag indicator now
-            d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
-        }
+	if auth == whd.CYW43_AUTH_OPEN {
+		// For open security we don't need EV_PSK_SUP, so set that flag indicator now
+		d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
+	}
 	return nil
 }
 
@@ -277,7 +277,7 @@ func (d *Device) processPackets() {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
 		Debug("processPackets:sdpcmPoll conclude payloadoffset=",
 			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
-		payload := d.buf[payloadOffset:payloadOffset+plen]
+		payload := d.buf[payloadOffset : payloadOffset+plen]
 		switch {
 		case err != nil:
 			// no packet or flow control
@@ -805,49 +805,49 @@ func (d *Device) wifiOn(country uint32) error {
 
 	/*
 
-	Disable this code chunk for now as it doesn't appear in the C trace
+		Disable this code chunk for now as it doesn't appear in the C trace
 
-	const (
-		msg    = "bsscfg:event_msgs\x00"
-		msgLen = len(msg)
-	)
-	copy(buf, msg)
-	for i := 0; i < 19; i++ {
-		buf[22+i] = 0xff // Clear async events.
-	}
-	clrEv := func(buf []byte, i int) {
-		buf[18+4+i/8] &= ^(1 << (i % 8))
-	}
-	clrEv(buf, 19)
-	clrEv(buf, 20)
-	clrEv(buf, 40)
-	clrEv(buf, 44)
-	clrEv(buf, 54)
-	clrEv(buf, 71)
+		const (
+			msg    = "bsscfg:event_msgs\x00"
+			msgLen = len(msg)
+		)
+		copy(buf, msg)
+		for i := 0; i < 19; i++ {
+			buf[22+i] = 0xff // Clear async events.
+		}
+		clrEv := func(buf []byte, i int) {
+			buf[18+4+i/8] &= ^(1 << (i % 8))
+		}
+		clrEv(buf, 19)
+		clrEv(buf, 20)
+		clrEv(buf, 40)
+		clrEv(buf, 44)
+		clrEv(buf, 54)
+		clrEv(buf, 71)
 
-	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:18+4+19])
-	if err != nil {
-		return err
-	}
-	time.Sleep(50 * time.Millisecond)
+		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:18+4+19])
+		if err != nil {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
 
-	// Enable multicast ethernet frames on IPv4 mDNS MAC address
-	// (01:00:5e:00:00:fb).
-	// This is needed for mDNS to work.
-	binary.LittleEndian.PutUint32(buf[:4], 1)
-	buf[4] = 0x01
-	buf[5] = 0x00
-	buf[6] = 0x5e
-	buf[7] = 0x00
-	buf[8] = 0x00
-	buf[9] = 0xfb
-	for i := 0; i < 9*6; i++ {
-		buf[10+i] = 0
-	}
-	err = d.WriteIOVarN("mcast_list", whd.WWD_STA_INTERFACE, buf[:4+10*6])
-	if err != nil {
-		return err
-	}
+		// Enable multicast ethernet frames on IPv4 mDNS MAC address
+		// (01:00:5e:00:00:fb).
+		// This is needed for mDNS to work.
+		binary.LittleEndian.PutUint32(buf[:4], 1)
+		buf[4] = 0x01
+		buf[5] = 0x00
+		buf[6] = 0x5e
+		buf[7] = 0x00
+		buf[8] = 0x00
+		buf[9] = 0xfb
+		for i := 0; i < 9*6; i++ {
+			buf[10+i] = 0
+		}
+		err = d.WriteIOVarN("mcast_list", whd.WWD_STA_INTERFACE, buf[:4+10*6])
+		if err != nil {
+			return err
+		}
 	*/
 	time.Sleep(50 * time.Millisecond)
 

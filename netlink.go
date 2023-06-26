@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/soypat/cyw43439/internal/netlink"
 	"github.com/soypat/cyw43439/whd"
-	"tinygo.org/x/drivers/netlink"
 )
 
 func (d *Device) showDriver() {
