@@ -131,13 +131,17 @@ func (d *Device) ReadIOVar(VAR string, iface whd.IoctlInterface) (uint32, error)
 	return binary.LittleEndian.Uint32(buf[:4]), nil
 }
 
-// reference: cyw43_ll_ioctl
+// reference: cyw43_ioctl/cyw43_ll_ioctl
 func (d *Device) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
-	kind := uint32(0)
+
+	d.lock()
+	defer d.unlock()
+
+	kind := whd.SDPCM_GET
 	if cmd&1 != 0 {
-		kind = 2
+		kind = whd.SDPCM_SET
 	}
-	return d.doIoctl(kind, iface, cmd>>1, w)
+	return d.doIoctl(uint32(kind), iface, cmd>>1, w)
 }
 
 // doIoctl uses Device's primary buffer to perform ioctl call. Use [Dev.offbuff] for
@@ -158,45 +162,44 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 	if err != nil {
 		return err
 	}
+
 	start := time.Now()
-	const ioctlTimeout = 50 * time.Millisecond
-	const maxRetries = 3
-	for retries := 0; time.Since(start) < ioctlTimeout || retries < maxRetries; retries++ {
+	timeout := 500 * time.Millisecond
+
+	for time.Since(start) < timeout {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		Debug("doIoctl:sdpcmPoll conclude payloadoffset=", int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
-		// The "wrong payload type" appears to happen during startup. See sdpcmProcessRxPacket
-		if err != nil && !errors.Is(err, err9WrongPayloadType) {
-			continue
-		}
-		payload := d.buf[payloadOffset : payloadOffset+plen]
-		switch header {
-		case whd.CONTROL_HEADER:
-			n := copy(buf[:], payload)
+		Debug("doIoctl:sdpcmPoll conclude payloadoffset=",
+			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
+		payload := d.buf[payloadOffset:payloadOffset+plen]
+		switch {
+		case err != nil:
+			break
+		case header == whd.CONTROL_HEADER:
+			n := copy(buf, payload)
 			if uint32(n) != plen {
-				return errors.New("not enough space on ioctl buffer for control header copy")
+				return errDoIoctlNoSpace
 			}
 			return nil
-
-		case whd.ASYNCEVENT_HEADER:
-			// TODO(soypat): Must handle this for wifi to work. cyw43_cb_process_async_event
-			Debug("ASYNCEVENT not handled")
-		case whd.DATA_HEADER:
-			// TODO(soypat): Implement ethernet interface. cyw43_cb_process_ethernet
-			Debug("DATA_HEADER not implemented yet")
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			d.processEthernet(payload)
 		default:
-			Debug("doIoctl got unexpected packet", header)
+			Debug("got unexpected packet", header)
 		}
 		time.Sleep(time.Millisecond)
 	}
-	Debug("todo")
-	return errDoioctlTimeout
+
+	return errDoIoctlTimeout
 }
 
-var errDoioctlTimeout = errors.New("doIoctl time out waiting for data")
+var errDoIoctlNoSpace = errors.New("not enough space on ioctl buffer for control header copy")
+var errDoIoctlTimeout = errors.New("doIoctl time out waiting for data")
 
 // reference: cyw43_send_ioctl
 func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
 	Debug("sendIoctl")
+
 	length := uint32(len(w))
 	if uint32(len(d.buf)) < whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length {
 		return errors.New("ioctl buffer too large for sending")
@@ -219,26 +222,29 @@ func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMC
 // sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
 // payload, length of the payload and the header type. Is cyw43_ll_sdpcm_poll_device in reference.
 func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
-	const badResult = 0
+	// First check the SDIO interrupt line to see if the WLAN notified us
+	const badHeader = whd.UNKNOWN_HEADER
 	noPacketSuccess := !d.hadSuccesfulPacket
 	if noPacketSuccess && !d.wlRegOn.Get() {
-		return 0, 0, badResult, errors.New("sdpcmPoll yield fault")
+		return 0, 0, badHeader, errors.New("sdpcmPoll yield fault")
 	}
 	err = d.busSleep(false)
 	if err != nil {
-		return 0, 0, badResult, err
+		return 0, 0, badHeader, err
 	}
 	if noPacketSuccess {
+		// Clear interrupt status so that HOST_WAKE/SDIO line is cleared
 		lastInt := d.lastInt
 		intStat, err := d.GetInterrupts()
-		if err != nil || lastInt != uint16(intStat) && intStat.IsBusOverflowedOrUnderflowed() {
+		if err != nil || lastInt != intStat && intStat.IsBusOverflowedOrUnderflowed() {
 			Debug("bus error condition detected =", uint16(intStat), err)
 		}
+		d.lastInt = intStat
 		if intStat != 0 {
 			d.Write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, uint16(intStat))
 		}
 		if !intStat.IsF2Available() {
-			return 0, 0, badResult, errors.New("sdpcmPoll: F2 unavailable")
+			return 0, 0, badHeader, errors.New("sdpcmPoll: F2 unavailable")
 		}
 	}
 	const (
@@ -251,25 +257,28 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 	var status Status = 0xFFFFFFFF
 	for i := 0; i < 1000 && status == 0xFFFFFFFF; i++ {
 		status, err = d.GetStatus()
+		if err != nil {
+			break
+		}
 	}
 	if status == 0xFFFFFFFF || err != nil {
-		return 0, 0, badResult, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
+		return 0, 0, badHeader, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
 	}
-	if !status.F2PacketAvailable() {
+	if !status.GSPIPacketAvailable() {
 		Debug("no packet")
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll: no packet")
+		return 0, 0, badHeader, errors.New("sdpcmPoll: no packet")
 	}
 	bytesPending := status.F2PacketLength()
 	if bytesPending == 0 || bytesPending > linkMTU-gspiPacketOverhead || status.IsUnderflow() {
 		Debug("SPI invalid bytes pending", bytesPending)
 		d.Write8(FuncBackplane, whd.SPI_FRAME_CONTROL, 1)
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll: invalid bytes pending")
+		return 0, 0, badHeader, errors.New("sdpcmPoll: invalid bytes pending")
 	}
 	err = d.ReadBytes(FuncWLAN, 0, buf[:bytesPending])
 	if err != nil {
-		return 0, 0, badResult, err
+		return 0, 0, badHeader, err
 	}
 	hdr0 := binary.LittleEndian.Uint16(buf[:])
 	hdr1 := binary.LittleEndian.Uint16(buf[2:])
@@ -277,16 +286,17 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 		// no packets.
 		Debug("no packet:zero size header")
 		d.hadSuccesfulPacket = false
-		return 0, 0, badResult, errors.New("sdpcmPoll:zero header")
+		return 0, 0, badHeader, errors.New("sdpcmPoll:zero header")
 	}
 	d.hadSuccesfulPacket = true
 	if hdr0^hdr1 != 0xffff {
 		Debug("header xor mismatch h[0]=", hdr0, "h[1]=", hdr1)
-		return 0, 0, badResult, errors.New("sdpcmPoll:header mismatch")
+		return 0, 0, badHeader, errors.New("sdpcmPoll:header mismatch")
 	}
-	payloadOffset, plen, header, err = d.sdpcmProcessRxPacket(buf)
-	return payloadOffset, plen, header, err
+	return d.sdpcmProcessRxPacket(buf[:bytesPending])
 }
+
+var errSendSDPCMTimeout = errors.New("sendSDPCMCommon time out waiting for data")
 
 // sendSDPCMCommon Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
 //
@@ -300,6 +310,43 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 	if err != nil {
 		return err
 	}
+
+	/*
+
+	// TODO: I've coded this up, but it is causing a timeout so something is
+	// TODO: wrong or got lost in translation...needs investigation.
+
+	// Wait until we are allowed to send Credits are 8-bit unsigned
+	// integers that roll over, so we are stalled while they are equal
+
+	start := time.Now()
+	timeout := 1000 * time.Millisecond
+
+	for d.wlanFlowCtl != 0 || d.sdpcmLastBusCredit == d.sdpcmTxSequence {
+		if time.Since(start) > timeout {
+			return errSendSDPCMTimeout
+		}
+		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
+		Debug("sendSDPCMCommon:sdpcmPoll conclude payloadoffset=",
+			int(payloadOffset), "plen=", int(plen), "header=",
+			header.String(), err)
+		payload := d.buf[payloadOffset:payloadOffset+plen]
+		switch {
+		case err != nil:
+			break
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			// Don't proccess it due to possible reentrancy
+			// issues (eg sending another ETH as part of
+			// the reception)
+		default:
+			Debug("got unexpected packet", header)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	*/
+
 	headerLength := uint8(whd.SDPCM_HEADER_LEN)
 	if kind == whd.DATA_HEADER {
 		headerLength += 2
@@ -673,15 +720,14 @@ var (
 // is sdpcm_process_rx_packet in reference.
 //
 //	reference: sdpcm_process_rx_packet
-func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, flag whd.SDPCMHeaderType, err error) {
-	const badFlag = 0
-	const sdpcmOffset = 0
-	hdr := whd.DecodeSDPCMHeader(buf[sdpcmOffset:])
+func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
+	const badHeader = whd.UNKNOWN_HEADER
+	hdr := whd.DecodeSDPCMHeader(buf)
 	switch {
 	case hdr.Size != ^hdr.SizeCom&0xffff:
-		return 0, 0, badFlag, err2InvalidPacket
+		return 0, 0, badHeader, err2InvalidPacket
 	case hdr.Size < whd.SDPCM_HEADER_LEN:
-		return 0, 0, badFlag, err3PacketTooSmall
+		return 0, 0, badHeader, err3PacketTooSmall
 	}
 	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
 		Debug("WLAN: changed flow control", d.wlanFlowCtl, hdr.WirelessFlowCtl)
@@ -696,21 +742,21 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, f
 		}
 	}
 	if hdr.Size == whd.SDPCM_HEADER_LEN {
-		return 0, 0, badFlag, err4IgnoreControlPacket // Flow ctl packet with no data.
+		return 0, 0, badHeader, err4IgnoreControlPacket // Flow ctl packet with no data.
 	}
 
 	payloadOffset = uint32(hdr.HeaderLength)
-	headerFlag := hdr.Type()
-	switch headerFlag {
+	headerType := hdr.Type()
+	switch headerType {
 	case whd.CONTROL_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
 		if hdr.Size < totalHeaderSize {
-			return 0, 0, badFlag, err5IgnoreSmallControlPacket
+			return 0, 0, badHeader, err5IgnoreSmallControlPacket
 		}
 		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
 		id := ioctlHeader.ID()
 		if id != d.sdpcmRequestedIoctlID {
-			return 0, 0, badFlag, err6IgnoreWrongIDPacket
+			return 0, 0, badHeader, err6IgnoreWrongIDPacket
 		}
 		payloadOffset += whd.IOCTL_HEADER_LEN
 		plen = uint32(hdr.Size) - payloadOffset
@@ -719,7 +765,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, f
 	case whd.DATA_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, err7IgnoreSmallDataPacket
+			return 0, 0, badHeader, err7IgnoreSmallDataPacket
 		}
 
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
@@ -730,28 +776,98 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, f
 	case whd.ASYNCEVENT_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
-			return 0, 0, badFlag, err8IgnoreTooSmallAsyncPacket
+			return 0, 0, badHeader, err8IgnoreTooSmallAsyncPacket
 		}
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
 		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
 		plen = uint32(hdr.Size) - payloadOffset
 		payload := buf[payloadOffset:]
-		// payload is actually an ethernet packet with type 0x886c.
+		// Check payload is actually an ethernet packet with type 0x886c.
 		if !(payload[12] == 0x88 && payload[13] == 0x6c) {
 			// ethernet packet doesn't have the correct type.
 			// Note - this happens during startup but appears to be expected
-			// return 0, 0, badFlag, Err9WrongPayloadType
-			err = err9WrongPayloadType
+			return 0, 0, badHeader, err9WrongPayloadType
 		}
 		// Check the Broadcom OUI.
 		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
-			return 0, 0, badFlag, err10IncorrectOUI
+			return 0, 0, badHeader, err10IncorrectOUI
 		}
 		plen = plen - 24
 		payloadOffset = payloadOffset + 24
 	default:
 		// Unknown Header.
-		return 0, 0, badFlag, err11UnknownHeader
+		return 0, 0, badHeader, err11UnknownHeader
 	}
-	return payloadOffset, plen, headerFlag, err
+	return payloadOffset, plen, headerType, err
+}
+
+// ref: void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev)
+func (d *Device) processAsyncEvent(ev whd.AsyncEvent) error {
+	fmt.Printf("AsyncEvent: %+v\r\n", ev)
+	switch ev.EventType {
+	case whd.CYW43_EV_ESCAN_RESULT:
+		// TODO
+	case whd.CYW43_EV_DISASSOC:
+		d.wifiJoinState = whd.WIFI_JOIN_STATE_DOWN
+		d.notifyDown()
+	case whd.CYW43_EV_PRUNE:
+		// TODO
+	case whd.CYW43_EV_SET_SSID:
+		switch {
+		case ev.Status == 0:
+			// Success setting SSID
+		case ev.Status == 3 && ev.Reason == 0:
+			// No matching SSID found (could be out of range, or down)
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_NONET
+		default:
+			// Other failure setting SSID
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_FAIL
+		}
+	case whd.CYW43_EV_AUTH:
+		switch ev.Status {
+		case 0:
+			if (d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK) ==
+				whd.WIFI_JOIN_STATE_BADAUTH {
+				// A good-auth follows a bad-auth, so change
+				// the join state back to active.
+				d.wifiJoinState = (d.wifiJoinState & ^uint32(whd.WIFI_JOIN_STATE_KIND_MASK)) |
+					whd.WIFI_JOIN_STATE_ACTIVE
+			}
+			d.wifiJoinState |= whd.WIFI_JOIN_STATE_AUTH
+		case 6:
+			// Unsolicited auth packet, ignore it
+		default:
+			// Cannot authenticate
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
+		}
+	case whd.CYW43_EV_DEAUTH_IND:
+		// TODO
+	case whd.CYW43_EV_LINK:
+		if ev.Status == 0 {
+			if (ev.Flags & 1) != 0 {
+				// Link is UP
+				d.wifiJoinState |= whd.WIFI_JOIN_STATE_LINK
+				// TODO missing some stuff
+			}
+		}
+	case whd.CYW43_EV_PSK_SUP:
+		switch {
+		case ev.Status == 6:
+			// WLC_SUP_KEYED
+			d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
+		case (ev.Status == 4 || ev.Status == 8 || ev.Status == 10) && ev.Reason == 15:
+			// TODO
+		default:
+			// PSK_SUP failure
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
+		}
+	}
+
+	if d.wifiJoinState == whd.WIFI_JOIN_STATE_ALL {
+		// STA connected
+		d.wifiJoinState = whd.WIFI_JOIN_STATE_ACTIVE
+		// TODO notify link UP
+	}
+
+	return nil
 }

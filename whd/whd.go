@@ -168,6 +168,7 @@ const (
 	CONTROL_HEADER    SDPCMHeaderType = 0
 	ASYNCEVENT_HEADER SDPCMHeaderType = 1
 	DATA_HEADER       SDPCMHeaderType = 2
+	UNKNOWN_HEADER    SDPCMHeaderType = 0xff
 
 	CDCF_IOC_ID_SHIFT = 16
 	CDCF_IOC_ID_MASK  = 0xffff0000
@@ -183,7 +184,7 @@ func (ht SDPCMHeaderType) String() (s string) {
 	case DATA_HEADER:
 		s = "data"
 	default:
-		s = "unknown"
+		s = "UNKNOWN"
 	}
 	return s
 }
@@ -561,6 +562,7 @@ const (
 // Bits 0-3 are an enumeration, while bits 8-11 are flags.
 const (
 	WIFI_JOIN_STATE_KIND_MASK = 0x000f
+	WIFI_JOIN_STATE_DOWN      = 0x0000
 	WIFI_JOIN_STATE_ACTIVE    = 0x0001
 	WIFI_JOIN_STATE_FAIL      = 0x0002
 	WIFI_JOIN_STATE_NONET     = 0x0003

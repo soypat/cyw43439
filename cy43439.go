@@ -20,9 +20,11 @@ When CY43439 boots it is in:
   - 16 bit word length mode
   - Big-Endian bit order (most common in SPI and other protocols)
 */
+
 package cyw43439
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -113,7 +115,7 @@ type Device struct {
 	itfState              uint8
 	wifiJoinState         uint32
 	sdpcmRequestedIoctlID uint16
-	lastInt               uint16
+	lastInt               Interrupts
 
 	// The following variables are used to store the last SSID joined
 	// first 4 bytes are length of SSID, stored in little endian.
@@ -126,13 +128,14 @@ type Device struct {
 	recvEth  func([]byte) error
 	notifyCb func(netlink.Event)
 
-	mu           sync.Mutex
+	hw           sync.Mutex
 	mac          net.HardwareAddr
 	fwVersion    string
 	netConnected bool
 	driverShown  bool
 	deviceShown  bool
 	killWatchdog chan bool
+	pollCancel   func()
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
@@ -153,8 +156,6 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 
 // ref: void cyw43_arch_enable_sta_mode()
 func (d *Device) EnableStaMode(country uint32) error {
-
-	// cyw43_wifi_set_up(&cyw43_state, CYW43_ITF_STA, true, cyw43_arch_get_country_code())
 
 	if err := d.Init(DefaultConfig(false)); err != nil {
 		return err
@@ -204,6 +205,10 @@ func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time
 
 // ref: int cyw43_arch_wifi_connect_bssid_async(const char *ssid, const uint8_t *bssid, const char *pw, uint32_t auth)
 func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
+
+	d.lock()
+	defer d.unlock()
+
 	if pass == "" {
 		auth = whd.CYW43_AUTH_OPEN
 	}
@@ -223,6 +228,10 @@ func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
 
 // ref: int cyw43_wifi_link_status(cyw43_t *self, int itf)
 func (d *Device) wifiLinkStatus() int32 {
+
+	d.lock()
+	defer d.unlock()
+
 	switch d.itfState {
 	case whd.CYW43_ITF_STA:
 		s := d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK
@@ -240,8 +249,111 @@ func (d *Device) wifiLinkStatus() int32 {
 	return whd.CYW43_LINK_DOWN
 }
 
+func (d *Device) handleAsyncEvent(payload []byte) error {
+	as, err := whd.ParseAsyncEvent(payload)
+	if err != nil {
+		return err
+	}
+	return d.processAsyncEvent(as)
+}
+
+// ref: void cyw43_cb_process_ethernet(void *cb_data, int itf, size_t len, const uint8_t *buf)
+func (d *Device) processEthernet(payload []byte) error {
+
+	if d.recvEth != nil {
+		// The handler MUST not hold on to references to payload when
+		// returning, error or not.  Payload is backed by d.buf, and we
+		// need d.buf free for the next recv.
+		return d.recvEth(payload)
+	}
+
+	Debug("RecvEthHandle handler not set, dropping Rx packet")
+	return nil
+}
+
+// ref: void cyw43_ll_process_packets(cyw43_ll_t *self_in)
+func (d *Device) processPackets() {
+	for {
+		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
+		Debug("processPackets:sdpcmPoll conclude payloadoffset=",
+			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
+		payload := d.buf[payloadOffset:payloadOffset+plen]
+		switch {
+		case err != nil:
+			// no packet or flow control
+			return
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			d.processEthernet(payload)
+		default:
+			Debug("got unexpected packet", header)
+		}
+	}
+}
+
+// ref: bool cyw43_ll_has_work(cyw43_ll_t *self_in)
+func (d *Device) hasWork() bool {
+	// TODO reading d.irq.Get() always returns ifalse, so something is
+	// wrong.  Return true for now to keep polling active and allow async
+	// event and Rx data proecssing.
+	return true
+	//return d.irq.Get()
+}
+
+// ref: void cyw43_poll_func(void)
+func (d *Device) poll() {
+
+	d.lock()
+	defer d.unlock()
+
+	if d.hasWork() {
+		d.processPackets()
+	}
+	// TODO check for other pending work (pend_rejoin, etc)
+}
+
+// ref: void cyw43_schedule_internal_poll_dispatch(__unused void (*func)(void))
+func (d *Device) pollStart() {
+	if d.pollCancel != nil {
+		return
+	}
+	println("STARTING POLLING")
+	ctx, cancel := context.WithCancel(context.Background())
+	d.pollCancel = cancel
+	go func() {
+		for ctx.Err() == nil {
+			d.poll()
+			time.Sleep(5 * time.Millisecond)
+		}
+		d.pollCancel = nil
+	}()
+}
+
+func (d *Device) pollStop() {
+	if d.pollCancel != nil {
+		println("CANCEL POLLING")
+		d.pollCancel()
+	}
+}
+
+// ref: int cyw43_ll_send_ethernet(cyw43_ll_t *self_in, int itf, size_t len, const void *buf, bool is_pbuf)
+func (d *Device) sendEthernet(buf []byte) error {
+
+	d.lock()
+	defer d.unlock()
+
+	// TODO finish
+
+	return nil
+}
+
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
+
+	d.lock()
+	defer d.unlock()
+
 	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
 		return err
@@ -534,6 +646,8 @@ f2ready:
 		return err
 	}
 
+	d.pollStart()
+
 	return nil
 }
 
@@ -552,9 +666,6 @@ func (d *Device) ClearStatus() (Status, error) {
 
 func (d *Device) GetInterrupts() (Interrupts, error) {
 	reg, err := d.Read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
-	if err == nil {
-		d.lastInt = reg
-	}
 	return Interrupts(reg), err
 }
 
@@ -641,6 +752,10 @@ func pmValue(pmMode, pmSleepRetMs, li_beacon_period, li_dtim_period, li_assoc ui
 
 // reference: cyw43_ll_wifi_on
 func (d *Device) wifiOn(country uint32) error {
+
+	d.lock()
+	defer d.unlock()
+
 	buf := d.offbuf()
 	copy(buf, "country\x00")
 	binary.LittleEndian.PutUint32(buf[8:12], country&0xff_ff)
@@ -764,6 +879,10 @@ func (d *Device) ensureUp() error {
 
 // reference: cyw43_wifi_pm
 func (d *Device) wifiPM(pm_in uint32) (err error) {
+
+	d.lock()
+	defer d.unlock()
+
 	err = d.ensureUp()
 	if err != nil {
 		return err
