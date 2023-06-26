@@ -71,14 +71,6 @@ const (
 	mockSDO = machine.GPIO3
 )
 
-const (
-	pktQSize = 2
-	// TODO want more that 2 pkts in Q but there is no space left in RAM
-	// TODO need PR#2 to reduce RAM
-	//pktQSize = 32
-	pktMaxSize = 14 + 1500
-)
-
 func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
 	const (
@@ -149,7 +141,6 @@ type Device struct {
 	params *netlink.ConnectParams
 
 	recvEth  func([]byte) error
-	recvPktQ chan([]byte)
 	notifyCb func(netlink.Event)
 
 	hw           sync.Mutex
@@ -174,7 +165,6 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 		cs:           cs,
 		wlRegOn:      wlRegOn,
 		sharedSD:     SD,
-		recvPktQ:     make(chan []byte, pktQSize),
 		killWatchdog: make(chan bool),
 	}
 }
@@ -274,45 +264,17 @@ func (d *Device) handleAsyncEvent(payload []byte) error {
 	return d.processAsyncEvent(as)
 }
 
-func (d *Device) allocRecvPktQ() {
-
-	// Allocate queue of recv pkts, each pkt large enough to hold a
-	// full-sized Ethernet pkt.  Pkts on the queue are not-active and are
-	// owned by the driver.  Pkts off the queue are active and owned by the
-	// stack.
-
-	for len(d.recvPktQ) < cap(d.recvPktQ) {
-		pkt := make([]byte, 0, pktMaxSize)
-		d.recvPktQ <- pkt
-	}
-}
-
 // ref: void cyw43_cb_process_ethernet(void *cb_data, int itf, size_t len, const uint8_t *buf)
 func (d *Device) processEthernet(payload []byte) error {
 
-	println("processEthernet")
-	if d.recvEth == nil {
-		// drop packet
-		return nil
+	if d.recvEth != nil {
+		// The handler MUST not hold on to references to payload when
+		// returning, error or not.  Payload is backed by d.buf, and we
+		// need d.buf free for the next recv.
+		return d.recvEth(payload)
 	}
 
-	// Pop a pkt off of the queue and copy the payload into the pkt,
-	// freeing up the payload backing for the next receive.  Send the pkt
-	// up the stack.  Later, the stack will return the pkt and pushed back
-	// onto the queue.
-
-	if len(d.recvPktQ) == 0 {
-		// no pkt available, drop
-		println("DROPPING PKT")
-		return nil
-	}
-
-	pkt := <-d.recvPktQ
-	n := copy(pkt[:cap(pkt)], payload)
-	if err := d.recvEth(pkt[:n]); err != nil {
-		return err
-	}
-
+	Debug("RecvEthHandle handler not set, dropping Rx packet")
 	return nil
 }
 
@@ -393,8 +355,6 @@ func (d *Device) sendEthernet(buf []byte) error {
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
-
-	d.allocRecvPktQ()
 
 	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
