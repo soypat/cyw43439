@@ -9,6 +9,7 @@ cmd/cywanalyze/*.bin
 cmd/cywanalyze/*.txt
 # Test binary, built with `go test -c`
 *.test
+*.elf
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
