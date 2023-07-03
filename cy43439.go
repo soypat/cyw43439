@@ -157,6 +157,9 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 // ref: void cyw43_arch_enable_sta_mode()
 func (d *Device) EnableStaMode(country uint32) error {
 
+	d.lock()
+	defer d.unlock()
+
 	if err := d.Init(DefaultConfig(false)); err != nil {
 		return err
 	}
@@ -350,9 +353,6 @@ func (d *Device) sendEthernet(buf []byte) error {
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
-
-	d.lock()
-	defer d.unlock()
 
 	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
@@ -753,9 +753,6 @@ func pmValue(pmMode, pmSleepRetMs, li_beacon_period, li_dtim_period, li_assoc ui
 // reference: cyw43_ll_wifi_on
 func (d *Device) wifiOn(country uint32) error {
 
-	d.lock()
-	defer d.unlock()
-
 	buf := d.offbuf()
 	copy(buf, "country\x00")
 	binary.LittleEndian.PutUint32(buf[8:12], country&0xff_ff)
@@ -879,9 +876,6 @@ func (d *Device) ensureUp() error {
 
 // reference: cyw43_wifi_pm
 func (d *Device) wifiPM(pm_in uint32) (err error) {
-
-	d.lock()
-	defer d.unlock()
 
 	err = d.ensureUp()
 	if err != nil {
