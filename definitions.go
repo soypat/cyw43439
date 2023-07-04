@@ -269,11 +269,9 @@ func min[T _integer](a, b T) T {
 }
 
 func (d *Device) lock() {
-	Debug("LOCKING")
 	d.hw.Lock()
 }
 
 func (d *Device) unlock() {
 	d.hw.Unlock()
-	Debug("UNLOCKED")
 }

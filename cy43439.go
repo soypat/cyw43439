@@ -149,6 +149,7 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 		spi:          spi,
 		cs:           cs,
 		wlRegOn:      wlRegOn,
+		irq:          irq,
 		sharedSD:     SD,
 		killWatchdog: make(chan bool),
 	}
@@ -297,11 +298,7 @@ func (d *Device) processPackets() {
 
 // ref: bool cyw43_ll_has_work(cyw43_ll_t *self_in)
 func (d *Device) hasWork() bool {
-	// TODO reading d.irq.Get() always returns ifalse, so something is
-	// wrong.  Return true for now to keep polling active and allow async
-	// event and Rx data proecssing.
-	return true
-	//return d.irq.Get()
+	return d.irq.Get()
 }
 
 // ref: void cyw43_poll_func(void)
@@ -646,6 +643,8 @@ f2ready:
 		return err
 	}
 
+	// Enable irq and start polling it
+	d.irq.Configure(machine.PinConfig{Mode: machine.PinInput})
 	d.pollStart()
 
 	return nil
@@ -692,7 +691,6 @@ func (d *Device) Reset() {
 	time.Sleep(20 * time.Millisecond)
 	d.wlRegOn.High()
 	time.Sleep(250 * time.Millisecond)
-	// d.irq.Configure(machine.PinConfig{Mode: machine.PinInput})
 }
 
 //go:inline
