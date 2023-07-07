@@ -29,6 +29,9 @@ func main() {
 	spi, cs, wlreg, irq := cyw43439.PicoWSpi(0)
 	dev := cyw43439.NewDevice(spi, cs, wlreg, irq, irq)
 
+	// Setup Rx callback
+	dev.RecvEthHandle(rx)
+
 	// Enable device for Wifi station mode
 	country := whd.CountryCode("XX", 0)
 	if err := dev.EnableStaMode(country); err != nil {
@@ -48,9 +51,6 @@ func main() {
 	// 1. dev.GetIP()
 	// 2. dev.SendEth() implemented for Tx
 	// 3. Interrupts (or polling) for Rx
-
-	// Setup Rx callback
-	dev.RecvEthHandle(rx)
 
 	// Forever send a pkt
 	for {
