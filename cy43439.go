@@ -489,10 +489,10 @@ alpset:
 		Debug("chip ID:", chipID)
 	}
 
-	if cfg.Firmware == nil {
+	if cfg.Firmware == "" {
 		return nil
-	} else if cfg.CLM == nil {
-		return errors.New("CLM is nil but firmware not nil")
+	} else if cfg.CLM == "" {
+		return errors.New("CLM is empty but firmware not empty")
 	}
 	Debug("begin disabling cores")
 	// Begin preparing for Firmware download.
@@ -527,9 +527,7 @@ alpset:
 	const RamSize = (512 * 1024)
 	wifinvramLen := align32(uint32(len(nvram43439)), 64)
 	Debug("start nvram download")
-	var nvrambuf [1024]byte
-	copy(nvrambuf[:], nvram43439)
-	err = d.downloadResource(RamSize-4-wifinvramLen, nvrambuf[:len(nvram43439)])
+	err = d.downloadResource(RamSize-4-wifinvramLen, nvram43439)
 	if err != nil {
 		return err
 	}
@@ -625,7 +623,7 @@ f2ready:
 
 	// Load CLM data. It's right after main firmware
 	Debug("prepare to flash CLM")
-	err = d.clmLoad(cfg.CLM)
+	err = d.clmLoad([]byte(cfg.CLM))
 	if err != nil {
 		return err
 	}

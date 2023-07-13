@@ -1,9 +1,9 @@
 package cyw43439
 
 import (
-	"bytes"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/soypat/cyw43439/whd"
 )
@@ -17,22 +17,28 @@ const (
 )
 
 type Config struct {
-	Firmware        []byte
-	CLM             []byte
+	Firmware        string
+	CLM             string
 	EnableBluetooth bool
 }
 
 func DefaultConfig(enableBT bool) Config {
-	var fw []byte
+	var fw string
+	var fwLen uint32
 	if enableBT {
 		panic("not implemented yet")
 		// fw = wifibtFW[:wifibtFWLen]
 	} else {
-		fw = wifiFW[:wifiFWLen]
+		fwLen = wifiFWLen
+		fw = wifiFW[:]
+	}
+	clmPtr := align32(fwLen, 512)
+	if clmPtr+clmLen > uint32(len(fw)) {
+		panic("firmware slice too small for CLM")
 	}
 	return Config{
-		Firmware:        fw,
-		CLM:             GetCLM(fw),
+		Firmware:        fw[:fwLen],
+		CLM:             fw[clmPtr : clmPtr+clmLen],
 		EnableBluetooth: enableBT,
 	}
 }
@@ -234,16 +240,16 @@ func Debug(a ...any) {
 	flushprint()
 }
 
-func getFWVersion(src []byte) (string, error) {
-	begin := bytes.LastIndex(src, []byte("Version: "))
+func getFWVersion(src string) (string, error) {
+	begin := strings.LastIndex(src, "Version: ")
 	if begin == -1 {
 		return "", errors.New("FW version not found")
 	}
-	end := bytes.Index(src[begin:], []byte{0})
+	end := strings.Index(src[begin:], "\x00")
 	if end == -1 {
 		return "", errors.New("FW version not found")
 	}
-	fwVersion := string(src[begin : begin+end])
+	fwVersion := src[begin : begin+end]
 	if verbose_debug {
 		Debug("got version", fwVersion)
 	}

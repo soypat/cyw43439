@@ -3,7 +3,6 @@
 package cyw43439
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -170,7 +169,7 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
 		Debug("doIoctl:sdpcmPoll conclude payloadoffset=",
 			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
-		payload := d.buf[payloadOffset:payloadOffset+plen]
+		payload := d.buf[payloadOffset : payloadOffset+plen]
 		switch {
 		case err != nil:
 			break
@@ -313,38 +312,38 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 
 	/*
 
-	// TODO: I've coded this up, but it is causing a timeout so something is
-	// TODO: wrong or got lost in translation...needs investigation.
+		// TODO: I've coded this up, but it is causing a timeout so something is
+		// TODO: wrong or got lost in translation...needs investigation.
 
-	// Wait until we are allowed to send Credits are 8-bit unsigned
-	// integers that roll over, so we are stalled while they are equal
+		// Wait until we are allowed to send Credits are 8-bit unsigned
+		// integers that roll over, so we are stalled while they are equal
 
-	start := time.Now()
-	timeout := 1000 * time.Millisecond
+		start := time.Now()
+		timeout := 1000 * time.Millisecond
 
-	for d.wlanFlowCtl != 0 || d.sdpcmLastBusCredit == d.sdpcmTxSequence {
-		if time.Since(start) > timeout {
-			return errSendSDPCMTimeout
+		for d.wlanFlowCtl != 0 || d.sdpcmLastBusCredit == d.sdpcmTxSequence {
+			if time.Since(start) > timeout {
+				return errSendSDPCMTimeout
+			}
+			payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
+			Debug("sendSDPCMCommon:sdpcmPoll conclude payloadoffset=",
+				int(payloadOffset), "plen=", int(plen), "header=",
+				header.String(), err)
+			payload := d.buf[payloadOffset:payloadOffset+plen]
+			switch {
+			case err != nil:
+				break
+			case header == whd.ASYNCEVENT_HEADER:
+				d.handleAsyncEvent(payload)
+			case header == whd.DATA_HEADER:
+				// Don't proccess it due to possible reentrancy
+				// issues (eg sending another ETH as part of
+				// the reception)
+			default:
+				Debug("got unexpected packet", header)
+			}
+			time.Sleep(time.Millisecond)
 		}
-		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		Debug("sendSDPCMCommon:sdpcmPoll conclude payloadoffset=",
-			int(payloadOffset), "plen=", int(plen), "header=",
-			header.String(), err)
-		payload := d.buf[payloadOffset:payloadOffset+plen]
-		switch {
-		case err != nil:
-			break
-		case header == whd.ASYNCEVENT_HEADER:
-			d.handleAsyncEvent(payload)
-		case header == whd.DATA_HEADER:
-			// Don't proccess it due to possible reentrancy
-			// issues (eg sending another ETH as part of
-			// the reception)
-		default:
-			Debug("got unexpected packet", header)
-		}
-		time.Sleep(time.Millisecond)
-	}
 	*/
 
 	headerLength := uint8(whd.SDPCM_HEADER_LEN)
@@ -510,15 +509,15 @@ func (d *Device) setBackplaneWindow(addr uint32) (err error) {
 }
 
 // reference: cyw43_download_resource
-func (d *Device) downloadResource(addr uint32, src []byte) error {
+func (d *Device) downloadResource(addr uint32, src string) error {
 	Debug("download resource addr=", addr, "len=", len(src))
 	// round up length to simplify download.
 	rlen := (len(src) + 255) &^ 255
-	if cap(src) < rlen {
-		return errors.New("firmware slice capacity needs extra 255 padding over it's length for transfer")
-	}
+	// if len(src) < rlen {
+	// 	return errors.New("firmware slice capacity needs extra 255 padding over it's length for transfer")
+	// }
 	const BLOCKSIZE = 64
-	var srcPtr []byte
+	var srcPtr string
 	var buf [BLOCKSIZE + 4]byte
 	for offset := 0; offset < rlen; offset += BLOCKSIZE {
 		sz := BLOCKSIZE
@@ -534,13 +533,19 @@ func (d *Device) downloadResource(addr uint32, src []byte) error {
 		if err != nil {
 			return err
 		}
+		var n int
 		if offset+sz > len(src) {
-			srcPtr = src[:cap(src)][offset:]
+			n = sz
+			buf = [len(buf)]byte{}
+			if offset < len(src) {
+				copy(buf[:sz], src[offset:])
+			}
 		} else {
 			srcPtr = src[offset:]
+			n = copy(buf[:sz], srcPtr)
 		}
 
-		err = d.WriteBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, srcPtr[:sz])
+		err = d.WriteBytes(FuncBackplane, dstAddr&whd.BACKPLANE_ADDR_MASK, buf[:n])
 		if err != nil {
 			return err
 		}
@@ -570,11 +575,12 @@ func (d *Device) downloadResource(addr uint32, src []byte) error {
 			return err
 		}
 		if offset+sz > len(src) {
-			srcPtr = src[:cap(src)][offset:]
+			srcPtr = src[offset:]
+			sz = len(srcPtr)
 		} else {
 			srcPtr = src[offset:]
 		}
-		if !bytes.Equal(buf[:sz], srcPtr[:sz]) {
+		if string(buf[:sz]) != srcPtr[:sz] {
 			err = fmt.Errorf("%w at addr=%#x: expected:%q\ngot: %q", errFirmwareValidationFailed, dstAddr, srcPtr[:sz], buf[:sz])
 			return err
 		}

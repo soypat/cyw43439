@@ -9,13 +9,13 @@ var (
 
 	// Of raw size 225240.
 	//go:embed firmware/wififw.bin
-	wifiFW []byte
+	wifiFW string
 	// Of raw size 232408 bytes
 	//go:embed firmware/wifibtfw.bin
-	wifibtFW []byte
+	wifibtFW string
 	// Of raw size 6164 bytes.
 	//go:embed firmware/btfw.bin
-	btFW []byte
+	btFW string
 )
 
 const (
