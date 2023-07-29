@@ -36,6 +36,7 @@ import (
 
 	"github.com/soypat/cyw43439/internal/netlink"
 	"github.com/soypat/cyw43439/whd"
+	"golang.org/x/exp/slog"
 	"tinygo.org/x/drivers"
 )
 
@@ -120,6 +121,8 @@ type Device struct {
 	// The following variables are used to store the last SSID joined
 	// first 4 bytes are length of SSID, stored in little endian.
 	lastSSIDJoined [36]byte
+	spibuf         [4]byte
+	spibufrr       [4 + whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE]byte
 	buf            [2048]byte
 	auxbuf         [2048]byte
 
@@ -136,6 +139,7 @@ type Device struct {
 	deviceShown  bool
 	killWatchdog chan bool
 	pollCancel   func()
+	log          *slog.Logger
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
@@ -144,8 +148,11 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 	if sharedDATA && sharedSD != machine.NoPin {
 		SD = sharedSD // Pico W special case.
 	}
-
+	// Small slog handler implemented on our side:
+	// smallHandler := &handler{w: machine.Serial, level: slog.LevelDebug}
+	handler := slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{Level: slog.LevelDebug})
 	return &Device{
+		log:          slog.New(handler),
 		spi:          spi,
 		cs:           cs,
 		wlRegOn:      wlRegOn,
@@ -157,7 +164,6 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 
 // ref: void cyw43_arch_enable_sta_mode()
 func (d *Device) EnableStaMode(country uint32) error {
-
 	d.lock()
 	defer d.unlock()
 
@@ -180,7 +186,6 @@ func (d *Device) EnableStaMode(country uint32) error {
 
 // ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
 func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
-
 	start := time.Now()
 
 	if err := d.wifiConnect(ssid, pass, auth); err != nil {
@@ -271,7 +276,7 @@ func (d *Device) processEthernet(payload []byte) error {
 		return d.recvEth(payload)
 	}
 
-	Debug("RecvEthHandle handler not set, dropping Rx packet")
+	d.debug("RecvEthHandle handler not set, dropping Rx packet")
 	return nil
 }
 
@@ -279,8 +284,12 @@ func (d *Device) processEthernet(payload []byte) error {
 func (d *Device) processPackets() {
 	for {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		Debug("processPackets:sdpcmPoll conclude payloadoffset=",
-			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
+		d.debug("processPackets:sdpcmPoll",
+			slog.Int("payloadOffset", int(payloadOffset)),
+			slog.Int("plen", int(plen)),
+			slog.Uint64("header", uint64(header)),
+			slog.Any("err", err),
+		)
 		payload := d.buf[payloadOffset : payloadOffset+plen]
 		switch {
 		case err != nil:
@@ -291,7 +300,7 @@ func (d *Device) processPackets() {
 		case header == whd.DATA_HEADER:
 			d.processEthernet(payload)
 		default:
-			Debug("got unexpected packet", header)
+			d.logError("got unexpected packet", slog.Uint64("header", uint64(header)))
 		}
 	}
 }
@@ -318,7 +327,7 @@ func (d *Device) pollStart() {
 	if d.pollCancel != nil {
 		return
 	}
-	println("STARTING POLLING")
+	d.info("STARTING POLLING")
 	ctx, cancel := context.WithCancel(context.Background())
 	d.pollCancel = cancel
 	go func() {
@@ -332,7 +341,7 @@ func (d *Device) pollStart() {
 
 func (d *Device) pollStop() {
 	if d.pollCancel != nil {
-		println("CANCEL POLLING")
+		d.info("CANCEL POLLING")
 		d.pollCancel()
 	}
 }
@@ -350,7 +359,7 @@ func (d *Device) sendEthernet(buf []byte) error {
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
 func (d *Device) Init(cfg Config) (err error) {
-
+	d.debug("init")
 	d.fwVersion, err = getFWVersion(cfg.Firmware)
 	if err != nil {
 		return err
@@ -456,7 +465,7 @@ chipup:
 	if err != nil {
 		return err
 	}
-	Debug("backplane is ready")
+	d.debug("backplane is ready")
 
 	// Clear data unavailable error if there is any.
 	// err = d.ClearInterrupts()
@@ -474,11 +483,11 @@ chipup:
 			goto alpset
 		}
 	}
-	Debug("ALP not set: ", reg8)
+	d.debug("ALP not set: ", slog.Uint64("reg8", uint64(reg8)))
 	return errors.New("timeout waiting for ALP to be set")
 
 alpset:
-	Debug("ALP Set")
+	d.debug("ALP Set")
 	// Clear request for ALP
 	d.Write8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR, 0)
 	if verbose_debug && validateDownloads {
@@ -494,7 +503,7 @@ alpset:
 	} else if cfg.CLM == "" {
 		return errors.New("CLM is empty but firmware not empty")
 	}
-	Debug("begin disabling cores")
+	d.debug("begin disabling cores")
 	// Begin preparing for Firmware download.
 	err = d.disableDeviceCore(whd.CORE_WLAN_ARM, false)
 	if err != nil {
@@ -517,7 +526,7 @@ alpset:
 	if err != nil {
 		return err
 	}
-	Debug("Cores ready, start firmware download")
+	d.debug("Cores ready, start firmware download")
 
 	err = d.downloadResource(0x0, cfg.Firmware)
 	if err != nil {
@@ -526,7 +535,7 @@ alpset:
 
 	const RamSize = (512 * 1024)
 	wifinvramLen := align32(uint32(len(nvram43439)), 64)
-	Debug("start nvram download")
+	d.debug("start nvram download")
 	err = d.downloadResource(RamSize-4-wifinvramLen, nvram43439)
 	if err != nil {
 		return err
@@ -540,7 +549,7 @@ alpset:
 	if !d.CoreIsActive(whd.CORE_WLAN_ARM) {
 		return errors.New("CORE_WLAN_ARM is not active after reset")
 	}
-	Debug("wlan core reset success")
+	d.debug("wlan core reset success")
 	// Wait until HT clock is available.
 	for i := 0; i < 1000; i++ {
 		reg, _ := d.Read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
@@ -552,7 +561,7 @@ alpset:
 	return errors.New("HT not ready")
 
 htready:
-	Debug("HT Ready")
+	d.debug("HT Ready")
 	err = d.WriteBackplane(whd.SDIO_INT_HOST_MASK, 4, whd.I_HMB_SW_MASK)
 	if err != nil {
 		return err
@@ -563,7 +572,7 @@ htready:
 	if err != nil {
 		return err
 	}
-	Debug("preparing F2")
+	d.debug("preparing F2")
 	for i := 0; i < 1000; i++ {
 		status, _ := d.GetStatus()
 		if status.F2PacketAvailable() {
@@ -575,7 +584,7 @@ htready:
 
 f2ready:
 	// Use of KSO:
-	Debug("preparing KSO")
+	d.debug("preparing KSO")
 	reg8, err = d.Read8(FuncBackplane, whd.SDIO_WAKEUP_CTRL)
 	if err != nil {
 		return err
@@ -605,7 +614,7 @@ f2ready:
 		return err
 	}
 	// Clear data unavailable error if there is any.
-	Debug("clear interrupts")
+	d.debug("clear interrupts")
 	err = d.ClearInterrupts()
 	if err != nil {
 		return err
@@ -615,19 +624,19 @@ f2ready:
 		d.ReadBackplane(whd.CHIPCOMMON_BASE_ADDRESS+0x508, 4)
 	}
 
-	Debug("prep bus wake")
+	d.debug("prep bus wake")
 	err = d.busSleep(false)
 	if err != nil {
 		return err
 	}
 
 	// Load CLM data. It's right after main firmware
-	Debug("prepare to flash CLM")
+	d.debug("prepare to flash CLM")
 	err = d.clmLoad([]byte(cfg.CLM))
 	if err != nil {
 		return err
 	}
-	Debug("final IOVar writes")
+	d.debug("final IOVar writes")
 	err = d.WriteIOVar("bus:txglom", whd.WWD_STA_INTERFACE, 0)
 	if err != nil {
 		return err
@@ -650,14 +659,14 @@ f2ready:
 
 func (d *Device) GetStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, whd.SPI_STATUS_REGISTER)
-	Debug("read SPI Bus status:", Status(busStatus).String())
+	// d.debug("GetStatus", slog.String("stat", Status(busStatus).String()))
 	return Status(busStatus), err
 }
 
 func (d *Device) ClearStatus() (Status, error) {
 	busStatus, err := d.Read32(FuncBus, whd.SPI_STATUS_REGISTER)
 	d.Write32(FuncBus, whd.SPI_STATUS_REGISTER, 0)
-	Debug("read SPI Bus status:", Status(busStatus).String())
+	// d.debug("read SPI Bus", slog.String("stat", Status(busStatus).String()))
 	return Status(busStatus), err
 }
 
@@ -989,6 +998,13 @@ func (d *Device) wifiScan(opts *whd.ScanOptions) error {
 
 // reference: cyw43_ll_wifi_join
 func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint32) (err error) {
+	d.info("wifiJoin",
+		slog.String("ssid", ssid),
+		slog.Int("passlen", len(key)),
+		slog.String("bssid", string(bssid[:])),
+		slog.Uint64("authType", uint64(authType)),
+		slog.Uint64("channel", uint64(channel)),
+	)
 	var buf [128]byte
 	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
 	if err != nil {
@@ -1003,7 +1019,6 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	} else {
 		return errors.New("unsupported auth type")
 	}
-	Debug("Setting wsec=", authType&0xff)
 	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC, uint32(authType)&0xff)
 	if err != nil {
 		return err
@@ -1011,14 +1026,12 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 
 	// Supplicant variable.
 	wpaSup := b2u32(wpa_auth != 0)
-	Debug("setting up sup_wpa=", wpaSup)
 	err = d.WriteIOVar2("bsscfg:sup_wpa", whd.WWD_STA_INTERFACE, 0, wpaSup)
 	if err != nil {
 		return err
 	}
 
 	// set the EAPOL version to whatever the AP is using (-1).
-	Debug("setting sup_wpa2_eapver=-1")
 	err = d.WriteIOVar2("bsscfg:sup_wpa2_eapver", whd.WWD_STA_INTERFACE, 0, negative1)
 	if err != nil {
 		return err
@@ -1026,7 +1039,6 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 
 	// wwd_wifi_set_supplicant_eapol_key_timeout
 	const CYW_EAPOL_KEY_TIMEOUT = 5000
-	Debug("setting sup_wpa_tm=5000")
 	err = d.WriteIOVar2("bsscfg:sup_wpa_tmo", whd.WWD_STA_INTERFACE, 0, CYW_EAPOL_KEY_TIMEOUT)
 	if err != nil {
 		return
@@ -1039,7 +1051,7 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		copy(buf[4:], key)
 		time.Sleep(2 * time.Millisecond) // Delay required to allow radio firmware to be ready to receive PMK and avoid intermittent failure
 
-		Debug("setting wsec_pmk ", len(key))
+		d.debug("setting wsec_pmk")
 		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC_PMK, buf[:68])
 		if err != nil {
 			return err
@@ -1047,21 +1059,21 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	}
 
 	// Set infrastructure mode.
-	Debug("setting infra=1")
+	d.debug("setting infra=1")
 	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_INFRA, 1)
 	if err != nil {
 		return err
 	}
 
 	// Set auth type (open system).
-	Debug("setting auth=0")
+	d.debug("setting auth=0")
 	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_AUTH, 0)
 	if err != nil {
 		return err
 	}
 
 	// Set WPA auth mode.
-	Debug("setting wpa_auth=", wpa_auth)
+	d.debug("set wpauth", slog.Uint64("auth", uint64(wpa_auth)))
 	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WPA_AUTH, wpa_auth)
 	if err != nil {
 		return err
@@ -1082,16 +1094,17 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	*/
 
 	// Set SSID.
-	Debug("setting ssid=", ssid)
+
 	binary.LittleEndian.PutUint32(d.lastSSIDJoined[:], uint32(len(ssid)))
 	copy(d.lastSSIDJoined[4:], ssid)
 	if bssid == nil {
 		// Join SSID. Rejoin uses d.lastSSIDJoined.
-		Debug("join SSID")
+		d.debug("join SSID")
 		return d.wifiRejoin()
 	}
 	// BSSID is not nil so join the AP.
-	Debug("setting bssid=", bssid)
+	d.debug("set bssid", slog.String("bssid", string(bssid[:])))
+
 	for i := 0; i < 4+32+20+14; i++ {
 		buf[i] = 0
 	}
@@ -1114,7 +1127,7 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	binary.LittleEndian.PutUint16(buf[4+32+20+12:], chspec)
 
 	// Join the AP.
-	Debug("join AP")
+	d.debug("join AP")
 	return d.WriteIOVarN("join", whd.WWD_STA_INTERFACE, buf[:4+32+20+14])
 }
 
@@ -1134,6 +1147,7 @@ func (d *Device) wifiAPInit() error {
 
 // reference: cyw43_ll_wifi_ap_init
 func (d *Device) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err error) {
+	d.debug("wifiAPInitInternal")
 	buf := d.offbuf()
 
 	// Get state of AP.
@@ -1252,4 +1266,16 @@ func (d *Device) wifiAPGetSTAs(macs []byte) (stas uint32, err error) {
 	stas = binary.LittleEndian.Uint32(buf[:])
 	copy(macs[:], buf[4:4+stas*6])
 	return stas, err
+}
+
+func (d *Device) debug(msg string, attrs ...slog.Attr) {
+	d.log.LogAttrs(context.Background(), slog.LevelInfo, msg, attrs...)
+}
+
+func (d *Device) info(msg string, attrs ...slog.Attr) {
+	d.log.LogAttrs(context.Background(), slog.LevelInfo, msg, attrs...)
+}
+
+func (d *Device) logError(msg string, attrs ...slog.Attr) {
+	d.log.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)
 }

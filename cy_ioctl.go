@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"github.com/soypat/cyw43439/whd"
+	"golang.org/x/exp/slog"
 )
 
 func (d *Device) LED() Pin {
@@ -44,7 +45,7 @@ const (
 )
 
 func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
-	Debug("gpioset", int(wlGPIO), "value=", value)
+	d.debug("GPIOSet", slog.Uint64("wlGPIO", uint64(wlGPIO)), slog.Bool("value", value))
 	if wlGPIO >= 3 {
 		panic("GPIO out of range 0..2")
 	}
@@ -62,7 +63,8 @@ func (d *Device) offbuf() []byte { return d.auxbuf[:] }
 
 // reference: cyw43_write_iovar_u32
 func (d *Device) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) error {
-	Debug("WriteIOVar var=", VAR, "ioctl=", uint8(iface), "val=", val)
+	d.debug("WriteIOVar", slog.String("var", VAR), slog.String("iface", iface.String()), slog.Uint64("val", uint64(val)))
+	// Debug("WriteIOVar var=", VAR, "ioctl=", uint8(iface), "val=", val)
 	buf := d.offbuf()
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
@@ -73,7 +75,8 @@ func (d *Device) WriteIOVar(VAR string, iface whd.IoctlInterface, val uint32) er
 
 // reference: cyw43_write_iovar_u32_u32 (const char *var, uint32_t val0, uint32_t val1, uint32_t iface)
 func (d *Device) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
-	Debug("WriteIOVar2 var=", VAR, "ioctl=", uint8(iface), "val1=", val0, "val2=", val1)
+	d.debug("WriteIOVar2", slog.String("var", VAR), slog.String("iface", iface.String()), slog.Uint64("val0", uint64(val0)), slog.Uint64("val1", uint64(val1)))
+	// Debug("WriteIOVar2 var=", VAR, "ioctl=", uint8(iface), "val1=", val0, "val2=", val1)
 	buf := d.offbuf()
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
@@ -85,7 +88,8 @@ func (d *Device) WriteIOVar2(VAR string, iface whd.IoctlInterface, val0, val1 ui
 
 // reference: cyw43_write_iovar_n
 func (d *Device) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) error {
-	Debug("WriteIOVarN var=", VAR, "ioctl=", uint8(iface), "len=", len(src))
+	d.debug("WriteIOVarN", slog.String("var", VAR), slog.String("iface", iface.String()), slog.Int("datalen", len(src)))
+	// Debug("WriteIOVarN var=", VAR, "ioctl=", uint8(iface), "len=", len(src))
 	iobuf := d.offbuf()
 	if len(VAR)+len(src)+1 > len(iobuf) {
 		return errors.New("buffer too short for IOVarN call")
@@ -101,7 +105,7 @@ func (d *Device) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) e
 
 // reference: cyw43_set_ioctl_u32 (uint32_t cmd, uint32_t val, uint32_t iface)
 func (d *Device) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
-	Debug("SetIoctl32")
+	d.debug("SetIoctl32")
 	var buf [4]byte
 	binary.LittleEndian.PutUint32(buf[:], val)
 	return d.doIoctl(whd.SDPCM_SET, iface, cmd, buf[:])
@@ -109,7 +113,7 @@ func (d *Device) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val 
 
 // reference: cyw43_get_ioctl_u32
 func (d *Device) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uint32, error) {
-	Debug("GetIoctl32")
+	d.debug("GetIoctl32")
 	var buf [4]byte
 	err := d.doIoctl(whd.SDPCM_GET, iface, cmd, buf[:])
 	return binary.LittleEndian.Uint32(buf[:4]), err
@@ -117,7 +121,7 @@ func (d *Device) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uin
 
 // reference: cyw43_read_iovar_u32
 func (d *Device) ReadIOVar(VAR string, iface whd.IoctlInterface) (uint32, error) {
-	Debug("ReadIOVar var=", VAR, "ioctl=", uint8(iface))
+	d.debug("ReadIOVar", slog.String("var", VAR), slog.String("iface", iface.String()))
 	buf := d.offbuf()
 	length := copy(buf, VAR)
 	buf[length] = 0 // Null terminate the string
@@ -167,8 +171,11 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 
 	for time.Since(start) < timeout {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		Debug("doIoctl:sdpcmPoll conclude payloadoffset=",
-			int(payloadOffset), "plen=", int(plen), "header=", header.String(), err)
+		d.debug("doIoctl:sdpcmPoll conclude",
+			slog.Int("payloadoffset", int(payloadOffset)),
+			slog.Int("plen", int(plen)),
+			slog.String("header", header.String()),
+		)
 		payload := d.buf[payloadOffset : payloadOffset+plen]
 		switch {
 		case err != nil:
@@ -184,7 +191,7 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 		case header == whd.DATA_HEADER:
 			d.processEthernet(payload)
 		default:
-			Debug("got unexpected packet", header)
+			d.logError("got unexpected packet", slog.Uint64("header", uint64(header)))
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -197,7 +204,7 @@ var errDoIoctlTimeout = errors.New("doIoctl time out waiting for data")
 
 // reference: cyw43_send_ioctl
 func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, w []byte) error {
-	Debug("sendIoctl")
+	d.debug("sendIoctl")
 
 	length := uint32(len(w))
 	if uint32(len(d.buf)) < whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length {
@@ -213,8 +220,7 @@ func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMC
 	}
 	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
 	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
-	Debug("sendIoctl cmd=", uint32(header.Cmd), " len=", header.Len, " flags=", header.Flags, "status=", header.Status)
-
+	d.debug("sendIoctl", slog.Uint64("hdr.Cmd", uint64(header.Cmd)), slog.Uint64("hdr.Len", uint64(header.Len)), slog.Uint64("hdr.Flags", uint64(header.Flags)), slog.Uint64("hdr.Status", uint64(header.Status)))
 	return d.sendSDPCMCommon(whd.CONTROL_HEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
 }
 
@@ -236,7 +242,7 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 		lastInt := d.lastInt
 		intStat, err := d.GetInterrupts()
 		if err != nil || lastInt != intStat && intStat.IsBusOverflowedOrUnderflowed() {
-			Debug("bus error condition detected =", uint16(intStat), err)
+			d.logError("bus error condition detected", slog.Uint64("intstat", uint64(intStat)), slog.Any("err", err))
 		}
 		d.lastInt = intStat
 		if intStat != 0 {
@@ -264,13 +270,13 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 		return 0, 0, badHeader, fmt.Errorf("bad status get in sdpcmPoll: %w", err)
 	}
 	if !status.GSPIPacketAvailable() {
-		Debug("no packet")
+		d.logError("no packet")
 		d.hadSuccesfulPacket = false
 		return 0, 0, badHeader, errors.New("sdpcmPoll: no packet")
 	}
 	bytesPending := status.F2PacketLength()
 	if bytesPending == 0 || bytesPending > linkMTU-gspiPacketOverhead || status.IsUnderflow() {
-		Debug("SPI invalid bytes pending", bytesPending)
+		d.logError("SPI invalid bytes pending", slog.Uint64("bytesPending", uint64(bytesPending)))
 		d.Write8(FuncBackplane, whd.SPI_FRAME_CONTROL, 1)
 		d.hadSuccesfulPacket = false
 		return 0, 0, badHeader, errors.New("sdpcmPoll: invalid bytes pending")
@@ -283,13 +289,13 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 	hdr1 := binary.LittleEndian.Uint16(buf[2:])
 	if hdr0 == 0 && hdr1 == 0 {
 		// no packets.
-		Debug("no packet:zero size header")
+		d.logError("no packet:zero size header")
 		d.hadSuccesfulPacket = false
 		return 0, 0, badHeader, errors.New("sdpcmPoll:zero header")
 	}
 	d.hadSuccesfulPacket = true
 	if hdr0^hdr1 != 0xffff {
-		Debug("header xor mismatch h[0]=", hdr0, "h[1]=", hdr1)
+		d.logError("header xor mismatch", slog.Uint64("hdr[0]", uint64(hdr0)), slog.Uint64("hdr[1]", uint64(hdr1)))
 		return 0, 0, badHeader, errors.New("sdpcmPoll:header mismatch")
 	}
 	return d.sdpcmProcessRxPacket(buf[:bytesPending])
@@ -301,7 +307,7 @@ var errSendSDPCMTimeout = errors.New("sendSDPCMCommon time out waiting for data"
 //
 //	reference: cyw43_sdpcm_send_common
 func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
-	Debug("sendSDPCMCommon len=", len(w))
+	d.debug("sendSDPCMCommon", slog.Int("len", len(w)))
 	if kind != whd.CONTROL_HEADER && kind != whd.DATA_HEADER {
 		return errors.New("unexpected SDPCM kind")
 	}
@@ -326,9 +332,6 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 				return errSendSDPCMTimeout
 			}
 			payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-			Debug("sendSDPCMCommon:sdpcmPoll conclude payloadoffset=",
-				int(payloadOffset), "plen=", int(plen), "header=",
-				header.String(), err)
 			payload := d.buf[payloadOffset:payloadOffset+plen]
 			switch {
 			case err != nil:
@@ -340,7 +343,7 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 				// issues (eg sending another ETH as part of
 				// the reception)
 			default:
-				Debug("got unexpected packet", header)
+				d.debug("got unexpected packet")
 			}
 			time.Sleep(time.Millisecond)
 		}
@@ -371,7 +374,7 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 // reference: disable_device_core
 func (d *Device) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	base := coreaddress(coreID)
-	Debug("disable core", coreID, base)
+	d.debug("disable core", slog.Int("coreid", int(coreID)))
 	d.ReadBackplane(base+whd.AI_RESETCTRL_OFFSET, 1)
 	reg, err := d.ReadBackplane(base+whd.AI_RESETCTRL_OFFSET, 1)
 	if err != nil {
@@ -380,7 +383,7 @@ func (d *Device) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	if reg&whd.AIRC_RESET != 0 {
 		return nil
 	}
-	Debug("core not in reset", reg)
+	d.logError("core not in reset")
 	return errors.New("core not in reset")
 }
 
@@ -396,7 +399,6 @@ func (d *Device) resetDeviceCore(coreID uint8, coreHalt bool) error {
 	}
 	base := coreaddress(coreID)
 	const addr = 0x18103000 + whd.AI_IOCTRL_OFFSET
-	Debug("begin reset process coreid=", coreID)
 	d.WriteBackplane(base+whd.AI_IOCTRL_OFFSET, 1, whd.SICF_FGC|whd.SICF_CLOCK_EN|cpuhaltFlag)
 	d.ReadBackplane(base+whd.AI_IOCTRL_OFFSET, 1)
 	d.WriteBackplane(base+whd.AI_RESETCTRL_OFFSET, 1, 0)
@@ -404,7 +406,6 @@ func (d *Device) resetDeviceCore(coreID uint8, coreHalt bool) error {
 	d.WriteBackplane(base+whd.AI_IOCTRL_OFFSET, 1, whd.SICF_CLOCK_EN|cpuhaltFlag)
 	d.ReadBackplane(base+whd.AI_IOCTRL_OFFSET, 1)
 	time.Sleep(time.Millisecond)
-	Debug("end reset process coreid=", coreID)
 	return nil
 }
 
@@ -440,7 +441,7 @@ func coreaddress(coreID uint8) (v uint32) {
 
 // reference: cyw43_read_backplane
 func (d *Device) ReadBackplane(addr uint32, size uint32) (uint32, error) {
-	Debug("read backplane", addr, size)
+	d.debug("read backplane", slog.Uint64("addr", uint64(addr)), slog.Uint64("size", uint64(size)))
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
 		return 0, err
@@ -461,7 +462,7 @@ func (d *Device) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 
 // reference: cyw43_write_backplane
 func (d *Device) WriteBackplane(addr, size, value uint32) error {
-	Debug("write backplane", addr, "=", value, "size=", int(size))
+	d.debug("write backplane", slog.Uint64("addr", uint64(addr)), slog.Uint64("size", uint64(size)), slog.Uint64("value", uint64(value)))
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
 		return err
@@ -510,7 +511,7 @@ func (d *Device) setBackplaneWindow(addr uint32) (err error) {
 
 // reference: cyw43_download_resource
 func (d *Device) downloadResource(addr uint32, src string) error {
-	Debug("download resource addr=", addr, "len=", len(src))
+	d.debug("download resource", slog.Uint64("addr", uint64(addr)), slog.Int("len", len(src)))
 	// round up length to simplify download.
 	rlen := (len(src) + 255) &^ 255
 	// if len(src) < rlen {
@@ -553,7 +554,7 @@ func (d *Device) downloadResource(addr uint32, src string) error {
 	if !validateDownloads {
 		return nil
 	}
-	Debug("download finished, validate data")
+	d.debug("download finished, validate data")
 	// Finished writing firmware... should be ready for use. We choose to validate it though.
 	for offset := 0; offset < rlen; offset += BLOCKSIZE {
 		sz := BLOCKSIZE
@@ -561,7 +562,6 @@ func (d *Device) downloadResource(addr uint32, src string) error {
 			sz = rlen - offset
 		}
 		dstAddr := addr + uint32(offset)
-		// Debug("dstAddr", dstAddr, "addr=", addr, "offset=", offset, "sz=", sz)
 		if dstAddr&whd.BACKPLANE_ADDR_MASK+uint32(sz) > whd.BACKPLANE_ADDR_MASK+1 {
 			panic("invalid dstAddr:" + strconv.Itoa(int(dstAddr)))
 		}
@@ -585,7 +585,7 @@ func (d *Device) downloadResource(addr uint32, src string) error {
 			return err
 		}
 	}
-	Debug("firmware validation success")
+	d.debug("firmware validation success")
 	return nil
 }
 
@@ -605,7 +605,7 @@ func (d *Device) busSleep(canSleep bool) (err error) {
 //
 //	reference: cyw43_kso_set
 func (d *Device) ksoSet(value bool) error {
-	Debug("ksoSet enable=", value)
+	d.debug("ksoSe", slog.Bool("value", value))
 	var writeVal uint8
 	if value {
 		writeVal = whd.SBSDIO_SLPCSR_KEEP_SDIO_ON
@@ -668,13 +668,13 @@ func (d *Device) clmLoad(clm []byte) error {
 		}
 		// Send data aligned to 8 bytes. We do end up sending scratch data
 		// at end of buffer that has not been set here.
-		Debug("clm data send off+len=", int(off+ln), "clmlen=", int(clmLen))
+		d.debug("clm data send", slog.Int("off+ln", int(off+ln)), slog.Int("clmlen", int(clmLen)))
 		err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:align32(20+uint32(ln), 8)])
 		if err != nil {
 			return err
 		}
 	}
-	Debug("clm data send done")
+	d.debug("clm data send done")
 	// Check status of the download.
 	const clmStatString = "clmload_status\x00\x00\x00\x00\x00"
 	const clmStatLen = len(clmStatString)
@@ -736,7 +736,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		return 0, 0, badHeader, err3PacketTooSmall
 	}
 	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
-		Debug("WLAN: changed flow control", d.wlanFlowCtl, hdr.WirelessFlowCtl)
+		d.debug("WLAN: changed flow control", slog.Uint64("old", uint64(d.wlanFlowCtl)), slog.Uint64("new", uint64(hdr.WirelessFlowCtl)))
 	}
 	d.wlanFlowCtl = hdr.WirelessFlowCtl
 
@@ -766,7 +766,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		}
 		payloadOffset += whd.IOCTL_HEADER_LEN
 		plen = uint32(hdr.Size) - payloadOffset
-		Debug("ioctl response id=", id, "len=", plen)
+		d.debug("ioctl response", slog.Int("id", int(id)), slog.Int("len", int(plen)))
 
 	case whd.DATA_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
@@ -809,7 +809,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 
 // ref: void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev)
 func (d *Device) processAsyncEvent(ev whd.AsyncEvent) error {
-	fmt.Printf("AsyncEvent: %+v\r\n", ev)
+	d.debug("AsyncEvent", slog.Any("ev", ev))
 	switch ev.EventType {
 	case whd.CYW43_EV_ESCAN_RESULT:
 		// TODO

@@ -17,6 +17,7 @@ type SPIbb struct {
 	Delay uint32
 	// If MockTo is not nil then clock, SDI and SDO writes/reads are duplicated to it.
 	MockTo *SPIbb
+	buf    [1]byte
 }
 
 // Configure sets up the SCK and SDO pins as outputs and sets them low
@@ -43,7 +44,7 @@ func (s *SPIbb) Configure() {
 // Tx matches signature of machine.SPI.Tx() and is used to send multiple bytes.
 // The r slice is ignored and no error will ever be returned.
 func (s *SPIbb) Tx(w []byte, r []byte) (err error) {
-	var aux [1]byte
+	aux := s.buf[:1]
 	mocking := s.MockTo != nil
 	if len(w) != 0 {
 		if len(r) == 0 {

@@ -8,6 +8,7 @@ import (
 	"machine"
 
 	"github.com/soypat/cyw43439/whd"
+	"golang.org/x/exp/slog"
 )
 
 // gSPI transaction endianess.
@@ -73,7 +74,7 @@ func (d *Device) wr(fn Function, addr, size, val uint32) error {
 		case 4:
 			function = "cyw43_write_reg_u32"
 		}
-		Debug(function, fn.String(), addr, "=", val, err)
+		d.debug(function, slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Uint64("val", uint64(val)))
 	}
 	return err
 }
@@ -118,7 +119,7 @@ func (d *Device) WriteBytes(fn Function, addr uint32, src []byte) error {
 
 // spiWrite performs the gSPI Write action. Does not control CS pin.
 func (d *Device) spiWrite(cmd uint32, w []byte) error {
-	var buf [4]byte
+	buf := d.spibuf[:4]
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
@@ -132,11 +133,11 @@ func (d *Device) spiWrite(cmd uint32, w []byte) error {
 		return err
 	}
 	// Read Status.
-	buf = [4]byte{}
+	d.spibuf = [4]byte{}
 	d.spi.Tx(buf[:], buf[:])
 	status := Status(swap32(endian.Uint32(buf[:]))) // !LE
 	if status.DataUnavailable() {
-		println("got status:", status)
+		// d.logError("data unavailable status", slog.Uint64("status", uint64(status)))
 		return ErrDataNotAvailable
 	}
 	return nil
@@ -167,7 +168,7 @@ func (d *Device) rr(fn Function, addr, size uint32) (uint32, error) {
 		padding = whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE
 	}
 	cmd := make_cmd(false, true, fn, addr, size+padding)
-	var buf [4 + whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE]byte
+	buf := d.spibufrr[:4+whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE]
 	d.csLow()
 	err := d.spiRead(cmd, buf[:4+padding], 0)
 	d.csHigh()
@@ -182,14 +183,14 @@ func (d *Device) rr(fn Function, addr, size uint32) (uint32, error) {
 		case 4:
 			function = "cyw43_read_reg_u32"
 		}
-		Debug(function, fn.String(), addr, "=", result, err)
+		d.debug(function, slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Uint64("result", uint64(result)))
 	}
 	return result, err
 }
 
 // reference: cyw43_read_bytes
 func (d *Device) ReadBytes(fn Function, addr uint32, src []byte) error {
-	Debug("read bytes addr=", addr, "len=", len(src), "fn=", fn.String())
+	d.debug("ReadBytes", slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Int("len", len(src)))
 	const maxReadPacket = 2040
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3
@@ -217,7 +218,7 @@ func (d *Device) ReadBytes(fn Function, addr uint32, src []byte) error {
 
 // spiRead performs the gSPI Read action.
 func (d *Device) spiRead(cmd uint32, r []byte, padding uint8) error {
-	var buf [4]byte
+	buf := d.spibuf[:4]
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
@@ -232,7 +233,7 @@ func (d *Device) spiRead(cmd uint32, r []byte, padding uint8) error {
 		return err
 	}
 	// Read Status.
-	buf = [4]byte{} // zero out buffer.
+	d.spibuf = [len(d.spibuf)]byte{} // zero out buffer.
 	err = d.spi.Tx(buf[:], buf[:])
 	status := Status(endian.Uint32(buf[:])) // !LE
 	if err == nil && status.DataUnavailable() {
@@ -287,7 +288,7 @@ func swap32(b uint32) uint32 {
 // Write32S writes register and swaps big-endian 16bit word length. Used only at initialization.
 func (d *Device) Write32S(fn Function, addr, val uint32) error {
 	cmd := make_cmd(true, true, fn, addr, 4)
-	var buf [4]byte
+	buf := d.spibuf[:4]
 	d.csLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -300,18 +301,16 @@ func (d *Device) Write32S(fn Function, addr, val uint32) error {
 	}
 	binary.BigEndian.PutUint32(buf[:], swap32(val))
 	err = d.spi.Tx(buf[:], nil)
-	Debug("cyw43_write_reg_u32_swap", fn.String(), addr, "=", val, err)
 	if err != nil || !d.enableStatusWord {
 		d.csHigh()
 		return err
 	}
 	// Read Status.
-	buf = [4]byte{}
+	d.spibuf = [len(d.spibuf)]byte{}
 	d.spi.Tx(buf[:], buf[:])
 	d.csHigh()
 	status := Status(swap32(binary.BigEndian.Uint32(buf[:])))
 	if status.DataUnavailable() {
-		println("got status:", status)
 		err = ErrDataNotAvailable
 	}
 	return err
@@ -323,7 +322,7 @@ func (d *Device) Read32S(fn Function, addr uint32) (uint32, error) {
 		panic("backplane not implemented for rrS")
 	}
 	cmd := make_cmd(false, true, fn, addr, 4)
-	var buf [4]byte
+	buf := d.spibuf[:4]
 	d.csLow()
 	if sharedDATA {
 		d.sharedSD.Configure(machine.PinConfig{Mode: machine.PinOutput})
@@ -336,19 +335,18 @@ func (d *Device) Read32S(fn Function, addr uint32) (uint32, error) {
 	d.responseDelay(0)
 	err := d.spi.Tx(nil, buf[:])
 	result := swap32(binary.BigEndian.Uint32(buf[:]))
-	Debug("cyw43_read_reg_u32_swap", fn.String(), addr, "=", result, err)
 	if err != nil || !d.enableStatusWord {
 		d.csHigh()
 		return result, err
 	}
 	// Read Status.
-	buf = [4]byte{} // zero out buffer.
+	d.spibuf = [len(d.spibuf)]byte{} // zero out buffer.
 	d.spi.Tx(buf[:], buf[:])
 	d.csHigh()
 	status := Status(swap32(binary.BigEndian.Uint32(buf[:])))
 	if status.DataUnavailable() {
 		err = ErrDataNotAvailable
-		println("got data unavailable status:", status)
+		// println("got data unavailable status:", status)
 	}
 	return result, err
 }

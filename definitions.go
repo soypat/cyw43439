@@ -251,7 +251,7 @@ func getFWVersion(src string) (string, error) {
 	}
 	fwVersion := src[begin : begin+end]
 	if verbose_debug {
-		Debug("got version", fwVersion)
+		println("got version", fwVersion)
 	}
 	return fwVersion, nil
 }
