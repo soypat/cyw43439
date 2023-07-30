@@ -5,43 +5,21 @@
 package cyw43439
 
 import (
-	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/soypat/cyw43439/internal/netlink"
 	"github.com/soypat/cyw43439/whd"
+	"golang.org/x/exp/slog"
 )
 
-func (d *Device) showDriver() {
-	if d.driverShown {
-		return
-	}
-	if debugging(debugBasic) {
-		fmt.Printf("\r\n")
-		fmt.Printf("%s\r\n\r\n", driverName)
-		fmt.Printf("Driver version           : %s\r\n", version)
-	}
-	d.driverShown = true
-}
-
-func (d *Device) showDevice() {
-	if d.deviceShown {
-		return
-	}
-	if debugging(debugBasic) {
-		fwVersion := strings.Fields(d.fwVersion)[1]
-		fmt.Printf("Firmware version         : %s\r\n", fwVersion)
-		fmt.Printf("MAC address              : %s\r\n", d.mac)
-		fmt.Printf("\r\n")
-	}
-	d.deviceShown = true
+func (d *Device) DeviceInfo() (driverName, driverVersion, fwVersion string, MAC net.HardwareAddr) {
+	return driverName, version, d.fwVersion, append(net.HardwareAddr{}, d.mac[:]...)
 }
 
 func (d *Device) connectToAP() error {
-
-	if len(d.params.Ssid) == 0 {
+	d.info("connectToAP", slog.String("SSID", d.params.SSID), slog.Int("passlen", len(d.params.Passphrase)))
+	if len(d.params.SSID) == 0 {
 		return netlink.ErrMissingSSID
 	}
 
@@ -64,21 +42,12 @@ func (d *Device) connectToAP() error {
 		panic("ConnectToAP: Unknown AuthType")
 	}
 
-	if debugging(debugBasic) {
-		fmt.Printf("Connecting to Wifi SSID '%s'...", d.params.Ssid)
-	}
-
-	err := d.WifiConnectTimeout(d.params.Ssid, d.params.Passphrase, auth, timeout)
+	err := d.WifiConnectTimeout(d.params.SSID, d.params.Passphrase, auth, timeout)
 	if err != nil {
-		if debugging(debugBasic) {
-			fmt.Printf("FAILED (%s)\r\n", err.Error())
-		}
+		d.logError("WifiConnectTimeout failed", slog.Any("err", err))
 		return err
 	}
-
-	if debugging(debugBasic) {
-		fmt.Printf("CONNECTED\r\n")
-	}
+	d.info("connected to AP", slog.String("SSID", d.params.SSID))
 
 	d.notifyUp()
 
@@ -103,7 +72,6 @@ func (d *Device) netConnect(reset bool) error {
 			return err
 		}
 	}
-	d.showDevice()
 
 	for i := 0; d.params.Retries == 0 || i < d.params.Retries; i++ {
 		if err := d.connectToAP(); err != nil {
@@ -131,9 +99,7 @@ func (d *Device) watchdog() {
 			return
 		case <-ticker.C:
 			if d.networkDown() {
-				if debugging(debugBasic) {
-					fmt.Printf("Watchdog: Wifi NOT CONNECTED, trying again...\r\n")
-				}
+				d.logError("Watchdog: Wifi NOT CONNECTED, trying again...")
 				d.notifyDown()
 				d.netConnect(false)
 			}
@@ -142,7 +108,7 @@ func (d *Device) watchdog() {
 }
 
 func (d *Device) NetConnect(params *netlink.ConnectParams) error {
-
+	d.info("NetConnect")
 	if d.netConnected {
 		return netlink.ErrConnected
 	}
@@ -154,8 +120,6 @@ func (d *Device) NetConnect(params *netlink.ConnectParams) error {
 	}
 
 	d.params = params
-
-	d.showDriver()
 
 	if err := d.netConnect(true); err != nil {
 		return err
@@ -175,7 +139,7 @@ func (d *Device) netDisconnect() {
 }
 
 func (d *Device) NetDisconnect() {
-
+	d.info("NetDisconnect")
 	if !d.netConnected {
 		return
 	}
@@ -186,11 +150,6 @@ func (d *Device) NetDisconnect() {
 
 	d.netDisconnect()
 	d.netConnected = false
-
-	if debugging(debugBasic) {
-		fmt.Printf("\r\nDisconnected from Wifi\r\n\r\n")
-	}
-
 	d.notifyDown()
 }
 

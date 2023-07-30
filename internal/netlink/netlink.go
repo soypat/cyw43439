@@ -53,11 +53,11 @@ type ConnectParams struct {
 	// Connect mode
 	ConnectMode
 	// SSID of Wifi AP
-	Ssid string
+	SSID string
 	// Passphrase of Wifi AP
 	Passphrase string
 	// Wifi authorization type
-	AuthType
+	AuthType AuthType
 	// Wifi country code as two-char string.  E.g. "XX" for world-wide,
 	// "US" for USA, etc.
 	Country string

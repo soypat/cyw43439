@@ -65,16 +65,16 @@ func (d *Device) wr(fn Function, addr, size, val uint32) error {
 	err := d.spiWrite(cmd, buf[:4])
 	d.csHigh()
 	if verbose_debug {
-		function := "bad size"
+		function := "Write<INVALID_SIZE>"
 		switch size {
 		case 1:
-			function = "cyw43_write_reg_u8"
+			function = "Write8"
 		case 2:
-			function = "cyw43_write_reg_u16"
+			function = "Write16"
 		case 4:
-			function = "cyw43_write_reg_u32"
+			function = "Write32"
 		}
-		d.debug(function, slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Uint64("val", uint64(val)))
+		d.debugIO(function, slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Uint64("val", uint64(val)))
 	}
 	return err
 }
@@ -174,23 +174,23 @@ func (d *Device) rr(fn Function, addr, size uint32) (uint32, error) {
 	d.csHigh()
 	result := endian.Uint32(buf[padding : padding+4]) // !LE
 	if verbose_debug {
-		function := "bad size"
+		function := "Read<INVALID_SIZE>"
 		switch size {
 		case 1:
-			function = "cyw43_read_reg_u8"
+			function = "Read8"
 		case 2:
-			function = "cyw43_read_reg_u16"
+			function = "Read16"
 		case 4:
-			function = "cyw43_read_reg_u32"
+			function = "Read32"
 		}
-		d.debug(function, slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Uint64("result", uint64(result)))
+		d.debugIO(function, slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Uint64("result", uint64(result)))
 	}
 	return result, err
 }
 
 // reference: cyw43_read_bytes
 func (d *Device) ReadBytes(fn Function, addr uint32, src []byte) error {
-	d.debug("ReadBytes", slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Int("len", len(src)))
+	d.debugIO("ReadBytes", slog.String("fn", fn.String()), slog.Uint64("addr", uint64(addr)), slog.Int("len", len(src)))
 	const maxReadPacket = 2040
 	length := uint32(len(src))
 	alignedLength := (length + 3) &^ 3

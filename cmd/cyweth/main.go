@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/soypat/cyw43439"
@@ -37,7 +38,9 @@ func main() {
 	if err := dev.EnableStaMode(country); err != nil {
 		panic(err.Error())
 	}
-
+	driver, version, fwVersion, MAC := dev.DeviceInfo()
+	fmt.Printf("\n==== DEVICEINFO ====\n\tDriver: %s\n\tVersion:%s\n\tFirmwareVersion:%s\n\tMAC:%s\n\n",
+		driver, version, fwVersion, MAC)
 	// Wifi connect to AP using WPA2 authorization
 	auth := uint32(whd.CYW43_AUTH_WPA2_AES_PSK)
 	timeout := 10 * time.Second
@@ -46,7 +49,7 @@ func main() {
 	}
 
 	// Everything beyond this point must be implemented!  Need:
-	// 
+	//
 	// 0. Get link status (Interrupt or polling?)
 	// 1. dev.GetIP()
 	// 2. dev.SendEth() implemented for Tx

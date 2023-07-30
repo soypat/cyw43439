@@ -45,7 +45,7 @@ const (
 )
 
 func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
-	d.debug("GPIOSet", slog.Uint64("wlGPIO", uint64(wlGPIO)), slog.Bool("value", value))
+	d.info("GPIOSet", slog.Uint64("wlGPIO", uint64(wlGPIO)), slog.Bool("value", value))
 	if wlGPIO >= 3 {
 		panic("GPIO out of range 0..2")
 	}
@@ -105,7 +105,7 @@ func (d *Device) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) e
 
 // reference: cyw43_set_ioctl_u32 (uint32_t cmd, uint32_t val, uint32_t iface)
 func (d *Device) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
-	d.debug("SetIoctl32")
+	d.debug("SetIoctl32", slog.String("iface", iface.String()), slog.Uint64("cmd", uint64(cmd)), slog.Uint64("val", uint64(val)))
 	var buf [4]byte
 	binary.LittleEndian.PutUint32(buf[:], val)
 	return d.doIoctl(whd.SDPCM_SET, iface, cmd, buf[:])
@@ -113,7 +113,7 @@ func (d *Device) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val 
 
 // reference: cyw43_get_ioctl_u32
 func (d *Device) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uint32, error) {
-	d.debug("GetIoctl32")
+	d.debug("GetIoctl32", slog.String("iface", iface.String()), slog.Uint64("cmd", uint64(cmd)))
 	var buf [4]byte
 	err := d.doIoctl(whd.SDPCM_GET, iface, cmd, buf[:])
 	return binary.LittleEndian.Uint32(buf[:4]), err
@@ -136,7 +136,6 @@ func (d *Device) ReadIOVar(VAR string, iface whd.IoctlInterface) (uint32, error)
 
 // reference: cyw43_ioctl/cyw43_ll_ioctl
 func (d *Device) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte) error {
-
 	d.lock()
 	defer d.unlock()
 
@@ -144,7 +143,11 @@ func (d *Device) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte)
 	if cmd&1 != 0 {
 		kind = whd.SDPCM_SET
 	}
-	return d.doIoctl(uint32(kind), iface, cmd>>1, w)
+	err := d.doIoctl(uint32(kind), iface, cmd>>1, w)
+	if err != nil {
+		d.logError("doIoctl fail", slog.Any("err", err))
+	}
+	return err
 }
 
 // doIoctl uses Device's primary buffer to perform ioctl call. Use [Dev.offbuff] for
@@ -171,7 +174,7 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 
 	for time.Since(start) < timeout {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		d.debug("doIoctl:sdpcmPoll conclude",
+		d.debug("doIoctl:sdpcmPoll(done)",
 			slog.Int("payloadoffset", int(payloadOffset)),
 			slog.Int("plen", int(plen)),
 			slog.String("header", header.String()),
@@ -227,6 +230,7 @@ func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMC
 // sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
 // payload, length of the payload and the header type. Is cyw43_ll_sdpcm_poll_device in reference.
 func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
+	d.debug("sdpcmPoll", slog.Int("len", len(buf)))
 	// First check the SDIO interrupt line to see if the WLAN notified us
 	const badHeader = whd.UNKNOWN_HEADER
 	noPacketSuccess := !d.hadSuccesfulPacket
@@ -374,7 +378,7 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 // reference: disable_device_core
 func (d *Device) disableDeviceCore(coreID uint8, coreHalt bool) error {
 	base := coreaddress(coreID)
-	d.debug("disable core", slog.Int("coreid", int(coreID)))
+	d.debug("disableDeviceCore", slog.Int("coreid", int(coreID)))
 	d.ReadBackplane(base+whd.AI_RESETCTRL_OFFSET, 1)
 	reg, err := d.ReadBackplane(base+whd.AI_RESETCTRL_OFFSET, 1)
 	if err != nil {
@@ -441,7 +445,7 @@ func coreaddress(coreID uint8) (v uint32) {
 
 // reference: cyw43_read_backplane
 func (d *Device) ReadBackplane(addr uint32, size uint32) (uint32, error) {
-	d.debug("read backplane", slog.Uint64("addr", uint64(addr)), slog.Uint64("size", uint64(size)))
+	d.debugIO("ReadBackplane", slog.Uint64("addr", uint64(addr)), slog.Uint64("size", uint64(size)))
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
 		return 0, err
@@ -462,7 +466,7 @@ func (d *Device) ReadBackplane(addr uint32, size uint32) (uint32, error) {
 
 // reference: cyw43_write_backplane
 func (d *Device) WriteBackplane(addr, size, value uint32) error {
-	d.debug("write backplane", slog.Uint64("addr", uint64(addr)), slog.Uint64("size", uint64(size)), slog.Uint64("value", uint64(value)))
+	d.debugIO("WriteBackplane", slog.Uint64("addr", uint64(addr)), slog.Uint64("size", uint64(size)), slog.Uint64("value", uint64(value)))
 	err := d.setBackplaneWindow(addr)
 	if err != nil {
 		return err
@@ -605,7 +609,7 @@ func (d *Device) busSleep(canSleep bool) (err error) {
 //
 //	reference: cyw43_kso_set
 func (d *Device) ksoSet(value bool) error {
-	d.debug("ksoSe", slog.Bool("value", value))
+	d.debug("ksoSet", slog.Bool("value", value))
 	var writeVal uint8
 	if value {
 		writeVal = whd.SBSDIO_SLPCSR_KEEP_SDIO_ON
@@ -736,7 +740,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		return 0, 0, badHeader, err3PacketTooSmall
 	}
 	if d.wlanFlowCtl != hdr.WirelessFlowCtl {
-		d.debug("WLAN: changed flow control", slog.Uint64("old", uint64(d.wlanFlowCtl)), slog.Uint64("new", uint64(hdr.WirelessFlowCtl)))
+		d.debug("sdpcmProcessRxPacket:WLANFLOWCTL_CHANGE", slog.Uint64("old", uint64(d.wlanFlowCtl)), slog.Uint64("new", uint64(hdr.WirelessFlowCtl)))
 	}
 	d.wlanFlowCtl = hdr.WirelessFlowCtl
 
@@ -766,7 +770,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		}
 		payloadOffset += whd.IOCTL_HEADER_LEN
 		plen = uint32(hdr.Size) - payloadOffset
-		d.debug("ioctl response", slog.Int("id", int(id)), slog.Int("len", int(plen)))
+		d.debug("sdpcmProcessRxPacket:CONTROL_HEADER", slog.Int("id", int(id)), slog.Int("len", int(plen)))
 
 	case whd.DATA_HEADER:
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
@@ -809,7 +813,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 
 // ref: void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev)
 func (d *Device) processAsyncEvent(ev whd.AsyncEvent) error {
-	d.debug("AsyncEvent", slog.Any("ev", ev))
+	d.debug("processAsyncEvent", slog.Any("ev", ev))
 	switch ev.EventType {
 	case whd.CYW43_EV_ESCAN_RESULT:
 		// TODO

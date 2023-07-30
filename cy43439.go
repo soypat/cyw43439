@@ -40,11 +40,6 @@ import (
 	"tinygo.org/x/drivers"
 )
 
-var _debug debug = debugBasic
-
-//var _debug debug = debugBasic | debugTxRx
-//var _debug debug = debugBasic | debugTxRx | debugSpi
-
 var (
 	version    = "0.0.1"
 	driverName = "Infineon cyw43439 Wifi network device driver (cyw43439)"
@@ -143,16 +138,11 @@ type Device struct {
 }
 
 func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device {
-
 	SD := machine.NoPin
 	if sharedDATA && sharedSD != machine.NoPin {
 		SD = sharedSD // Pico W special case.
 	}
-	// Small slog handler implemented on our side:
-	// smallHandler := &handler{w: machine.Serial, level: slog.LevelDebug}
-	handler := slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{Level: slog.LevelDebug})
-	return &Device{
-		log:          slog.New(handler),
+	d := &Device{
 		spi:          spi,
 		cs:           cs,
 		wlRegOn:      wlRegOn,
@@ -160,6 +150,8 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 		sharedSD:     SD,
 		killWatchdog: make(chan bool),
 	}
+	_setDefaultLogger(d)
+	return d
 }
 
 // ref: void cyw43_arch_enable_sta_mode()
@@ -495,7 +487,7 @@ alpset:
 		if err != nil {
 			return err
 		}
-		Debug("chip ID:", chipID)
+		d.debug("chip ID:", slog.Uint64("chipID", uint64(chipID)))
 	}
 
 	if cfg.Firmware == "" {
@@ -1266,16 +1258,4 @@ func (d *Device) wifiAPGetSTAs(macs []byte) (stas uint32, err error) {
 	stas = binary.LittleEndian.Uint32(buf[:])
 	copy(macs[:], buf[4:4+stas*6])
 	return stas, err
-}
-
-func (d *Device) debug(msg string, attrs ...slog.Attr) {
-	d.log.LogAttrs(context.Background(), slog.LevelInfo, msg, attrs...)
-}
-
-func (d *Device) info(msg string, attrs ...slog.Attr) {
-	d.log.LogAttrs(context.Background(), slog.LevelInfo, msg, attrs...)
-}
-
-func (d *Device) logError(msg string, attrs ...slog.Attr) {
-	d.log.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)
 }

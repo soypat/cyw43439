@@ -5,23 +5,44 @@ package cyw43439
 import (
 	"context"
 	"io"
+	"machine"
 
 	"golang.org/x/exp/slog"
 )
 
-type debug uint8
-
 const (
-	debugBasic debug = 1 << iota // show fw version, mac addr, etc
-	debugTxRx                    // show Tx/Rx I/O debug info
-	debugSpi                     // show SPI debug info
-
-	debugOff = 0
-	debugAll = debugBasic | debugTxRx | debugSpi
+	verbose_debug     = true
+	initReadback      = false
+	validateDownloads = false
+	LevelDebugIO      = slog.LevelDebug - 1
 )
 
-func debugging(want debug) bool {
-	return (_debug & want) != 0
+func (d *Device) debugIO(msg string, attrs ...slog.Attr) {
+	d.log.LogAttrs(context.Background(), LevelDebugIO, msg, attrs...)
+}
+
+func (d *Device) debug(msg string, attrs ...slog.Attr) {
+	d.log.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...)
+}
+
+func (d *Device) info(msg string, attrs ...slog.Attr) {
+	d.log.LogAttrs(context.Background(), slog.LevelInfo, msg, attrs...)
+}
+
+func (d *Device) logError(msg string, attrs ...slog.Attr) {
+	d.log.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)
+}
+
+func (d *Device) SetLogger(log *slog.Logger) {
+	d.log = log
+}
+
+func _setDefaultLogger(d *Device) {
+	writer := machine.Serial
+	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{Level: slog.LevelDebug})
+	// Small slog handler implemented on our side:
+	// smallHandler := &handler{w: writer, level: slog.LevelDebug}
+	d.log = slog.New(handler)
 }
 
 var _ slog.Handler = (*handler)(nil)

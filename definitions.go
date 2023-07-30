@@ -2,18 +2,9 @@ package cyw43439
 
 import (
 	"errors"
-	"strconv"
 	"strings"
 
 	"github.com/soypat/cyw43439/whd"
-)
-
-const (
-	verbose_debug     = true
-	initReadback      = false
-	validateDownloads = false
-	// uint32(int32(-1)) = 0xffffffff
-	negative1 uint32 = 0xffffffff
 )
 
 type Config struct {
@@ -44,7 +35,8 @@ func DefaultConfig(enableBT bool) Config {
 }
 
 const (
-	sharedDATA = true
+	sharedDATA        = true
+	negative1  uint32 = 0xffffffff
 )
 
 type Function uint32
@@ -174,71 +166,6 @@ func GetCLM(firmware []byte) []byte {
 func align32(val, align uint32) uint32 { return (val + align - 1) &^ (align - 1) }
 
 var errFirmwareValidationFailed = errors.New("firmware validation failed")
-
-var debugBuf [128]byte
-
-// Debug prints out arguments. Keep in mind it needs primitive Go types to work.
-// This means it will not print out user defined types, even if the underlying type is an integer.
-// Nil arguments are omitted.
-func Debug(a ...any) {
-	if verbose_debug {
-		for i, v := range a {
-			printUi := false
-			printSpace := true
-			var ui uint64
-			switch c := v.(type) {
-			case string:
-				print(c)
-				printSpace = len(c) > 0 && c[len(c)-1] != '='
-			case int:
-				print(c)
-			case uint8:
-				printUi = true
-				ui = uint64(c)
-			case uint16:
-				printUi = true
-				ui = uint64(c)
-			case uint32:
-				printUi = true
-				ui = uint64(c)
-			case bool:
-				print(c)
-			case error:
-				if c == nil {
-					print("err=<nil>")
-				} else {
-					print("err=\"")
-					print(c.Error())
-					print("\"")
-				}
-			case nil:
-				// probably an error type.
-				continue
-			default:
-				print("<unknown type>")
-			}
-			if printUi {
-				debugBuf[0] = '0'
-				debugBuf[1] = 'x'
-				n := len(strconv.AppendUint(debugBuf[2:2], ui, 16))
-				print(string(debugBuf[:2+n]))
-			}
-
-			if i > 0 {
-				lastStr, ok := a[i-1].(string)
-				if ok && len(lastStr) > 0 && lastStr[0] == '=' {
-					printSpace = false
-				}
-			}
-
-			if printSpace {
-				print(" ")
-			}
-		}
-		print("\n")
-	}
-	flushprint()
-}
 
 func getFWVersion(src string) (string, error) {
 	begin := strings.LastIndex(src, "Version: ")
