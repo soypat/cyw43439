@@ -116,12 +116,11 @@ type Device struct {
 	// The following variables are used to store the last SSID joined
 	// first 4 bytes are length of SSID, stored in little endian.
 	lastSSIDJoined [36]byte
-	spibuf         [4]byte
-	spibufrr       [4 + whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE]byte
 	buf            [2048]byte
 	auxbuf         [2048]byte
-
-	params *netlink.ConnectParams
+	spibuf         [4]byte
+	spibufrr       [4 + whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE]byte
+	params         *netlink.ConnectParams
 
 	recvEth  func([]byte) error
 	notifyCb func(netlink.Event)
@@ -206,7 +205,12 @@ func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time
 
 // ref: int cyw43_arch_wifi_connect_bssid_async(const char *ssid, const uint8_t *bssid, const char *pw, uint32_t auth)
 func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
-
+	d.info("wifiConnect",
+		slog.String("SSID", ssid),
+		slog.Int("passlen", len(pass)),
+		slog.Uint64("itf", uint64(d.itfState)),
+		slog.Uint64("wifiJoinState", uint64(d.wifiJoinState)),
+	)
 	d.lock()
 	defer d.unlock()
 
@@ -251,6 +255,7 @@ func (d *Device) wifiLinkStatus() int32 {
 }
 
 func (d *Device) handleAsyncEvent(payload []byte) error {
+	d.debug("handleAsyncEvent", slog.Int("plen", len(payload)))
 	as, err := whd.ParseAsyncEvent(payload)
 	if err != nil {
 		return err
@@ -260,7 +265,7 @@ func (d *Device) handleAsyncEvent(payload []byte) error {
 
 // ref: void cyw43_cb_process_ethernet(void *cb_data, int itf, size_t len, const uint8_t *buf)
 func (d *Device) processEthernet(payload []byte) error {
-
+	d.debug("processEthernet", slog.Int("plen", len(payload)))
 	if d.recvEth != nil {
 		// The handler MUST not hold on to references to payload when
 		// returning, error or not.  Payload is backed by d.buf, and we
@@ -990,12 +995,16 @@ func (d *Device) wifiScan(opts *whd.ScanOptions) error {
 
 // reference: cyw43_ll_wifi_join
 func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint32) (err error) {
+	bssAttr := slog.String("bssid", "<nil>")
+	if bssid != nil {
+		bssAttr = slog.String("bssid", string(bssid[:]))
+	}
 	d.info("wifiJoin",
 		slog.String("ssid", ssid),
 		slog.Int("passlen", len(key)),
-		slog.String("bssid", string(bssid[:])),
 		slog.Uint64("authType", uint64(authType)),
 		slog.Uint64("channel", uint64(channel)),
+		bssAttr,
 	)
 	var buf [128]byte
 	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)

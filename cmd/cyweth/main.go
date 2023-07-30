@@ -23,7 +23,14 @@ func rx(pkt []byte) error {
 }
 
 func main() {
-
+	defer func() {
+		a := recover()
+		if a != nil {
+			fmt.Println("panic:", a)
+		}
+		println("program finished")
+		time.Sleep(time.Second)
+	}()
 	// Delay before sending output to monitor
 	time.Sleep(2 * time.Second)
 

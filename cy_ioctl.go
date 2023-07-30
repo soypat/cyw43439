@@ -731,6 +731,7 @@ var (
 //
 //	reference: sdpcm_process_rx_packet
 func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
+	d.debug("sdpcmProcessRxPacket", slog.Int("len", len(buf)))
 	const badHeader = whd.UNKNOWN_HEADER
 	hdr := whd.DecodeSDPCMHeader(buf)
 	switch {
@@ -762,6 +763,10 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
 		if hdr.Size < totalHeaderSize {
 			return 0, 0, badHeader, err5IgnoreSmallControlPacket
+		}
+		if payloadOffset+whd.IOCTL_HEADER_LEN > uint32(len(buf)) {
+			// TODO(soypat): This error case is not specified in the reference.
+			return 0, 0, badHeader, errors.New("undefined control packet error, size too large")
 		}
 		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
 		id := ioctlHeader.ID()

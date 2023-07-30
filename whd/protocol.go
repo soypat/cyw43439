@@ -215,7 +215,13 @@ func ParseScanResult(buf []byte) (sr EventScanResult, err error) {
 	if len(buf) > int(unsafe.Sizeof(scanresult{})) {
 		return sr, errors.New("buffer to small for scanresult")
 	}
-	scan := (*scanresult)(unsafe.Pointer(&buf[0]))
+
+	println("prep deref")
+	ptr := unsafe.Pointer(&buf[0])
+	if uintptr(ptr)%4 != 0 {
+		return sr, errors.New("buffer not aligned to 4 bytes")
+	}
+	scan := (*scanresult)(ptr)
 	if uint32(scan.bss.IEOffset)+scan.bss.IELength > scan.bss.Length {
 		return sr, errors.New("IE end exceeds bss length")
 	}

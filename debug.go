@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"machine"
+	"time"
 
 	"golang.org/x/exp/slog"
 )
@@ -15,6 +16,7 @@ const (
 	initReadback      = false
 	validateDownloads = false
 	LevelDebugIO      = slog.LevelDebug - 1
+	defaultLevel      = LevelDebugIO
 )
 
 func (d *Device) debugIO(msg string, attrs ...slog.Attr) {
@@ -23,6 +25,7 @@ func (d *Device) debugIO(msg string, attrs ...slog.Attr) {
 
 func (d *Device) debug(msg string, attrs ...slog.Attr) {
 	d.log.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...)
+	time.Sleep(time.Millisecond / 16)
 }
 
 func (d *Device) info(msg string, attrs ...slog.Attr) {
@@ -39,7 +42,7 @@ func (d *Device) SetLogger(log *slog.Logger) {
 
 func _setDefaultLogger(d *Device) {
 	writer := machine.Serial
-	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{Level: slog.LevelDebug})
+	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{Level: defaultLevel})
 	// Small slog handler implemented on our side:
 	// smallHandler := &handler{w: writer, level: slog.LevelDebug}
 	d.log = slog.New(handler)
