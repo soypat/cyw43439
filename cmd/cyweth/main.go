@@ -16,12 +16,6 @@ var (
 	pass string
 )
 
-func rx(pkt []byte) error {
-	println("Rx:", len(pkt))
-	println(hex.Dump(pkt))
-	return nil
-}
-
 func main() {
 	defer func() {
 		a := recover()

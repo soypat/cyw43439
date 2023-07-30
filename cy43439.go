@@ -295,7 +295,11 @@ func (d *Device) processPackets() {
 		case header == whd.ASYNCEVENT_HEADER:
 			d.handleAsyncEvent(payload)
 		case header == whd.DATA_HEADER:
-			d.processEthernet(payload)
+			err = d.processEthernet(payload)
+			if err != nil {
+				d.logError("processPackets:processEthernet", slog.Any("err", err))
+			}
+
 		default:
 			d.logError("got unexpected packet", slog.Uint64("header", uint64(header)))
 		}

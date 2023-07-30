@@ -15,7 +15,7 @@ const (
 	verbose_debug     = true
 	initReadback      = false
 	validateDownloads = false
-	LevelDebugIO      = slog.LevelDebug - 1
+	LevelDebugIO      = slog.LevelDebug
 	defaultLevel      = LevelDebugIO
 )
 

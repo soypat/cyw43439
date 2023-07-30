@@ -13,7 +13,7 @@ import (
 	"golang.org/x/exp/slog"
 )
 
-func (d *Device) DeviceInfo() (driverName, driverVersion, fwVersion string, MAC net.HardwareAddr) {
+func (d *Device) DeviceInfo() (driver, driverVersion, fwVersion string, MAC net.HardwareAddr) {
 	return driverName, version, d.fwVersion, append(net.HardwareAddr{}, d.mac[:]...)
 }
 
