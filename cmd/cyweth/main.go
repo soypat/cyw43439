@@ -30,6 +30,7 @@ func main() {
 		}
 		println("program finished")
 		time.Sleep(time.Second)
+		select {}
 	}()
 	// Delay before sending output to monitor
 	time.Sleep(2 * time.Second)
