@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/soypat/cyw43439/internal/netlink"
+	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
-	"golang.org/x/exp/slog"
 )
 
 func (d *Device) DeviceInfo() (driver, driverVersion, fwVersion string, MAC net.HardwareAddr) {

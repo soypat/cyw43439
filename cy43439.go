@@ -35,8 +35,8 @@ import (
 	"unsafe"
 
 	"github.com/soypat/cyw43439/internal/netlink"
+	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
-	"golang.org/x/exp/slog"
 	"tinygo.org/x/drivers"
 )
 
@@ -999,6 +999,13 @@ func (d *Device) wifiScan(opts *whd.ScanOptions) error {
 
 // reference: cyw43_ll_wifi_join
 func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint32) (err error) {
+	defer func() {
+		if err != nil {
+			d.logError("wifiJoin:failed", slog.Any("err", err))
+		} else {
+			d.info("wifiJoin:success")
+		}
+	}()
 	bssAttr := slog.String("bssid", "<nil>")
 	if bssid != nil {
 		bssAttr = slog.String("bssid", string(bssid[:]))
@@ -1108,8 +1115,7 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		return d.wifiRejoin()
 	}
 	// BSSID is not nil so join the AP.
-	d.debug("set bssid", slog.String("bssid", string(bssid[:])))
-
+	d.debug("set bssid")
 	for i := 0; i < 4+32+20+14; i++ {
 		buf[i] = 0
 	}

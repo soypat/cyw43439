@@ -7,8 +7,8 @@ import (
 	"errors"
 	"machine"
 
+	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
-	"golang.org/x/exp/slog"
 )
 
 // gSPI transaction endianess.

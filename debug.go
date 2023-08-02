@@ -8,7 +8,7 @@ import (
 	"machine"
 	"time"
 
-	"golang.org/x/exp/slog"
+	"github.com/soypat/cyw43439/internal/slog"
 )
 
 const (

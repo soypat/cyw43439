@@ -10,8 +10,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
-	"golang.org/x/exp/slog"
 )
 
 func (d *Device) LED() Pin {
