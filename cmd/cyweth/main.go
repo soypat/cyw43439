@@ -73,7 +73,7 @@ func main() {
 	buf := make([]byte, 28)
 	arp.Put(buf)
 	for {
-		time.Sleep(10 * time.Second)
+		time.Sleep(30 * time.Second)
 		if err := dev.SendEth(buf); err != nil {
 			panic(err.Error())
 		}

@@ -26,6 +26,17 @@ func rx(pkt []byte) error {
 	println("IPv4:", ipHdr.String())
 	println("Rx:", len(pkt))
 	println(hex.Dump(pkt))
+	if ipHdr.Protocol == 17 {
+		// We got an UDP packet and we validate it.
+		udpHdr := eth.DecodeUDPHeader(pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header:])
+		gotChecksum := udpHdr.CalculateChecksumIPv4(&ipHdr, pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header+eth.SizeUDPHeader:])
+		if gotChecksum != udpHdr.Checksum {
+			println("checksum mismatch! Received ", udpHdr.Checksum, " but calculated ", gotChecksum)
+		} else {
+			println("checksum match!")
+		}
+		return nil
+	}
 	if ipHdr.Protocol != 6 {
 		return errNotTCP
 	}
