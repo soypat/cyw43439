@@ -228,15 +228,17 @@ func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMC
 }
 
 // sdpcmPoll reads next packet from WLAN into buf and returns the offset of the
-// payload, length of the payload and the header type. Is cyw43_ll_sdpcm_poll_device in reference.
+// payload, length of the payload and the header type.
+// reference: cyw43_ll_sdpcm_poll_device(cyw43_int_t *self, size_t *len, uint8_t **buf)
 func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
 	d.debug("sdpcmPoll", slog.Int("len", len(buf)))
 	// First check the SDIO interrupt line to see if the WLAN notified us
 	const badHeader = whd.UNKNOWN_HEADER
 	noPacketSuccess := !d.hadSuccesfulPacket
-	if noPacketSuccess && !d.wlRegOn.Get() {
-		return 0, 0, badHeader, errors.New("sdpcmPoll yield fault")
-	}
+	// TODO(soypat): Adding this causes a timeout in the ioctl test "doIoctl time out waiting for data"
+	// if noPacketSuccess && !d.irq.Get() {
+	// 	return 0, 0, badHeader, errors.New("sdpcmPoll yield fault")
+	// }
 	err = d.busSleep(false)
 	if err != nil {
 		return 0, 0, badHeader, err
@@ -308,10 +310,14 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 var errSendSDPCMTimeout = errors.New("sendSDPCMCommon time out waiting for data")
 
 // sendSDPCMCommon Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
+// sendSDPCMCommon requires a buffer with 12 bytes of free space at the beginning,
+// which are used for the SDPCM header. This means the actual data is at 12 bytes offset!
 //
 //	reference: cyw43_sdpcm_send_common
-func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
-	d.debug("sendSDPCMCommon", slog.Int("len", len(w)))
+func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, bufWithFreeFirst12Bytes []byte) error {
+	// Developer beware: bufWithFreeFirst12Bytes is most likely d.buf
+	w := bufWithFreeFirst12Bytes
+	d.debug("sendSDPCMCommon", slog.Int("len", len(w)), slog.String("kind", kind.String()))
 	if kind != whd.CONTROL_HEADER && kind != whd.DATA_HEADER {
 		return errors.New("unexpected SDPCM kind")
 	}
@@ -321,6 +327,8 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, w []byte) error {
 	}
 
 	/*
+		// soypat: careful- this call is using d.buf! When you call d.sdcpmPoll on d.buf
+		// you are overwriting the data in the argument buffer.
 
 		// TODO: I've coded this up, but it is causing a timeout so something is
 		// TODO: wrong or got lost in translation...needs investigation.

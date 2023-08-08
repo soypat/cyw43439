@@ -174,7 +174,7 @@ func (d *Device) GetHardwareAddr() (net.HardwareAddr, error) {
 }
 
 func (d *Device) SendEth(pkt []byte) error {
-	return d.sendEthernet(pkt)
+	return d.SendEthernet(pkt)
 }
 
 func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {

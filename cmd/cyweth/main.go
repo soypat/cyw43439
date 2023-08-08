@@ -3,11 +3,11 @@
 package main
 
 import (
-	"encoding/hex"
 	"fmt"
 	"time"
 
 	"github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 	"github.com/soypat/cyw43439/whd"
 )
 
@@ -58,31 +58,24 @@ func main() {
 	// 3. Interrupts (or polling) for Rx
 
 	// Forever send a pkt
+	mac, _ := dev.GetHardwareAddr()
+	arp := eth.ARPv4Header{
+		HardwareType:   1,
+		ProtoType:      uint16(eth.EtherTypeIPv4),
+		HardwareLength: 6,
+		ProtoLength:    4,
+		Operation:      1,
+		HardwareTarget: [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		ProtoTarget:    [4]byte{192, 168, 0, 44},
+		ProtoSender:    [4]byte{192, 168, 0, 255},
+	}
+	copy(arp.HardwareSender[:], mac[:])
+	buf := make([]byte, 28)
+	arp.Put(buf)
 	for {
-		var pkt []byte
-
-		// TODO encode pkt, for example to broadcast a gratuitous ARP pkt:
-		//
-		//    Eth.Src:  dev.GetHardwareAddr()
-		//    Eth.Dst:  net.ParseMAC("ff:ff:ff:ff:ff:ff") // broadcast
-		//    Eth.Type: ARP (0x0806)
-		//        Arp.HardwareType: 1
-		//        Arp.ProtocolType: IPv4 (0x0800)
-		//        Arp.HardwareSize: 6
-		//        Arp.ProtocolSize: 4
-		//        Arp.Opcode:       request (1)
-		//        Arp.SenderMAC:    dev.GetHardwareAddr()
-		//        Arp.SenderIP:     dev.GetIP()
-		//        Arp.TargetMAC:    net.ParseMAC("ff:ff:ff:ff:ff:ff")
-		//        Arp.TargetIP:     dev.GetIP()
-
-		println("Tx:", len(pkt))
-		println(hex.Dump(pkt))
-
-		if err := dev.SendEth(pkt); err != nil {
+		time.Sleep(10 * time.Second)
+		if err := dev.SendEth(buf); err != nil {
 			panic(err.Error())
 		}
-
-		time.Sleep(time.Second)
 	}
 }

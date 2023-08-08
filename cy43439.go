@@ -228,30 +228,38 @@ func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
 		// For open security we don't need EV_PSK_SUP, so set that flag indicator now
 		d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
 	}
+	d.info("wifiConnect:success",
+		slog.Uint64("itf", uint64(d.itfState)),
+		slog.Uint64("wifiJoinState", uint64(d.wifiJoinState)),
+	)
 	return nil
 }
 
 // ref: int cyw43_wifi_link_status(cyw43_t *self, int itf)
-func (d *Device) wifiLinkStatus() int32 {
-
+func (d *Device) wifiLinkStatus() (linkStat int32) {
 	d.lock()
 	defer d.unlock()
-
-	switch d.itfState {
-	case whd.CYW43_ITF_STA:
-		s := d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK
-		switch s {
-		case whd.WIFI_JOIN_STATE_ACTIVE:
-			return whd.CYW43_LINK_JOIN
-		case whd.WIFI_JOIN_STATE_FAIL:
-			return whd.CYW43_LINK_FAIL
-		case whd.WIFI_JOIN_STATE_NONET:
-			return whd.CYW43_LINK_NONET
-		case whd.WIFI_JOIN_STATE_BADAUTH:
-			return whd.CYW43_LINK_BADAUTH
-		}
+	if d.itfState != whd.CYW43_ITF_STA {
+		return whd.CYW43_LINK_DOWN
 	}
-	return whd.CYW43_LINK_DOWN
+
+	switch d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK {
+	case whd.WIFI_JOIN_STATE_ACTIVE:
+		linkStat = whd.CYW43_LINK_UP // TODO(soypat): This should be LINK_JOIN?
+
+	case whd.WIFI_JOIN_STATE_FAIL:
+		linkStat = whd.CYW43_LINK_FAIL
+
+	case whd.WIFI_JOIN_STATE_NONET:
+		linkStat = whd.CYW43_LINK_NONET
+
+	case whd.WIFI_JOIN_STATE_BADAUTH:
+		linkStat = whd.CYW43_LINK_BADAUTH
+
+	default:
+		linkStat = whd.CYW43_LINK_DOWN
+	}
+	return linkStat
 }
 
 func (d *Device) handleAsyncEvent(payload []byte) error {
@@ -347,15 +355,28 @@ func (d *Device) pollStop() {
 	}
 }
 
-// ref: int cyw43_ll_send_ethernet(cyw43_ll_t *self_in, int itf, size_t len, const void *buf, bool is_pbuf)
-func (d *Device) sendEthernet(buf []byte) error {
+func (d *Device) SendEthernet(buf []byte) error {
+	return d.sendEthernet(whd.CYW43_ITF_STA, buf)
+}
 
+// ref: int cyw43_ll_send_ethernet(cyw43_ll_t *self_in, int itf, size_t len, const void *buf, bool is_pbuf)
+func (d *Device) sendEthernet(itf uint8, buf []byte) error {
+	d.info("sendEthernet", slog.Int("itf", int(itf)), slog.Int("len", len(buf)))
 	d.lock()
 	defer d.unlock()
+	const totalHeader = 2 + whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
+	if len(buf)+totalHeader > len(d.buf) {
+		return errors.New("sendEthernet: packet too large")
+	}
 
-	// TODO finish
+	header := whd.BDCHeader{
+		Flags:  0x20,
+		Flags2: itf,
+	}
+	header.Put(d.buf[whd.SDPCM_HEADER_LEN+2:])
 
-	return nil
+	n := copy(d.buf[totalHeader:], buf)
+	return d.sendSDPCMCommon(whd.DATA_HEADER, d.buf[:n+totalHeader])
 }
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
