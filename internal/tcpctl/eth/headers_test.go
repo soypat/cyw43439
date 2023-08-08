@@ -2,10 +2,12 @@ package eth
 
 import (
 	"encoding/binary"
+	"fmt"
+	"math/rand"
 	"testing"
 )
 
-func TestCRC791(t *testing.T) {
+func TestCRC791_oneshot(t *testing.T) {
 	for _, data := range [][]byte{
 		{0x23},
 		{0x23, 0xfb},
@@ -23,6 +25,71 @@ func TestCRC791(t *testing.T) {
 		}
 	}
 }
+
+func TestCRC791_multifuzz(t *testing.T) {
+	data := []byte("00\x0010")
+	rng := rand.New(rand.NewSource(1))
+	crc := CRC791{}
+	dataDiv := data
+	for len(dataDiv) > 0 {
+		n := rng.Intn(len(dataDiv)) + 1
+		crc.Write(dataDiv[:n])
+		t.Logf("write: %q", dataDiv[:n])
+		dataDiv = dataDiv[n:]
+	}
+	got := crc.Sum16()
+	expect := sum(data)
+	if got != expect {
+		t.Errorf("crc mismatch, got %#04x; expected %#04x", got, expect)
+		panic("CRC791 mismatch for data " + fmt.Sprintf("%q", data))
+	}
+}
+
+func FuzzCRC(f *testing.F) {
+	f.Add([]byte{0x23, 0xfb, 0xde, 0xad, 0xde, 0xad, 0xc0, 0xff, 0xee, 0x00})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		rng := rand.New(rand.NewSource(1))
+		crc := CRC791{}
+		dataDiv := data
+		for len(dataDiv) > 0 {
+			n := rng.Intn(len(dataDiv)) + 1
+			if n == 2 {
+				crc.AddUint16(binary.BigEndian.Uint16(dataDiv[:n]))
+			} else {
+				crc.Write(dataDiv[:n])
+			}
+			dataDiv = dataDiv[n:]
+		}
+		got := crc.Sum16()
+		expect := sum(data)
+		if got != expect {
+			panic("CRC791 mismatch for data " + fmt.Sprintf("%q", data))
+		}
+	})
+}
+
+// func TestCRC791_multi(t *testing.T) {
+// 	rng := rand.New(rand.NewSource(1))
+// 	for i := 0; i < 1000; i++ {
+// 		// Make random Data.
+// 		data := make([]byte, 100+rng.Intn(1000))
+// 		for j := range data {
+// 			data[j] = byte(rng.Intn(256))
+// 		}
+// 		expect := sum(data)
+// 		crc := CRC791{}
+// 		dataDiv := data
+// 		for len(dataDiv) > 0 {
+// 			n := rng.Intn(len(dataDiv)) + 1
+// 			crc.Write(dataDiv[:n])
+// 			dataDiv = dataDiv[n:]
+// 		}
+// 		got := crc.Sum16()
+// 		if got != expect {
+// 			t.Errorf("CRC791 mismatch (%d), got %#04x; expected %#04x", len(data), got, expect)
+// 		}
+// 	}
+// }
 
 // Checksum is the 16-bit one's complement of the one's complement sum of a
 // pseudo header of information from the IP header, the UDP header, and the
