@@ -52,6 +52,16 @@ func (c *CRC791) AddUint16(value uint16) {
 	}
 }
 
+// Add16 adds value to the running checksum interpreted as BigEndian (network order).
+func (c *CRC791) AddUint8(value uint8) {
+	if c.needPad {
+		c.sum += uint32(c.excedent)<<8 | uint32(value)
+	} else {
+		c.excedent = value
+	}
+	c.needPad = !c.needPad
+}
+
 // Sum16 calculates the checksum with the data written to c thus far.
 func (c *CRC791) Sum16() uint16 {
 	sum := c.sum

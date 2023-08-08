@@ -55,6 +55,8 @@ func FuzzCRC(f *testing.F) {
 			n := rng.Intn(len(dataDiv)) + 1
 			if n == 2 {
 				crc.AddUint16(binary.BigEndian.Uint16(dataDiv[:n]))
+			} else if n == 1 {
+				crc.AddUint8(dataDiv[0])
 			} else {
 				crc.Write(dataDiv[:n])
 			}

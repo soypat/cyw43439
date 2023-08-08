@@ -376,12 +376,13 @@ func (udphdr *UDPHeader) Put(buf []byte) {
 func (udphdr *UDPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, payload []byte) uint16 {
 	const sizePseudo = 12
 	crc := CRC791{}
-	var buf [sizePseudo + 8]byte
-	pseudoHeader.PutPseudo(buf[:sizePseudo])
-	udphdr.Put(buf[sizePseudo:])
-	// Zero out checksum field.
-	binary.BigEndian.PutUint16(buf[sizePseudo+6:], 0)
-	crc.Write(buf[:sizePseudo+8])
+	crc.Write(pseudoHeader.Source[:])
+	crc.Write(pseudoHeader.Destination[:])
+	crc.AddUint16(uint16(pseudoHeader.Protocol)) // Pads with 0.
+	crc.AddUint16(pseudoHeader.TotalLength)
+	crc.AddUint16(udphdr.SourcePort)
+	crc.AddUint16(udphdr.DestinationPort)
+	crc.AddUint16(udphdr.Length)
 	crc.Write(payload)
 	return crc.Sum16()
 }
