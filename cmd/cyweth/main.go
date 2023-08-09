@@ -31,10 +31,12 @@ func main() {
 
 	spi, cs, wlreg, irq := cyw43439.PicoWSpi(0)
 	dev := cyw43439.NewDevice(spi, cs, wlreg, irq, irq)
+	if err := dev.Init(cyw43439.DefaultConfig(false)); err != nil {
+		panic(err)
+	}
 
 	// Setup Rx callback
 	dev.RecvEthHandle(rx)
-
 	// Enable device for Wifi station mode
 	country := whd.CountryCode("XX", 0)
 	if err := dev.EnableStaMode(country); err != nil {

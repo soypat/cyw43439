@@ -24,7 +24,6 @@ When CY43439 boots it is in:
 package cyw43439
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -58,7 +57,7 @@ func PicoWSpi(delay uint32) (spi *SPIbb, cs, wlRegOn, irq machine.Pin) {
 		WL_REG_ON = machine.GPIO23
 		DATA_OUT  = machine.GPIO24
 		DATA_IN   = machine.GPIO24
-		IRQ       = machine.GPIO24
+		IRQ       = machine.GPIO24 // AKA WL_HOST_WAKE
 		CLK       = machine.GPIO29
 		CS        = machine.GPIO25
 	)
@@ -107,7 +106,7 @@ type Device struct {
 	sdpcmTxSequence    uint8
 	sdpcmLastBusCredit uint8
 	wlanFlowCtl        uint8
-	// 0 == unitialized, 1 == STA, 2 == AP
+	// 0 == unitialized, 1<<1 == STA, 1<<2 == AP
 	itfState              uint8
 	wifiJoinState         uint32
 	sdpcmRequestedIoctlID uint16
@@ -153,55 +152,85 @@ func NewDevice(spi drivers.SPI, cs, wlRegOn, irq, sharedSD machine.Pin) *Device 
 	return d
 }
 
+// EnableStaMode enables the wifi interface in station mode.
+//
 // ref: void cyw43_arch_enable_sta_mode()
+// ref: void cyw43_wifi_set_up(cyw43_t *self, int itf, bool up, uint32_t country)
 func (d *Device) EnableStaMode(country uint32) error {
-	d.lock()
-	defer d.unlock()
-
-	if err := d.Init(DefaultConfig(false)); err != nil {
-		return err
-	}
-
-	if err := d.wifiOn(country); err != nil {
-		return err
-	}
-
-	if err := d.wifiPM(defaultPM); err != nil {
-		return err
-	}
-
-	d.itfState = whd.CYW43_ITF_STA
-
-	return nil
+	return d.wifiSetup(whd.CYW43_ITF_STA, true, country)
 }
 
 // ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
 func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
-	start := time.Now()
+	deadline := time.Now().Add(timeout)
 
 	if err := d.wifiConnect(ssid, pass, auth); err != nil {
 		return err
 	}
-
-	for {
-		status := d.wifiLinkStatus()
-		switch status {
-		case whd.CYW43_LINK_UP:
-			return nil
-		case whd.CYW43_LINK_NONET:
-			// If there was no network, keep trying
+	status := int32(whd.CYW43_LINK_UP + 1)
+	for status >= 0 && status != whd.CYW43_LINK_UP {
+		newStatus := d.tcpipLinkStatus(whd.CYW43_ITF_STA)
+		if newStatus == whd.CYW43_LINK_NONET {
+			newStatus = whd.CYW43_LINK_JOIN
 			if err := d.wifiConnect(ssid, pass, auth); err != nil {
 				return err
 			}
-		case whd.CYW43_LINK_BADAUTH:
-			return netlink.ErrAuthFailure
 		}
-		if time.Since(start) > timeout {
+		if newStatus != status {
+			d.info("WifiConnectTimeout:status_change", slog.Int("newstatus", int(newStatus)), slog.Int("oldstatus", int(status)))
+			status = newStatus
+		}
+		if time.Until(deadline) <= 0 {
 			return netlink.ErrConnectTimeout
 		}
 		time.Sleep(1 * time.Second)
 	}
+	if status == whd.CYW43_LINK_UP {
+		return nil
+	} else if status == whd.CYW43_LINK_BADAUTH {
+		return netlink.ErrAuthFailure
+	}
+	return netlink.ErrConnectFailed
 }
+
+// ref: cyw43_wifi_set_up(cyw43_t *self, int itf, bool up, uint32_t country)
+func (d *Device) wifiSetup(itf uint8, up bool, country uint32) (err error) {
+	d.lock()
+	defer d.unlock()
+	if !up {
+		if itf == itfAP {
+			err = d.wifiAPSetUp(false)
+		}
+		return err
+	}
+
+	if d.itfState == 0 {
+		if err := d.wifiOn(country); err != nil {
+			return err
+		}
+		if err := d.wifiPM(defaultPM); err != nil {
+			return err
+		}
+	}
+
+	if itf == whd.CYW43_ITF_AP {
+		if err = d.wifiAPInit(); err != nil {
+			return err
+		}
+		if err = d.wifiAPSetUp(true); err != nil {
+			return err
+		}
+	}
+	// itf == AP:cyw43_wifi_ap_init(self);  cyw43_wifi_ap_set_up(self, true);
+	if d.itfState&(1<<itf) == 0 {
+		// Reinitialize tcpip here.
+		d.itfState |= 1 << itf
+	}
+	return nil
+}
+
+func (d *Device) isSTAActive() bool { return (d.itfState>>itfSTA)&1 != 0 }
+func (d *Device) isAPActive() bool  { return (d.itfState>>itfAP)&1 != 0 }
 
 // ref: int cyw43_arch_wifi_connect_bssid_async(const char *ssid, const uint8_t *bssid, const char *pw, uint32_t auth)
 func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
@@ -211,6 +240,9 @@ func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
 		slog.Uint64("itf", uint64(d.itfState)),
 		slog.Uint64("wifiJoinState", uint64(d.wifiJoinState)),
 	)
+	if !d.isSTAActive() {
+		return errors.New("wifiConnect: STA not active")
+	}
 	d.lock()
 	defer d.unlock()
 
@@ -235,17 +267,22 @@ func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
 	return nil
 }
 
+// ref: int cyw43_tcpip_link_status(cyw43_t *self, int itf)
+func (d *Device) tcpipLinkStatus(itf uint8) int32 {
+	// TODO(soypat): add TCPIP netlink status here prob.
+	return d.wifiLinkStatus(itf)
+}
+
+// Returns enum LINK_JOIN, LINK_FAIL, LINK_NONET, LINK_BADAUTH, LINK_DOWN. LINK_DOWN may indicate further failure.
 // ref: int cyw43_wifi_link_status(cyw43_t *self, int itf)
-func (d *Device) wifiLinkStatus() (linkStat int32) {
-	d.lock()
-	defer d.unlock()
-	if d.itfState != whd.CYW43_ITF_STA {
+func (d *Device) wifiLinkStatus(itf uint8) (linkStat int32) {
+	if itf != whd.CYW43_ITF_STA {
 		return whd.CYW43_LINK_DOWN
 	}
 
 	switch d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK {
 	case whd.WIFI_JOIN_STATE_ACTIVE:
-		linkStat = whd.CYW43_LINK_UP // TODO(soypat): This should be LINK_JOIN?
+		linkStat = whd.CYW43_LINK_UP // TODO(soypat): This should be LINK_JOIN.
 
 	case whd.WIFI_JOIN_STATE_FAIL:
 		linkStat = whd.CYW43_LINK_FAIL
@@ -269,114 +306,6 @@ func (d *Device) handleAsyncEvent(payload []byte) error {
 		return err
 	}
 	return d.processAsyncEvent(as)
-}
-
-// ref: void cyw43_cb_process_ethernet(void *cb_data, int itf, size_t len, const uint8_t *buf)
-func (d *Device) processEthernet(payload []byte) error {
-	d.debug("processEthernet", slog.Int("plen", len(payload)))
-	if d.recvEth != nil {
-		// The handler MUST not hold on to references to payload when
-		// returning, error or not.  Payload is backed by d.buf, and we
-		// need d.buf free for the next recv.
-		return d.recvEth(payload)
-	}
-
-	d.debug("RecvEthHandle handler not set, dropping Rx packet")
-	return nil
-}
-
-// ref: void cyw43_ll_process_packets(cyw43_ll_t *self_in)
-func (d *Device) processPackets() {
-	for {
-		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-		d.debug("processPackets:sdpcmPoll",
-			slog.Int("payloadOffset", int(payloadOffset)),
-			slog.Int("plen", int(plen)),
-			slog.Uint64("header", uint64(header)),
-			slog.Any("err", err),
-		)
-		payload := d.buf[payloadOffset : payloadOffset+plen]
-		switch {
-		case err != nil:
-			// no packet or flow control
-			return
-		case header == whd.ASYNCEVENT_HEADER:
-			d.handleAsyncEvent(payload)
-		case header == whd.DATA_HEADER:
-			err = d.processEthernet(payload)
-			if err != nil {
-				d.logError("processPackets:processEthernet", slog.Any("err", err))
-			}
-
-		default:
-			d.logError("got unexpected packet", slog.Uint64("header", uint64(header)))
-		}
-	}
-}
-
-// ref: bool cyw43_ll_has_work(cyw43_ll_t *self_in)
-func (d *Device) hasWork() bool {
-	return d.irq.Get()
-}
-
-// ref: void cyw43_poll_func(void)
-func (d *Device) poll() {
-
-	d.lock()
-	defer d.unlock()
-
-	if d.hasWork() {
-		d.processPackets()
-	}
-	// TODO check for other pending work (pend_rejoin, etc)
-}
-
-// ref: void cyw43_schedule_internal_poll_dispatch(__unused void (*func)(void))
-func (d *Device) pollStart() {
-	if d.pollCancel != nil {
-		return
-	}
-	d.info("STARTING POLLING")
-	ctx, cancel := context.WithCancel(context.Background())
-	d.pollCancel = cancel
-	go func() {
-		for ctx.Err() == nil {
-			d.poll()
-			time.Sleep(5 * time.Millisecond)
-		}
-		d.pollCancel = nil
-	}()
-}
-
-func (d *Device) pollStop() {
-	if d.pollCancel != nil {
-		d.info("CANCEL POLLING")
-		d.pollCancel()
-	}
-}
-
-func (d *Device) SendEthernet(buf []byte) error {
-	return d.sendEthernet(whd.CYW43_ITF_STA, buf)
-}
-
-// ref: int cyw43_ll_send_ethernet(cyw43_ll_t *self_in, int itf, size_t len, const void *buf, bool is_pbuf)
-func (d *Device) sendEthernet(itf uint8, buf []byte) error {
-	d.info("sendEthernet", slog.Int("itf", int(itf)), slog.Int("len", len(buf)))
-	d.lock()
-	defer d.unlock()
-	const totalHeader = 2 + whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
-	if len(buf)+totalHeader > len(d.buf) {
-		return errors.New("sendEthernet: packet too large")
-	}
-
-	header := whd.BDCHeader{
-		Flags:  0x20,
-		Flags2: itf,
-	}
-	header.Put(d.buf[whd.SDPCM_HEADER_LEN+2:])
-
-	n := copy(d.buf[totalHeader:], buf)
-	return d.sendSDPCMCommon(whd.DATA_HEADER, d.buf[:n+totalHeader])
 }
 
 // reference: int cyw43_ll_bus_init(cyw43_ll_t *self_in, const uint8_t *mac)
@@ -673,7 +602,7 @@ f2ready:
 	}
 
 	// Enable irq and start polling it
-	d.irq.Configure(machine.PinConfig{Mode: machine.PinInput})
+	d.initIRQ()
 	d.pollStart()
 
 	return nil
@@ -744,27 +673,6 @@ const (
 	itfSTA
 	itfAP
 )
-
-func (d *Device) wifiSetup(itf uint8, up bool, country uint32) (err error) {
-	if !up {
-		if itf == itfAP {
-			return d.wifiAPSetUp(false)
-		}
-		return nil
-	}
-	switch itf {
-	case itfNone:
-		err = d.wifiOn(country)
-		if err != nil {
-			return err
-		}
-		err = d.wifiPM(defaultPM)
-
-	case itfAP:
-		err = d.wifiAPInit()
-	}
-	return err
-}
 
 var defaultPM = pmValue(whd.CYW43_PM2_POWERSAVE_MODE, 200, 1, 1, 10)
 
@@ -1027,17 +935,21 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 			d.info("wifiJoin:success")
 		}
 	}()
-	bssAttr := slog.String("bssid", "<nil>")
-	if bssid != nil {
-		bssAttr = slog.String("bssid", string(bssid[:]))
+	{
+		// Logging.
+		bssAttr := slog.String("bssid", "<nil>")
+		if bssid != nil {
+			bssAttr = slog.String("bssid", string(bssid[:]))
+		}
+		d.info("wifiJoin",
+			slog.String("ssid", ssid),
+			slog.Int("passlen", len(key)),
+			slog.Uint64("authType", uint64(authType)),
+			slog.Uint64("channel", uint64(channel)),
+			bssAttr,
+		)
 	}
-	d.info("wifiJoin",
-		slog.String("ssid", ssid),
-		slog.Int("passlen", len(key)),
-		slog.Uint64("authType", uint64(authType)),
-		slog.Uint64("channel", uint64(channel)),
-		bssAttr,
-	)
+
 	var buf [128]byte
 	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
 	if err != nil {
@@ -1049,6 +961,8 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		wpa_auth = whd.CYW43_WPA2_AUTH_PSK
 	} else if authType == whd.CYW43_AUTH_WPA_TKIP_PSK {
 		wpa_auth = whd.CYW43_WPA_AUTH_PSK
+	} else if authType == whd.CYW43_AUTH_OPEN {
+		// wpa_auth = 0
 	} else {
 		return errors.New("unsupported auth type")
 	}
@@ -1077,7 +991,7 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		return
 	}
 
-	if authType != 0 {
+	if authType != whd.CYW43_AUTH_OPEN {
 		// wwd_wifi_set_passphrase
 		binary.LittleEndian.PutUint16(buf[:], uint16(len(key)))
 		binary.LittleEndian.PutUint16(buf[2:], 1)
@@ -1130,11 +1044,13 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 
 	binary.LittleEndian.PutUint32(d.lastSSIDJoined[:], uint32(len(ssid)))
 	copy(d.lastSSIDJoined[4:], ssid)
+
 	if bssid == nil {
 		// Join SSID. Rejoin uses d.lastSSIDJoined.
 		d.debug("join SSID")
 		return d.wifiRejoin()
 	}
+
 	// BSSID is not nil so join the AP.
 	d.debug("set bssid")
 	for i := 0; i < 4+32+20+14; i++ {
@@ -1147,6 +1063,7 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	binary.LittleEndian.PutUint32(buf[44:], negative1) // Active time.
 	binary.LittleEndian.PutUint32(buf[48:], negative1) // Passive time.
 	binary.LittleEndian.PutUint32(buf[52:], negative1) // Home time.
+	// Assoc params.
 	const (
 		WL_CHANSPEC_BW_20       = 0x1000
 		WL_CHANSPEC_CTL_SB_LLL  = 0x0000
@@ -1154,9 +1071,11 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		WL_CHANSPEC_BAND_2G     = 0x0000
 	)
 	copy(buf[4+32+20:], bssid[:6])
-	binary.LittleEndian.PutUint32(buf[4+32+20+8:], 1) // Channel spec number.
-	chspec := uint16(channel) | WL_CHANSPEC_BW_20 | WL_CHANSPEC_CTL_SB_NONE | WL_CHANSPEC_BAND_2G
-	binary.LittleEndian.PutUint16(buf[4+32+20+12:], chspec)
+	if channel != whd.CYW43_CHANNEL_NONE {
+		binary.LittleEndian.PutUint32(buf[4+32+20+8:], 1) // Channel spec number.
+		chspec := uint16(channel) | WL_CHANSPEC_BW_20 | WL_CHANSPEC_CTL_SB_NONE | WL_CHANSPEC_BAND_2G
+		binary.LittleEndian.PutUint16(buf[4+32+20+12:], chspec) // Channel spec list.
+	}
 
 	// Join the AP.
 	d.debug("join AP")

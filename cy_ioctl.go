@@ -281,6 +281,10 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 		return 0, 0, badHeader, errors.New("sdpcmPoll: no packet")
 	}
 	bytesPending := status.F2PacketLength()
+	if bytesPending > uint16(len(buf)) {
+		d.logError("bytes pending too large", slog.Uint64("bytesPending", uint64(bytesPending)), slog.Int("len(buf)", len(buf)))
+		return 0, 0, badHeader, errors.New("INVALID bytes pending")
+	}
 	if bytesPending == 0 || bytesPending > linkMTU-gspiPacketOverhead || status.IsUnderflow() {
 		d.logError("SPI invalid bytes pending", slog.Uint64("bytesPending", uint64(bytesPending)))
 		d.Write8(FuncBackplane, whd.SPI_FRAME_CONTROL, 1)
@@ -768,6 +772,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 	headerType := hdr.Type()
 	switch headerType {
 	case whd.CONTROL_HEADER:
+		d.debug("sdpcmProcessRxPacket:CONTROL_HEADER")
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
 		if hdr.Size < totalHeaderSize {
 			return 0, 0, badHeader, err5IgnoreSmallControlPacket
@@ -786,6 +791,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		d.debug("sdpcmProcessRxPacket:CONTROL_HEADER", slog.Int("id", int(id)), slog.Int("len", int(plen)))
 
 	case whd.DATA_HEADER:
+		d.debug("sdpcmProcessRxPacket:DATA_HEADER")
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
 			return 0, 0, badHeader, err7IgnoreSmallDataPacket
@@ -797,6 +803,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		plen = (uint32(hdr.Size) - payloadOffset) | uint32(itf)<<31
 
 	case whd.ASYNCEVENT_HEADER:
+		d.debug("sdpcmProcessRxPacket:ASYNC_HEADER")
 		const totalHeaderSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 		if hdr.Size <= totalHeaderSize {
 			return 0, 0, badHeader, err8IgnoreTooSmallAsyncPacket
