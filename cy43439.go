@@ -445,8 +445,8 @@ f2ready:
 	}
 
 	// Enable irq and start polling it
-	d.initIRQ()
-	d.pollStart()
+	// d.initIRQ()
+	// d.pollStart()
 
 	return nil
 }

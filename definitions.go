@@ -35,6 +35,7 @@ func DefaultConfig(enableBT bool) Config {
 }
 
 const (
+	// The CYW43439 on the Raspberry Pi Pico shares IRQ and both SPI MISO/MOSI on same line.
 	sharedDATA        = true
 	negative1  uint32 = 0xffffffff
 )

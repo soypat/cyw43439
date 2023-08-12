@@ -74,10 +74,18 @@ func main() {
 	copy(arp.HardwareSender[:], mac[:])
 	buf := make([]byte, 28)
 	arp.Put(buf)
+	var lastPoll, lastSent time.Time
 	for {
-		time.Sleep(30 * time.Second)
-		if err := dev.SendEth(buf); err != nil {
-			panic(err.Error())
+		if time.Since(lastPoll) > 1*time.Second {
+			dev.Poll()
+			lastPoll = time.Now()
 		}
+		if time.Since(lastSent) > 30*time.Second {
+			lastSent = time.Now()
+			if err := dev.SendEth(buf); err != nil {
+				println("error sending ethernet packet:", err.Error())
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

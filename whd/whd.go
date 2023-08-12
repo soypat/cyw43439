@@ -195,6 +195,8 @@ const (
 	SDPCM_SET = 2
 )
 
+//go:generate stringer -type=SDPCMCommand -output=sdpcm_command_string.go -trimprefix=WLC_
+
 type SDPCMCommand uint32
 
 const (

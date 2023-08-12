@@ -30,10 +30,11 @@ func rx(pkt []byte) error {
 		// We got an UDP packet and we validate it.
 		udpHdr := eth.DecodeUDPHeader(pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header:])
 		gotChecksum := udpHdr.CalculateChecksumIPv4(&ipHdr, pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header+eth.SizeUDPHeader:])
-		if gotChecksum != udpHdr.Checksum {
-			println("checksum mismatch! Received ", udpHdr.Checksum, " but calculated ", gotChecksum)
-		} else {
+		println("UDP:", udpHdr.String())
+		if gotChecksum == 0 || gotChecksum == udpHdr.Checksum {
 			println("checksum match!")
+		} else {
+			println("checksum mismatch! Received ", udpHdr.Checksum, " but calculated ", gotChecksum)
 		}
 		return nil
 	}

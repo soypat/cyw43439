@@ -105,7 +105,7 @@ func (d *Device) WriteIOVarN(VAR string, iface whd.IoctlInterface, src []byte) e
 
 // reference: cyw43_set_ioctl_u32 (uint32_t cmd, uint32_t val, uint32_t iface)
 func (d *Device) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val uint32) error {
-	d.debug("SetIoctl32", slog.String("iface", iface.String()), slog.Uint64("cmd", uint64(cmd)), slog.Uint64("val", uint64(val)))
+	d.debug("SetIoctl32", slog.String("iface", iface.String()), slog.String("cmd", cmd.String()), slog.Uint64("val", uint64(val)))
 	var buf [4]byte
 	binary.LittleEndian.PutUint32(buf[:], val)
 	return d.doIoctl(whd.SDPCM_SET, iface, cmd, buf[:])
@@ -113,7 +113,7 @@ func (d *Device) SetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand, val 
 
 // reference: cyw43_get_ioctl_u32
 func (d *Device) GetIoctl32(iface whd.IoctlInterface, cmd whd.SDPCMCommand) (uint32, error) {
-	d.debug("GetIoctl32", slog.String("iface", iface.String()), slog.Uint64("cmd", uint64(cmd)))
+	d.debug("GetIoctl32", slog.String("iface", iface.String()), slog.String("cmd", cmd.String()))
 	var buf [4]byte
 	err := d.doIoctl(whd.SDPCM_GET, iface, cmd, buf[:])
 	return binary.LittleEndian.Uint32(buf[:4]), err

@@ -201,23 +201,17 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		}
 	}
 
-	// Set infrastructure mode.
-	d.debug("setting infra=1")
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_INFRA, 1)
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_INFRA, 1) // Set infrastructure mode.
 	if err != nil {
 		return err
 	}
 
-	// Set auth type (open system).
-	d.debug("setting auth=0")
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_AUTH, 0)
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_AUTH, 0) // Set auth type (open system).
 	if err != nil {
 		return err
 	}
 
-	// Set WPA auth mode.
-	d.debug("set wpauth", slog.Uint64("auth", uint64(wpa_auth)))
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WPA_AUTH, wpa_auth)
+	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WPA_AUTH, wpa_auth) // Set WPA auth mode.
 	if err != nil {
 		return err
 	}
@@ -295,10 +289,12 @@ func (d *Device) wifiOn(country uint32) error {
 		binary.LittleEndian.PutUint32(buf[12:16], country>>16)
 	}
 	binary.LittleEndian.PutUint32(buf[16:20], country&0xff_ff)
+
 	err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:20])
 	if err != nil {
 		return err
 	}
+
 	time.Sleep(20 * time.Millisecond)
 
 	// Set antenna to chip antenna

@@ -1,10 +1,8 @@
 package cyw43439
 
 import (
-	"context"
 	"errors"
 	"machine"
-	"time"
 
 	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
@@ -39,21 +37,21 @@ func (d *Device) irqHandler(pin machine.Pin) {
 }
 
 // ref: void cyw43_schedule_internal_poll_dispatch(__unused void (*func)(void))
-func (d *Device) pollStart() {
-	if d.pollCancel != nil {
-		return
-	}
-	d.info("STARTING POLLING")
-	ctx, cancel := context.WithCancel(context.Background())
-	d.pollCancel = cancel
-	go func() {
-		for ctx.Err() == nil {
-			d.poll()
-			time.Sleep(5 * time.Millisecond)
-		}
-		d.pollCancel = nil
-	}()
-}
+// func (d *Device) pollStart() {
+// 	if d.pollCancel != nil {
+// 		return
+// 	}
+// 	d.info("STARTING POLLING")
+// 	ctx, cancel := context.WithCancel(context.Background())
+// 	d.pollCancel = cancel
+// 	go func() {
+// 		for ctx.Err() == nil {
+// 			d.poll()
+// 			time.Sleep(5 * time.Millisecond)
+// 		}
+// 		d.pollCancel = nil
+// 	}()
+// }
 
 // ref: void cyw43_cb_process_ethernet(void *cb_data, int itf, size_t len, const uint8_t *buf)
 func (d *Device) processEthernet(payload []byte) error {
@@ -93,28 +91,28 @@ func (d *Device) processPackets() {
 			}
 
 		default:
-			d.logError("got unexpected packet", slog.Uint64("header", uint64(header)))
+			d.logError("processPackets:unexpectedHeader", slog.Uint64("header", uint64(header)))
 		}
 	}
 }
 
 // ref: bool cyw43_ll_has_work(cyw43_ll_t *self_in)
 func (d *Device) hasWork() bool {
+	if sharedDATA {
+		d.irq.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
+	}
 	return d.irq.Get()
 }
 
 // ref: void cyw43_poll_func(void)
-func (d *Device) poll() {
+func (d *Device) Poll() {
 	d.lock()
 	defer d.unlock()
-
-	if d.hasWork() {
+	hasWork := d.hasWork()
+	d.info("Poll", slog.Bool("hadWork", hasWork))
+	if hasWork {
 		d.processPackets()
-	} else {
-		time.Sleep(time.Second)
 	}
-	d.reenableIRQ()
-	// TODO check for other pending work (pend_rejoin, etc)
 }
 
 func (d *Device) pollStop() {

@@ -34,6 +34,7 @@ package eth
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net"
 	"strconv"
 )
@@ -227,8 +228,8 @@ const (
 // AssertType returns the Size or EtherType field of the Ethernet frame as EtherType.
 func (e EthernetHeader) AssertType() EtherType { return EtherType(e.SizeOrEtherType) }
 
-// DecodeEthernetHeader decodes an ethernet frame from buf. It does not
-// handle 802.1Q VLAN situation where at least 4 more bytes must be decoded from wire.
+// DecodeEthernetHeader decodes an ethernet frame from the first 14 bytes of buf.
+// It does not handle 802.1Q VLAN situation where at least 4 more bytes must be decoded from wire.
 func DecodeEthernetHeader(b []byte) (ethdr EthernetHeader) {
 	_ = b[13]
 	copy(ethdr.Destination[0:], b[0:])
@@ -379,12 +380,16 @@ func (udphdr *UDPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, payload
 	crc.Write(pseudoHeader.Source[:])
 	crc.Write(pseudoHeader.Destination[:])
 	crc.AddUint16(uint16(pseudoHeader.Protocol)) // Pads with 0.
-	crc.AddUint16(pseudoHeader.TotalLength)
+	crc.AddUint16(udphdr.Length)                 // UDP length appears twice: https://stackoverflow.com/questions/45908909/my-udp-checksum-calculation-gives-wrong-results-every-time
 	crc.AddUint16(udphdr.SourcePort)
 	crc.AddUint16(udphdr.DestinationPort)
 	crc.AddUint16(udphdr.Length)
 	crc.Write(payload)
 	return crc.Sum16()
+}
+
+func (udphdr *UDPHeader) String() string {
+	return fmt.Sprintf("%d->%d len=%d", udphdr.SourcePort, udphdr.DestinationPort, udphdr.Length)
 }
 
 // Put marshals the ARP header onto buf. buf needs to be 28 bytes in length or Put panics.
