@@ -147,3 +147,12 @@ func (d *Device) sendEthernet(itf uint8, buf []byte) error {
 	n := copy(d.buf[totalHeader:], buf)
 	return d.sendSDPCMCommon(whd.DATA_HEADER, d.buf[:n+totalHeader])
 }
+
+func (d *Device) handleAsyncEvent(payload []byte) error {
+	d.debug("handleAsyncEvent", slog.Int("plen", len(payload)))
+	as, err := whd.ParseAsyncEvent(payload)
+	if err != nil {
+		return err
+	}
+	return d.processAsyncEvent(as)
+}

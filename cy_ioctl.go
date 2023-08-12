@@ -151,7 +151,8 @@ func (d *Device) ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, w []byte)
 }
 
 // doIoctl uses Device's primary buffer to perform ioctl call. Use [Dev.offbuff] for
-// allocations that are passed into doIoctl.
+// allocations that are passed into doIoctl. Does not require offsetting buf for
+// the SDPCM header.
 //
 //	reference: cyw43_do_ioctl(uint32_t kind, uint32_t cmd, size_t len, uint8_t *buf, uint32_t iface)
 func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCommand, buf []byte) error {
