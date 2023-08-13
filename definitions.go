@@ -124,7 +124,7 @@ func (s Status) F3RxReady() bool { return s&0x40 != 0 }
 // HostCommandDataError TODO document.
 func (s Status) HostCommandDataError() bool { return s&0x80 != 0 }
 
-// GSPIPacketAvailable notifies there is a packet available over
+// GSPIPacketAvailable notifies there is a packet available over gSPI.
 func (s Status) GSPIPacketAvailable() bool { return s&0x0100 != 0 }
 
 // F2PacketAvailable returns true if Packet is available/ready in F2 TX FIFO.

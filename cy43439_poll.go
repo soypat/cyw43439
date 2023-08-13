@@ -3,6 +3,7 @@ package cyw43439
 import (
 	"errors"
 	"machine"
+	"time"
 
 	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
@@ -68,7 +69,7 @@ func (d *Device) processEthernet(payload []byte) error {
 }
 
 // ref: void cyw43_ll_process_packets(cyw43_ll_t *self_in)
-func (d *Device) processPackets() {
+func (d *Device) processPackets() (gotPackets bool) {
 	for {
 		payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
 		d.debug("processPackets:sdpcmPoll",
@@ -80,11 +81,13 @@ func (d *Device) processPackets() {
 		payload := d.buf[payloadOffset : payloadOffset+plen]
 		switch {
 		case err != nil:
-			// no packet or flow control
-			return
+			d.logError("processPackets:sdpcmPoll", slog.String("err", err.Error()))
+			return gotPackets
 		case header == whd.ASYNCEVENT_HEADER:
+			gotPackets = true
 			d.handleAsyncEvent(payload)
 		case header == whd.DATA_HEADER:
+			gotPackets = true
 			err = d.processEthernet(payload)
 			if err != nil {
 				d.logError("processPackets:processEthernet", slog.Any("err", err))
@@ -104,27 +107,42 @@ func (d *Device) hasWork() bool {
 	return d.irq.Get()
 }
 
+// PollUntilNextOrDeadline blocks until the next packet is received or the
+// deadline is reached, whichever comes first
+//
+// ref: cyw43_arch_wait_for_work_until
+func (d *Device) PollUntilNextOrDeadline(deadline time.Time) (gotPacket bool) {
+	d.info("PollUntil", slog.Time("deadline", deadline))
+	d.lock()
+	defer d.unlock()
+	for !gotPacket && time.Until(deadline) > 0 {
+		if !d.hasWork() {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		gotPacket = d.processPackets()
+	}
+	return gotPacket
+}
+
 // ref: void cyw43_poll_func(void)
-func (d *Device) Poll() {
+func (d *Device) Poll() (gotPacket bool) {
 	d.lock()
 	defer d.unlock()
 	hasWork := d.hasWork()
 	d.info("Poll", slog.Bool("hadWork", hasWork))
 	if hasWork {
-		d.processPackets()
+		gotPacket = d.processPackets()
 	}
+	return gotPacket
 }
 
-func (d *Device) pollStop() {
-	if d.pollCancel != nil {
-		d.info("CANCEL POLLING")
-		d.pollCancel()
-	}
-}
-
-func (d *Device) SendEthernet(buf []byte) error {
-	return d.sendEthernet(whd.CYW43_ITF_STA, buf)
-}
+// func (d *Device) pollStop() {
+// 	if d.pollCancel != nil {
+// 		d.info("CANCEL POLLING")
+// 		d.pollCancel()
+// 	}
+// }
 
 // ref: int cyw43_ll_send_ethernet(cyw43_ll_t *self_in, int itf, size_t len, const void *buf, bool is_pbuf)
 func (d *Device) sendEthernet(itf uint8, buf []byte) error {
@@ -153,4 +171,77 @@ func (d *Device) handleAsyncEvent(payload []byte) error {
 		return err
 	}
 	return d.processAsyncEvent(as)
+}
+
+// ref: void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev)
+func (d *Device) processAsyncEvent(ev whd.AsyncEvent) error {
+	d.debug("processAsyncEvent", slog.String("EventType", ev.EventType.String()), slog.Uint64("status", uint64(ev.Status)), slog.Uint64("reason", uint64(ev.Reason)))
+	switch ev.EventType {
+	case whd.CYW43_EV_ESCAN_RESULT:
+		// TODO
+	case whd.CYW43_EV_DISASSOC:
+		d.wifiJoinState = whd.WIFI_JOIN_STATE_DOWN
+		d.notifyDown()
+	case whd.CYW43_EV_PRUNE:
+		// TODO
+	case whd.CYW43_EV_SET_SSID:
+		switch {
+		case ev.Status == 0:
+			// Success setting SSID
+		case ev.Status == 3 && ev.Reason == 0:
+			// No matching SSID found (could be out of range, or down)
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_NONET
+		default:
+			// Other failure setting SSID
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_FAIL
+		}
+	case whd.CYW43_EV_AUTH:
+		switch ev.Status {
+		case 0:
+			if (d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK) ==
+				whd.WIFI_JOIN_STATE_BADAUTH {
+				// A good-auth follows a bad-auth, so change
+				// the join state back to active.
+				d.wifiJoinState = (d.wifiJoinState & ^uint32(whd.WIFI_JOIN_STATE_KIND_MASK)) |
+					whd.WIFI_JOIN_STATE_ACTIVE
+			}
+			d.wifiJoinState |= whd.WIFI_JOIN_STATE_AUTH
+		case 6:
+			// Unsolicited auth packet, ignore it
+		default:
+			// Cannot authenticate
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
+		}
+	case whd.CYW43_EV_DEAUTH_IND:
+		// TODO
+	case whd.CYW43_EV_LINK:
+		if ev.Status == 0 {
+			if (ev.Flags & 1) != 0 {
+				// Link is UP
+				d.wifiJoinState |= whd.WIFI_JOIN_STATE_LINK
+				// TODO missing some stuff
+			}
+		}
+	case whd.CYW43_EV_PSK_SUP:
+		switch {
+		case ev.Status == 6:
+			// WLC_SUP_KEYED
+			d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
+		case (ev.Status == 4 || ev.Status == 8 || ev.Status == 10) && ev.Reason == 15:
+			// Timeout waiting for key exchange M1/M3/G1
+			// Probably at edge of the cell, retry
+			// TODO
+		default:
+			// PSK_SUP failure
+			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
+		}
+	}
+
+	if d.wifiJoinState == whd.WIFI_JOIN_STATE_ALL {
+		// STA connected
+		d.wifiJoinState = whd.WIFI_JOIN_STATE_ACTIVE
+		// TODO notify link UP
+	}
+
+	return nil
 }

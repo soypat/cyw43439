@@ -28,7 +28,10 @@ func main() {
 	}()
 	// Delay before sending output to monitor
 	time.Sleep(2 * time.Second)
-
+	if len(pass) < 8 {
+		println("WARNING: password is less than 8 characters long.")
+		time.Sleep(5 * time.Second)
+	}
 	spi, cs, wlreg, irq := cyw43439.PicoWSpi(0)
 	dev := cyw43439.NewDevice(spi, cs, wlreg, irq, irq)
 	if err := dev.Init(cyw43439.DefaultConfig(false)); err != nil {

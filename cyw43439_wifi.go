@@ -12,6 +12,7 @@ import (
 )
 
 // ref: int cyw43_arch_wifi_connect_timeout_ms(const char *ssid, const char *pw, uint32_t auth, uint32_t timeout_ms)
+// ref: cyw43_arch_wifi_connect_bssid_until
 func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time.Duration) error {
 	d.info("WifiConnectTimeout",
 		slog.String("SSID", ssid),
@@ -40,7 +41,7 @@ func (d *Device) WifiConnectTimeout(ssid, pass string, auth uint32, timeout time
 		if time.Until(deadline) <= 0 {
 			return netlink.ErrConnectTimeout
 		}
-		time.Sleep(1 * time.Second)
+		d.PollUntilNextOrDeadline(deadline)
 	}
 	if status == whd.CYW43_LINK_UP {
 		return nil
@@ -55,6 +56,11 @@ func (d *Device) isAPActive() bool  { return (d.itfState>>whd.CYW43_ITF_AP)&1 !=
 
 // ref: int cyw43_arch_wifi_connect_bssid_async(const char *ssid, const uint8_t *bssid, const char *pw, uint32_t auth)
 func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
+	if !d.isSTAActive() {
+		return errors.New("wifiConnect: STA not active")
+	}
+	d.lock()
+	defer d.unlock()
 	d.info("wifiConnect",
 		slog.String("SSID", ssid),
 		slog.Int("passlen", len(pass)),
@@ -62,13 +68,6 @@ func (d *Device) wifiConnect(ssid, pass string, auth uint32) error {
 		slog.Uint64("itf", uint64(d.itfState)),
 		slog.Uint64("wifiJoinState", uint64(d.wifiJoinState)),
 	)
-
-	if !d.isSTAActive() {
-		return errors.New("wifiConnect: STA not active")
-	}
-	d.lock()
-	defer d.unlock()
-
 	if pass == "" {
 		auth = whd.CYW43_AUTH_OPEN
 	}
@@ -102,24 +101,18 @@ func (d *Device) wifiLinkStatus(itf uint8) (linkStat int32) {
 	if itf != whd.CYW43_ITF_STA {
 		return whd.CYW43_LINK_DOWN
 	}
-
 	switch d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK {
 	case whd.WIFI_JOIN_STATE_ACTIVE:
-		linkStat = whd.CYW43_LINK_UP // TODO(soypat): This should be LINK_JOIN.
-
+		return whd.CYW43_LINK_JOIN
 	case whd.WIFI_JOIN_STATE_FAIL:
-		linkStat = whd.CYW43_LINK_FAIL
-
+		return whd.CYW43_LINK_FAIL
 	case whd.WIFI_JOIN_STATE_NONET:
-		linkStat = whd.CYW43_LINK_NONET
-
+		return whd.CYW43_LINK_NONET
 	case whd.WIFI_JOIN_STATE_BADAUTH:
-		linkStat = whd.CYW43_LINK_BADAUTH
-
+		return whd.CYW43_LINK_BADAUTH
 	default:
-		linkStat = whd.CYW43_LINK_DOWN
+		return whd.CYW43_LINK_DOWN
 	}
-	return linkStat
 }
 
 // reference: cyw43_ll_wifi_join
@@ -194,7 +187,6 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		copy(buf[4:], key)
 		time.Sleep(2 * time.Millisecond) // Delay required to allow radio firmware to be ready to receive PMK and avoid intermittent failure
 
-		d.debug("setting wsec_pmk")
 		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC_PMK, buf[:68])
 		if err != nil {
 			return err
@@ -237,12 +229,12 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 
 	if bssid == nil {
 		// Join SSID. Rejoin uses d.lastSSIDJoined.
-		d.debug("join SSID")
+		d.debug("wifiJoin:wifiRejoin")
 		return d.wifiRejoin()
 	}
 
 	// BSSID is not nil so join the AP.
-	d.debug("set bssid")
+	d.debug("wifiJoin:setbssid")
 	for i := 0; i < 4+32+20+14; i++ {
 		buf[i] = 0
 	}
@@ -268,7 +260,7 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	}
 
 	// Join the AP.
-	d.debug("join AP")
+	d.debug("wifiJoin:joinSTA")
 	return d.WriteIOVarN("join", whd.WWD_STA_INTERFACE, buf[:4+32+20+14])
 }
 

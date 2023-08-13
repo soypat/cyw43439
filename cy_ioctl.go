@@ -183,6 +183,7 @@ func (d *Device) doIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMCom
 		payload := d.buf[payloadOffset : payloadOffset+plen]
 		switch {
 		case err != nil:
+			d.logError("doIoctl:sdpcmPoll", slog.String("err", err.Error()))
 			break
 		case header == whd.CONTROL_HEADER:
 			n := copy(buf, payload)
@@ -224,7 +225,7 @@ func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMC
 	}
 	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
 	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
-	d.debug("sendIoctl", slog.Uint64("hdr.Cmd", uint64(header.Cmd)), slog.Uint64("hdr.Len", uint64(header.Len)), slog.Uint64("hdr.Flags", uint64(header.Flags)), slog.Uint64("hdr.Status", uint64(header.Status)))
+	d.debug("sendIoctl", slog.String("hdr.Cmd", header.Cmd.String()), slog.Uint64("hdr.Len", uint64(header.Len)), slog.Uint64("hdr.Flags", uint64(header.Flags)), slog.Uint64("hdr.Status", uint64(header.Status)))
 	return d.sendSDPCMCommon(whd.CONTROL_HEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
 }
 
@@ -237,9 +238,9 @@ func (d *Device) sdpcmPoll(buf []byte) (payloadOffset, plen uint32, header whd.S
 	const badHeader = whd.UNKNOWN_HEADER
 	noPacketSuccess := !d.hadSuccesfulPacket
 	// TODO(soypat): Adding this causes a timeout in the ioctl test "doIoctl time out waiting for data"
-	// if noPacketSuccess && !d.irq.Get() {
-	// 	return 0, 0, badHeader, errors.New("sdpcmPoll yield fault")
-	// }
+	if noPacketSuccess && !d.hasWork() {
+		return 0, 0, badHeader, errors.New("sdpcm:no work")
+	}
 	err = d.busSleep(false)
 	if err != nil {
 		return 0, 0, badHeader, err
@@ -317,6 +318,7 @@ var errSendSDPCMTimeout = errors.New("sendSDPCMCommon time out waiting for data"
 // sendSDPCMCommon Total IO performed is WriteBytes, which may call GetStatus if packet is WLAN.
 // sendSDPCMCommon requires a buffer with 12 bytes of free space at the beginning,
 // which are used for the SDPCM header. This means the actual data is at 12 bytes offset!
+// Note: sendSDPCMCommon is called from SendEthernet and sendIoctl. Latter uses d.buf.
 //
 //	reference: cyw43_sdpcm_send_common
 func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, bufWithFreeFirst12Bytes []byte) error {
@@ -331,40 +333,40 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, bufWithFreeFirst12Byt
 		return err
 	}
 
-	/*
-		// soypat: careful- this call is using d.buf! When you call d.sdcpmPoll on d.buf
-		// you are overwriting the data in the argument buffer.
+	// soypat: careful- this call is using d.buf! When you call d.sdcpmPoll on d.buf
+	// you are overwriting the data in the argument buffer.
 
-		// TODO: I've coded this up, but it is causing a timeout so something is
-		// TODO: wrong or got lost in translation...needs investigation.
+	// TODO: I've coded this up, but it is causing a timeout so something is
+	// TODO: wrong or got lost in translation...needs investigation.
 
-		// Wait until we are allowed to send Credits are 8-bit unsigned
-		// integers that roll over, so we are stalled while they are equal
+	// Wait until we are allowed to send Credits which are 8-bit unsigned
+	// integers that roll over, so we are stalled while they are equal
 
-		start := time.Now()
-		timeout := 1000 * time.Millisecond
-
-		for d.wlanFlowCtl != 0 || d.sdpcmLastBusCredit == d.sdpcmTxSequence {
-			if time.Since(start) > timeout {
-				return errSendSDPCMTimeout
-			}
-			payloadOffset, plen, header, err := d.sdpcmPoll(d.buf[:])
-			payload := d.buf[payloadOffset:payloadOffset+plen]
-			switch {
-			case err != nil:
-				break
-			case header == whd.ASYNCEVENT_HEADER:
-				d.handleAsyncEvent(payload)
-			case header == whd.DATA_HEADER:
-				// Don't proccess it due to possible reentrancy
-				// issues (eg sending another ETH as part of
-				// the reception)
-			default:
-				d.debug("got unexpected packet")
-			}
-			time.Sleep(time.Millisecond)
+	start := time.Now()
+	timeout := 1000 * time.Millisecond
+	auxbuf := d.offbuf()
+	for d.wlanFlowCtl != 0 || d.sdpcmLastBusCredit == d.sdpcmTxSequence {
+		d.debug("wait for credits", slog.Int("wlanFlowCtl", int(d.wlanFlowCtl)))
+		if time.Since(start) > timeout {
+			return errSendSDPCMTimeout
 		}
-	*/
+		payloadOffset, plen, header, err := d.sdpcmPoll(auxbuf[:])
+		payload := auxbuf[payloadOffset : payloadOffset+plen]
+		switch {
+		case err != nil:
+			d.logError("sendSDPCMCommon:sdpcmPoll", slog.String("err", err.Error()))
+			break
+		case header == whd.ASYNCEVENT_HEADER:
+			d.handleAsyncEvent(payload)
+		case header == whd.DATA_HEADER:
+			// Don't proccess it due to possible reentrancy
+			// issues (eg sending another ETH as part of
+			// the reception)
+		default:
+			d.debug("got unexpected packet")
+		}
+		time.Sleep(time.Millisecond)
+	}
 
 	headerLength := uint8(whd.SDPCM_HEADER_LEN)
 	if kind == whd.DATA_HEADER {
@@ -810,7 +812,11 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 			return 0, 0, badHeader, err8IgnoreTooSmallAsyncPacket
 		}
 		bdcHeader := whd.DecodeBDCHeader(buf[payloadOffset:])
-		payloadOffset += whd.BDC_HEADER_LEN + uint32(bdcHeader.DataOffset)<<2
+		payloadOffset += whd.BDC_HEADER_LEN + (uint32(bdcHeader.DataOffset) << 2)
+		// headerPtr := uint32(uintptr(unsafe.Pointer(&buf[0])))
+		// payloadPtr := uint32(uintptr(unsafe.Pointer(&buf[payloadOffset])))
+		// plen = uint32(hdr.Size) - (payloadPtr - headerPtr)
+		// Reference does some gnarly pointer arithmetic here. This is the safe equivalent to above.
 		plen = uint32(hdr.Size) - payloadOffset
 		payload := buf[payloadOffset:]
 		// Check payload is actually an ethernet packet with type 0x886c.
@@ -830,75 +836,4 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		return 0, 0, badHeader, err11UnknownHeader
 	}
 	return payloadOffset, plen, headerType, err
-}
-
-// ref: void cyw43_cb_process_async_event(void *cb_data, const cyw43_async_event_t *ev)
-func (d *Device) processAsyncEvent(ev whd.AsyncEvent) error {
-	d.debug("processAsyncEvent", slog.Any("ev", ev))
-	switch ev.EventType {
-	case whd.CYW43_EV_ESCAN_RESULT:
-		// TODO
-	case whd.CYW43_EV_DISASSOC:
-		d.wifiJoinState = whd.WIFI_JOIN_STATE_DOWN
-		d.notifyDown()
-	case whd.CYW43_EV_PRUNE:
-		// TODO
-	case whd.CYW43_EV_SET_SSID:
-		switch {
-		case ev.Status == 0:
-			// Success setting SSID
-		case ev.Status == 3 && ev.Reason == 0:
-			// No matching SSID found (could be out of range, or down)
-			d.wifiJoinState = whd.WIFI_JOIN_STATE_NONET
-		default:
-			// Other failure setting SSID
-			d.wifiJoinState = whd.WIFI_JOIN_STATE_FAIL
-		}
-	case whd.CYW43_EV_AUTH:
-		switch ev.Status {
-		case 0:
-			if (d.wifiJoinState & whd.WIFI_JOIN_STATE_KIND_MASK) ==
-				whd.WIFI_JOIN_STATE_BADAUTH {
-				// A good-auth follows a bad-auth, so change
-				// the join state back to active.
-				d.wifiJoinState = (d.wifiJoinState & ^uint32(whd.WIFI_JOIN_STATE_KIND_MASK)) |
-					whd.WIFI_JOIN_STATE_ACTIVE
-			}
-			d.wifiJoinState |= whd.WIFI_JOIN_STATE_AUTH
-		case 6:
-			// Unsolicited auth packet, ignore it
-		default:
-			// Cannot authenticate
-			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
-		}
-	case whd.CYW43_EV_DEAUTH_IND:
-		// TODO
-	case whd.CYW43_EV_LINK:
-		if ev.Status == 0 {
-			if (ev.Flags & 1) != 0 {
-				// Link is UP
-				d.wifiJoinState |= whd.WIFI_JOIN_STATE_LINK
-				// TODO missing some stuff
-			}
-		}
-	case whd.CYW43_EV_PSK_SUP:
-		switch {
-		case ev.Status == 6:
-			// WLC_SUP_KEYED
-			d.wifiJoinState |= whd.WIFI_JOIN_STATE_KEYED
-		case (ev.Status == 4 || ev.Status == 8 || ev.Status == 10) && ev.Reason == 15:
-			// TODO
-		default:
-			// PSK_SUP failure
-			d.wifiJoinState = whd.WIFI_JOIN_STATE_BADAUTH
-		}
-	}
-
-	if d.wifiJoinState == whd.WIFI_JOIN_STATE_ALL {
-		// STA connected
-		d.wifiJoinState = whd.WIFI_JOIN_STATE_ACTIVE
-		// TODO notify link UP
-	}
-
-	return nil
 }

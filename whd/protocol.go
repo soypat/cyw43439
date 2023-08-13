@@ -108,7 +108,7 @@ func DecodeBDCHeader(b []byte) (hdr BDCHeader) {
 type AsyncEvent struct {
 	_         uint16
 	Flags     uint16
-	EventType uint32
+	EventType AsyncEventType
 	Status    uint32
 	Reason    uint32
 	_         [30]byte
@@ -123,7 +123,7 @@ func ParseAsyncEvent(buf []byte) (ev AsyncEvent, err error) {
 		return ev, errors.New("buffer too small to parse async event")
 	}
 	ev.Flags = binary.BigEndian.Uint16(buf[2:])
-	ev.EventType = binary.BigEndian.Uint32(buf[4:])
+	ev.EventType = AsyncEventType(binary.BigEndian.Uint32(buf[4:]))
 	ev.Status = binary.BigEndian.Uint32(buf[8:])
 	ev.Reason = binary.BigEndian.Uint32(buf[12:])
 	const ifaceOffset = 12 + 4 + 30
@@ -135,22 +135,6 @@ func ParseAsyncEvent(buf []byte) (ev AsyncEvent, err error) {
 		ev.u, err = ParseScanResult(buf[48:])
 	}
 	return ev, err
-}
-
-var asyncEventNames = map[uint32]string{
-	CYW43_EV_SET_SSID:         "SET_SSID",
-	CYW43_EV_JOIN:             "JOIN",
-	CYW43_EV_AUTH:             "AUTH",
-	CYW43_EV_DEAUTH_IND:       "DEAUTH_IND",
-	CYW43_EV_ASSOC:            "ASSOC",
-	CYW43_EV_DISASSOC:         "DISASSOC",
-	CYW43_EV_DISASSOC_IND:     "DISASSOC_IND",
-	CYW43_EV_LINK:             "LINK",
-	CYW43_EV_PSK_SUP:          "PSK_SUP",
-	CYW43_EV_ESCAN_RESULT:     "ESCAN_RESULT",
-	CYW43_EV_CSA_COMPLETE_IND: "CSA_COMPLETE_IND",
-	CYW43_EV_ASSOC_REQ_IE:     "ASSOC_REQ_IE",
-	CYW43_EV_ASSOC_RESP_IE:    "ASSOC_RESP_IE",
 }
 
 func (ev *AsyncEvent) EventScanResult() *EventScanResult {
