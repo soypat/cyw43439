@@ -135,7 +135,7 @@ func (d *Device) NetConnect(params *netlink.ConnectParams) error {
 }
 
 func (d *Device) netDisconnect() {
-	d.pollStop()
+	// d.pollStop()
 }
 
 func (d *Device) NetDisconnect() {
@@ -174,7 +174,7 @@ func (d *Device) GetHardwareAddr() (net.HardwareAddr, error) {
 }
 
 func (d *Device) SendEth(pkt []byte) error {
-	return d.sendEthernet(pkt)
+	return d.sendEthernet(whd.CYW43_ITF_STA, pkt)
 }
 
 func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {

@@ -34,6 +34,7 @@ package eth
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net"
 	"strconv"
 )
@@ -126,6 +127,14 @@ type TCPHeader struct {
 	UrgentPtr       uint16    // 18:20
 }
 
+// UDPHeader represents a UDP header. 8 bytes in size. UDP is protocol 17.
+type UDPHeader struct {
+	SourcePort      uint16 // 0:2
+	DestinationPort uint16 // 2:4
+	Length          uint16 // 4:6
+	Checksum        uint16 // 6:8
+}
+
 // There are 9 flags, bits 100 thru 103 are reserved
 const (
 	// TCP words are 4 octals, or uint32s
@@ -148,6 +157,8 @@ const (
 const (
 	SizeEthernetHeaderNoVLAN = 14
 	SizeIPv4Header           = 20
+	SizeUDPHeader            = 8
+	SizeARPv4Header          = 28
 	SizeTCPHeaderNoOptions   = 20
 	ipflagDontFrag           = 0x4000
 	ipFlagMoreFrag           = 0x8000
@@ -217,8 +228,8 @@ const (
 // AssertType returns the Size or EtherType field of the Ethernet frame as EtherType.
 func (e EthernetHeader) AssertType() EtherType { return EtherType(e.SizeOrEtherType) }
 
-// DecodeEthernetHeader decodes an ethernet frame from buf. It does not
-// handle 802.1Q VLAN situation where at least 4 more bytes must be decoded from wire.
+// DecodeEthernetHeader decodes an ethernet frame from the first 14 bytes of buf.
+// It does not handle 802.1Q VLAN situation where at least 4 more bytes must be decoded from wire.
 func DecodeEthernetHeader(b []byte) (ethdr EthernetHeader) {
 	_ = b[13]
 	copy(ethdr.Destination[0:], b[0:])
@@ -341,6 +352,44 @@ func DecodeARPv4Header(buf []byte) (arphdr ARPv4Header) {
 	copy(arphdr.HardwareTarget[:], buf[18:24])
 	copy(arphdr.ProtoTarget[:], buf[24:28])
 	return arphdr
+}
+
+// DecodeUDPHeader decodes a UDP header from buf. Panics if buf is less than 8 bytes in length.
+func DecodeUDPHeader(buf []byte) (udp UDPHeader) {
+	_ = buf[7]
+	udp.SourcePort = binary.BigEndian.Uint16(buf[0:2])
+	udp.DestinationPort = binary.BigEndian.Uint16(buf[2:4])
+	udp.Length = binary.BigEndian.Uint16(buf[4:6])
+	udp.Checksum = binary.BigEndian.Uint16(buf[6:8])
+	return udp
+}
+
+// Put marshals the UDPHeader onto buf. If buf's length is less than 8 then Put panics.
+func (udphdr *UDPHeader) Put(buf []byte) {
+	_ = buf[7]
+	binary.BigEndian.PutUint16(buf[0:2], udphdr.SourcePort)
+	binary.BigEndian.PutUint16(buf[2:4], udphdr.DestinationPort)
+	binary.BigEndian.PutUint16(buf[4:6], udphdr.Length)
+	binary.BigEndian.PutUint16(buf[6:8], udphdr.Checksum)
+}
+
+// CalculateChecksumIPv4 calculates the checksum for a UDP packet over IPv4.
+func (udphdr *UDPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, payload []byte) uint16 {
+	const sizePseudo = 12
+	crc := CRC791{}
+	crc.Write(pseudoHeader.Source[:])
+	crc.Write(pseudoHeader.Destination[:])
+	crc.AddUint16(uint16(pseudoHeader.Protocol)) // Pads with 0.
+	crc.AddUint16(udphdr.Length)                 // UDP length appears twice: https://stackoverflow.com/questions/45908909/my-udp-checksum-calculation-gives-wrong-results-every-time
+	crc.AddUint16(udphdr.SourcePort)
+	crc.AddUint16(udphdr.DestinationPort)
+	crc.AddUint16(udphdr.Length)
+	crc.Write(payload)
+	return crc.Sum16()
+}
+
+func (udphdr *UDPHeader) String() string {
+	return fmt.Sprintf("%d->%d len=%d", udphdr.SourcePort, udphdr.DestinationPort, udphdr.Length)
 }
 
 // Put marshals the ARP header onto buf. buf needs to be 28 bytes in length or Put panics.

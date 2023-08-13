@@ -14,6 +14,9 @@ cmd/cywanalyze/*.txt
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+*.txt
+*.log
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 .vscode/*

@@ -3,11 +3,11 @@
 package main
 
 import (
-	"encoding/hex"
 	"fmt"
 	"time"
 
 	"github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 	"github.com/soypat/cyw43439/whd"
 )
 
@@ -28,13 +28,23 @@ func main() {
 	}()
 	// Delay before sending output to monitor
 	time.Sleep(2 * time.Second)
-
+	auth := uint32(whd.CYW43_AUTH_WPA2_AES_PSK)
+	if len(pass) < 8 && len(pass) > 0 {
+		println("WARNING: password is less than 8 characters long")
+		time.Sleep(5 * time.Second)
+	} else if len(pass) == 0 {
+		auth = whd.CYW43_AUTH_OPEN
+		println("WARNING: no password provided, will use open auth")
+		time.Sleep(1 * time.Second)
+	}
 	spi, cs, wlreg, irq := cyw43439.PicoWSpi(0)
 	dev := cyw43439.NewDevice(spi, cs, wlreg, irq, irq)
+	if err := dev.Init(cyw43439.DefaultConfig(false)); err != nil {
+		panic(err)
+	}
 
 	// Setup Rx callback
 	dev.RecvEthHandle(rx)
-
 	// Enable device for Wifi station mode
 	country := whd.CountryCode("XX", 0)
 	if err := dev.EnableStaMode(country); err != nil {
@@ -44,7 +54,7 @@ func main() {
 	fmt.Printf("\n==== DEVICEINFO ====\n\tDriver: %s\n\tVersion:%s\n\tFirmwareVersion:%s\n\tMAC:%s\n\n",
 		driver, version, fwVersion, MAC)
 	// Wifi connect to AP using WPA2 authorization
-	auth := uint32(whd.CYW43_AUTH_WPA2_AES_PSK)
+
 	timeout := 10 * time.Second
 	if err := dev.WifiConnectTimeout(ssid, pass, auth, timeout); err != nil {
 		panic(err.Error())
@@ -58,31 +68,32 @@ func main() {
 	// 3. Interrupts (or polling) for Rx
 
 	// Forever send a pkt
+	mac, _ := dev.GetHardwareAddr()
+	arp := eth.ARPv4Header{
+		HardwareType:   1,
+		ProtoType:      uint16(eth.EtherTypeIPv4),
+		HardwareLength: 6,
+		ProtoLength:    4,
+		Operation:      1,
+		HardwareTarget: [6]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		ProtoTarget:    [4]byte{192, 168, 0, 44},
+		ProtoSender:    [4]byte{192, 168, 0, 255},
+	}
+	copy(arp.HardwareSender[:], mac[:])
+	buf := make([]byte, 28)
+	arp.Put(buf)
+	var lastPoll, lastSent time.Time
 	for {
-		var pkt []byte
-
-		// TODO encode pkt, for example to broadcast a gratuitous ARP pkt:
-		//
-		//    Eth.Src:  dev.GetHardwareAddr()
-		//    Eth.Dst:  net.ParseMAC("ff:ff:ff:ff:ff:ff") // broadcast
-		//    Eth.Type: ARP (0x0806)
-		//        Arp.HardwareType: 1
-		//        Arp.ProtocolType: IPv4 (0x0800)
-		//        Arp.HardwareSize: 6
-		//        Arp.ProtocolSize: 4
-		//        Arp.Opcode:       request (1)
-		//        Arp.SenderMAC:    dev.GetHardwareAddr()
-		//        Arp.SenderIP:     dev.GetIP()
-		//        Arp.TargetMAC:    net.ParseMAC("ff:ff:ff:ff:ff:ff")
-		//        Arp.TargetIP:     dev.GetIP()
-
-		println("Tx:", len(pkt))
-		println(hex.Dump(pkt))
-
-		if err := dev.SendEth(pkt); err != nil {
-			panic(err.Error())
+		if time.Since(lastPoll) > 1*time.Second {
+			dev.Poll()
+			lastPoll = time.Now()
 		}
-
-		time.Sleep(time.Second)
+		if time.Since(lastSent) > 30*time.Second {
+			lastSent = time.Now()
+			if err := dev.SendEth(buf); err != nil {
+				println("error sending ethernet packet:", err.Error())
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }

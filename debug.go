@@ -6,7 +6,6 @@ import (
 	"context"
 	"io"
 	"machine"
-	"time"
 
 	"github.com/soypat/cyw43439/internal/slog"
 )
@@ -25,7 +24,6 @@ func (d *Device) debugIO(msg string, attrs ...slog.Attr) {
 
 func (d *Device) debug(msg string, attrs ...slog.Attr) {
 	d.log.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...)
-	time.Sleep(time.Millisecond / 16)
 }
 
 func (d *Device) info(msg string, attrs ...slog.Attr) {

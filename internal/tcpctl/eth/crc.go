@@ -13,39 +13,65 @@ import (
 type CRC791 struct {
 	sum      uint32
 	excedent uint8
-	needsPad bool
+	needPad  bool
 }
 
 // Write adds the bytes in p to the running checksum.
 func (c *CRC791) Write(buff []byte) (n int, err error) {
-	// automatic padding of uneven data
-	if c.needsPad {
+	if len(buff) == 0 {
+		return 0, nil
+	}
+	if c.needPad {
 		c.sum += uint32(c.excedent)<<8 + uint32(buff[0])
 		buff = buff[1:]
-		c.needsPad = false
+		c.excedent = 0
+		c.needPad = false
+		if len(buff) == 0 {
+			return 1, nil
+		}
 	}
-	n = len(buff) / 2
-	if len(buff)%2 != 0 {
+	count := len(buff)
+	for count > 1 {
+		c.sum += uint32(binary.BigEndian.Uint16(buff[len(buff)-count:]))
+		count -= 2
+	}
+	if count != 0 {
 		c.excedent = buff[len(buff)-1]
-		buff = buff[:len(buff)-1]
-		c.needsPad = true
-	}
-	for i := 0; i < n; i++ {
-		c.sum += uint32(binary.BigEndian.Uint16(buff[i*2 : i*2+2]))
+		c.needPad = true
 	}
 	return len(buff), nil
 }
 
+// Add16 adds value to the running checksum interpreted as BigEndian (network order).
+func (c *CRC791) AddUint16(value uint16) {
+	if c.needPad {
+		c.sum += uint32(c.excedent)<<8 | uint32(value>>8)
+		c.excedent = byte(value)
+	} else {
+		c.sum += uint32(value)
+	}
+}
+
+// Add16 adds value to the running checksum interpreted as BigEndian (network order).
+func (c *CRC791) AddUint8(value uint8) {
+	if c.needPad {
+		c.sum += uint32(c.excedent)<<8 | uint32(value)
+	} else {
+		c.excedent = value
+	}
+	c.needPad = !c.needPad
+}
+
 // Sum16 calculates the checksum with the data written to c thus far.
 func (c *CRC791) Sum16() uint16 {
-	if c.needsPad {
-		c.sum += uint32(c.excedent) << 8
-		c.needsPad = false
+	sum := c.sum
+	if c.needPad {
+		sum += uint32(c.excedent) << 8
 	}
-	for c.sum > 0xffff {
-		c.sum = c.sum&0xffff + c.sum>>16
+	for sum>>16 != 0 {
+		sum = (sum & 0xffff) + (sum >> 16)
 	}
-	return ^uint16(c.sum)
+	return uint16(^sum)
 }
 
 // Reset zeros out the CRC791, resetting it to the initial state.

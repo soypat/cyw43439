@@ -195,6 +195,8 @@ const (
 	SDPCM_SET = 2
 )
 
+//go:generate stringer -type=SDPCMCommand -output=sdpcm_command_string.go -trimprefix=WLC_
+
 type SDPCMCommand uint32
 
 const (
@@ -395,23 +397,31 @@ const (
 	SPI_FRAME_CONTROL = 0x1000D
 )
 
+//go:generate stringer -type=AsyncEventType -output=asyncevent_type_string.go -trimprefix=CYW43_EV_
+
+// AsyncEventType is the type of an async event
+type AsyncEventType uint32
+
 // Async events, event_type field
 const (
-	CYW43_EV_SET_SSID         = 0
-	CYW43_EV_JOIN             = 1
-	CYW43_EV_AUTH             = 3
-	CYW43_EV_DEAUTH           = 5
-	CYW43_EV_DEAUTH_IND       = 6
-	CYW43_EV_ASSOC            = 7
-	CYW43_EV_DISASSOC         = 11
-	CYW43_EV_DISASSOC_IND     = 12
-	CYW43_EV_LINK             = 16
-	CYW43_EV_PRUNE            = 23
-	CYW43_EV_PSK_SUP          = 46
-	CYW43_EV_ESCAN_RESULT     = 69
-	CYW43_EV_CSA_COMPLETE_IND = 80
-	CYW43_EV_ASSOC_REQ_IE     = 87
-	CYW43_EV_ASSOC_RESP_IE    = 88
+	CYW43_EV_SET_SSID                 AsyncEventType = 0
+	CYW43_EV_JOIN                     AsyncEventType = 1
+	CYW43_EV_AUTH                     AsyncEventType = 3
+	CYW43_EV_DEAUTH                   AsyncEventType = 5
+	CYW43_EV_DEAUTH_IND               AsyncEventType = 6
+	CYW43_EV_ASSOC                    AsyncEventType = 7
+	CYW43_EV_DISASSOC                 AsyncEventType = 11
+	CYW43_EV_DISASSOC_IND             AsyncEventType = 12
+	CYW43_EV_LINK                     AsyncEventType = 16
+	CYW43_EV_PRUNE                    AsyncEventType = 23
+	CYW43_EV_PSK_SUP                  AsyncEventType = 46
+	CYW43_EV_IF                       AsyncEventType = 54 // I/F change (for wlan host notification)
+	CYW43_EV_P2P_DISC_LISTEN_COMPLETE AsyncEventType = 55 // P2P Discovery listen state expires
+	CYW43_EV_RSSI                     AsyncEventType = 56 // indicate RSSI change based on configured levels
+	CYW43_EV_ESCAN_RESULT             AsyncEventType = 69
+	CYW43_EV_CSA_COMPLETE_IND         AsyncEventType = 80
+	CYW43_EV_ASSOC_REQ_IE             AsyncEventType = 87
+	CYW43_EV_ASSOC_RESP_IE            AsyncEventType = 88
 )
 
 // IOCTL commands
