@@ -130,7 +130,7 @@ func (d *Device) Poll() (gotPacket bool) {
 	d.lock()
 	defer d.unlock()
 	hasWork := d.hasWork()
-	d.info("Poll", slog.Bool("hadWork", hasWork))
+	d.info("Poll", slog.Bool("hasWork", hasWork))
 	if hasWork {
 		gotPacket = d.processPackets()
 	}

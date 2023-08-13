@@ -610,6 +610,7 @@ func (d *Device) downloadResource(addr uint32, src string) error {
 
 // reference: cyw43_ll_bus_sleep and cyw43_ll_bus_sleep_helper
 func (d *Device) busSleep(canSleep bool) (err error) {
+	d.debug("busSleep", slog.Bool("canSleep", canSleep), slog.Bool("busIsUp", d.busIsUp))
 	if d.busIsUp != canSleep {
 		return nil // Already at desired state.
 	}

@@ -28,9 +28,14 @@ func main() {
 	}()
 	// Delay before sending output to monitor
 	time.Sleep(2 * time.Second)
-	if len(pass) < 8 {
-		println("WARNING: password is less than 8 characters long.")
+	auth := uint32(whd.CYW43_AUTH_WPA2_AES_PSK)
+	if len(pass) < 8 && len(pass) > 0 {
+		println("WARNING: password is less than 8 characters long")
 		time.Sleep(5 * time.Second)
+	} else if len(pass) == 0 {
+		auth = whd.CYW43_AUTH_OPEN
+		println("WARNING: no password provided, will use open auth")
+		time.Sleep(1 * time.Second)
 	}
 	spi, cs, wlreg, irq := cyw43439.PicoWSpi(0)
 	dev := cyw43439.NewDevice(spi, cs, wlreg, irq, irq)
@@ -49,7 +54,7 @@ func main() {
 	fmt.Printf("\n==== DEVICEINFO ====\n\tDriver: %s\n\tVersion:%s\n\tFirmwareVersion:%s\n\tMAC:%s\n\n",
 		driver, version, fwVersion, MAC)
 	// Wifi connect to AP using WPA2 authorization
-	auth := uint32(whd.CYW43_AUTH_WPA2_AES_PSK)
+
 	timeout := 10 * time.Second
 	if err := dev.WifiConnectTimeout(ssid, pass, auth, timeout); err != nil {
 		panic(err.Error())

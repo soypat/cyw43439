@@ -506,11 +506,6 @@ func (d *Device) GPIOSetup() {
 	d.csHigh()
 }
 
-func flushprint() {
-	for machine.UART0.Bus.GetUARTFR_BUSY() != 0 {
-	}
-}
-
 var defaultPM = pmValue(whd.CYW43_PM2_POWERSAVE_MODE, 200, 1, 1, 10)
 
 //go:inline
