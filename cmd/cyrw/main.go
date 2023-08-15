@@ -11,7 +11,7 @@ func main() {
 	println("starting program")
 	dev := cyrw.DefaultNew()
 
-	err := dev.Init(cyrw.Config{})
+	err := dev.Init(cyrw.DefaultConfig())
 	if err != nil {
 		panic(err)
 	}

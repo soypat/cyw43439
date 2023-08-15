@@ -4,14 +4,22 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"reflect"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers"
 )
 
 type OutputPin func(bool)
+
+func DefaultConfig() Config {
+	return Config{
+		Firmware: wifiFW,
+	}
+}
 
 // type OutputPin func(bool)
 type Device struct {
@@ -35,58 +43,66 @@ func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
 	return d
 }
 
-type Config struct{}
+type Config struct {
+	Firmware string
+}
 
 func hex32(u uint32) string {
 	return hex.EncodeToString([]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
 }
 
-func (d *Device) Init(cfg Config) error {
-	d.Reset()
+func (d *Device) Init(cfg Config) (err error) {
+	d.initBus()
+
+	d.write8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR, 0x08) // BACKPLANE_ALP_AVAIL_REQ
 	for {
-		got := d.read32_swapped(whd.SPI_READ_TEST_REGISTER)
-		if got == whd.TEST_PATTERN {
-			break
+		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
+		if got&0x40 != 0 {
+			break // ALP available-> clock OK.
 		}
-		println(got)
 	}
 
-	const spiRegTestRW = 0x18
-	d.write32_swapped(spiRegTestRW, whd.TEST_PATTERN)
-	got := d.read32_swapped(spiRegTestRW)
-	if got != whd.TEST_PATTERN {
-		return errors.New("spi test failed:" + hex32(got))
+	chip_id, _ := d.bp_read16(0x1800_0000)
+	println("chipID:", chip_id)
+	// Upload firmware.
+	err = d.core_disable(whd.CORE_WLAN_ARM)
+	if err != nil {
+		return err
 	}
-	// Address 0x0000 registers.
-	const (
-		// 0=16bit word, 1=32bit word transactions.
-		WordLengthPos = 0
-		// Set to 1 for big endian words.
-		EndianessBigPos = 1 // 30
-		HiSpeedModePos  = 4
-		InterruptPolPos = 5
-		WakeUpPos       = 7
+	err = d.core_reset(whd.CORE_SOCRAM, false)
+	if err != nil {
+		return err
+	}
+	d.bp_write32(whd.SOCSRAM_BASE_ADDRESS+0x10, 3)
+	d.bp_write32(whd.SOCSRAM_BASE_ADDRESS+0x44, 0)
 
-		ResponseDelayPos       = 0x1*8 + 0
-		StatusEnablePos        = 0x2*8 + 0
-		InterruptWithStatusPos = 0x2*8 + 1
-		// 132275 is Pico-sdk's default value.
-		// NOTE: embassy uses little endian words and StatusEnablePos.
-		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | (1 << EndianessBigPos) |
-			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
-			(1 << InterruptWithStatusPos) // | (1 << StatusEnablePos)
-	)
-	d.write32_swapped(whd.SPI_BUS_CONTROL, setupValue)
-	got, err := d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
-	if err != nil || got != whd.TEST_PATTERN {
-		return errors.Join(errors.New("spi RO test failed:"+hex32(got)), err)
+	println("flashing firmware")
+	var ramAddr uint32 // Start at ATCM_RAM_BASE_ADDRESS = 0.
+	err = d.bp_writestring(ramAddr, cfg.Firmware)
+	if err != nil {
+		return err
 	}
 
-	d.write32(FuncBus, spiRegTestRW, ^uint32(whd.TEST_PATTERN))
-	got, err = d.read32(FuncBus, spiRegTestRW)
-	if err != nil || got != ^uint32(whd.TEST_PATTERN) {
-		return errors.Join(errors.New("spi RW test failed:"+hex32(got)), err)
+	// Load NVRAM
+	const chipRAMSize = 512 * 1024
+	nvramLen := align(uint32(len(nvram43439)), 4)
+	err = d.bp_writestring(ramAddr+chipRAMSize-4-nvramLen, nvram43439)
+	if err != nil {
+		return err
 	}
+	nvramLenWords := nvramLen / 4
+	nvramLenMagic := ((^nvramLenWords) << 16) | nvramLenWords
+	d.bp_write32(ramAddr+chipRAMSize-4, nvramLenMagic)
+
+	// Start core.
+	err = d.core_reset(whd.CORE_WLAN_ARM, false)
+	if err != nil {
+		return err
+	}
+	if !d.core_is_up(whd.CORE_WLAN_ARM) {
+		return errors.New("core not up after reset")
+	}
+
 	return nil
 }
 
@@ -102,45 +118,46 @@ func (d *Device) wlan_read(dst []byte) error {
 }
 
 func (d *Device) wlan_write(data []byte) error {
-	return d.writebytes(FuncWLAN, 0, data)
+	// return d.writebytes(FuncWLAN, 0, data)
+	panic("not implemented yet")
 }
 
 func (d *Device) bp_read(addr uint32, dst []byte) error {
 	return d.readbytes(FuncBackplane, addr, dst)
 }
 
-func (d *Device) bp_write(addr uint32, data []byte) error {
-	return d.writebytes(FuncBackplane, addr, data)
+// bp_writestring exists to leverage static string data which is always put in flash.
+func (d *Device) bp_writestring(addr uint32, data string) error {
+	hdr := (*reflect.StringHeader)(unsafe.Pointer(&data))
+	sliceHdr := reflect.SliceHeader{
+		Data: hdr.Data,
+		Len:  hdr.Len,
+		Cap:  align(hdr.Len, 4),
+	}
+	return d.bp_write(addr, *(*[]byte)(unsafe.Pointer(&sliceHdr)))
 }
 
-func (d *Device) writebytes(fn Function, addr uint32, data []byte) error {
-	length := uint32(len(data))
-	alignedLength := align(length, 4)
-	assert := alignedLength > 0 && alignedLength <= 2040 && (fn != FuncBackplane || (length <= 64 && (addr+length) <= 0x8000))
-	if !assert {
-		return errors.New("bad argument to writebytes")
+func (d *Device) bp_write(addr uint32, data []byte) (err error) {
+	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
+	// var buf [maxTxSize]byte
+	alignedLen := align(uint32(len(data)), 4)
+	data = data[:alignedLen]
+
+	for err == nil && len(data) > 0 {
+		// Calculate address and length of next write.
+		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
+		windowRemaining := 0x8000 - windowOffset // windowsize - windowoffset
+		length := min(min(uint32(len(data)), maxTxSize), windowRemaining)
+
+		cmd := cmd_word(true, true, FuncBackplane, addr, length)
+		d.csEnable(true)
+		err = d.spiWrite(cmd, data[:length])
+		d.csEnable(false)
+		// println("addr", addr, "length", length, "len(data)", len(data), "windowRemaining", windowRemaining)
+		addr += length
+		data = data[length:]
 	}
-	if fn == FuncWLAN {
-		readyAttempts := 1000
-		for ; readyAttempts > 0; readyAttempts-- {
-			status, err := d.GetStatus()
-			if err != nil {
-				return err
-			}
-			if status.F2RxReady() {
-				break
-			}
-		}
-		if readyAttempts <= 0 {
-			return errors.New("F2 not ready")
-		}
-		data = data[:alignedLength]
-	}
-	cmd := cmd_word(true, true, fn, addr, length)
-	d.csEnable(true)
-	err := d.spiWrite(cmd, data)
-	d.csEnable(false)
-	return err
+	return nil
 }
 
 func (d *Device) readbytes(fn Function, addr uint32, dst []byte) error {

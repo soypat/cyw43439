@@ -157,7 +157,7 @@ func getFWVersion(src string) (string, error) {
 }
 
 type _uinteger = interface {
-	~uint16 | ~uint32 | ~uint64 | ~uint8
+	~uint8 | ~uint16 | ~uint32 | ~uint64 | uintptr
 }
 
 type _integer = interface {
