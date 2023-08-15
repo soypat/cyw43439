@@ -11,10 +11,10 @@ var (
 	//go:embed firmware/wififw.bin
 	wifiFW string
 	// Of raw size 232408 bytes
-	//go:embed ./../firmware/wifibtfw.bin
+	//go:embed firmware/wifibtfw.bin
 	wifibtFW string
 	// Of raw size 6164 bytes.
-	//go:embed ./../firmware/btfw.bin
+	//go:embed firmware/btfw.bin
 	btFW string
 )
 

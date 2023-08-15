@@ -2,8 +2,10 @@ package cyrw
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers"
@@ -31,6 +33,68 @@ func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
 		spi: spi,
 	}
 	return d
+}
+
+type Config struct{}
+
+func hex32(u uint32) string {
+	return hex.EncodeToString([]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
+}
+
+func (d *Device) Init(cfg Config) error {
+	d.Reset()
+	for {
+		got := d.read32_swapped(whd.SPI_READ_TEST_REGISTER)
+		if got == whd.TEST_PATTERN {
+			break
+		}
+		println(got)
+	}
+
+	const spiRegTestRW = 0x18
+	d.write32_swapped(spiRegTestRW, whd.TEST_PATTERN)
+	got := d.read32_swapped(spiRegTestRW)
+	if got != whd.TEST_PATTERN {
+		return errors.New("spi test failed:" + hex32(got))
+	}
+	// Address 0x0000 registers.
+	const (
+		// 0=16bit word, 1=32bit word transactions.
+		WordLengthPos = 0
+		// Set to 1 for big endian words.
+		EndianessBigPos = 1 // 30
+		HiSpeedModePos  = 4
+		InterruptPolPos = 5
+		WakeUpPos       = 7
+
+		ResponseDelayPos       = 0x1*8 + 0
+		StatusEnablePos        = 0x2*8 + 0
+		InterruptWithStatusPos = 0x2*8 + 1
+		// 132275 is Pico-sdk's default value.
+		// NOTE: embassy uses little endian words and StatusEnablePos.
+		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | (1 << EndianessBigPos) |
+			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
+			(1 << InterruptWithStatusPos) // | (1 << StatusEnablePos)
+	)
+	d.write32_swapped(whd.SPI_BUS_CONTROL, setupValue)
+	got, err := d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
+	if err != nil || got != whd.TEST_PATTERN {
+		return errors.Join(errors.New("spi RO test failed:"+hex32(got)), err)
+	}
+
+	d.write32(FuncBus, spiRegTestRW, ^uint32(whd.TEST_PATTERN))
+	got, err = d.read32(FuncBus, spiRegTestRW)
+	if err != nil || got != ^uint32(whd.TEST_PATTERN) {
+		return errors.Join(errors.New("spi RW test failed:"+hex32(got)), err)
+	}
+	return nil
+}
+
+func (d *Device) Reset() {
+	d.pwr(false)
+	time.Sleep(20 * time.Millisecond)
+	d.pwr(true)
+	time.Sleep(250 * time.Millisecond)
 }
 
 func (d *Device) wlan_read(dst []byte) error {
@@ -234,10 +298,6 @@ func (d *Device) responseDelay(padding uint8) {
 	}
 }
 
-func (d *Device) csEnable(b bool) {
-	d.cs(!b)
-}
-
 //go:inline
 func cmd_word(write, autoInc bool, fn Function, addr uint32, sz uint32) uint32 {
 	return b2u32(write)<<31 | b2u32(autoInc)<<30 | uint32(fn)<<28 | (addr&0x1ffff)<<11 | sz
@@ -251,9 +311,36 @@ func b2u32(b bool) uint32 {
 	return 0
 }
 
-// swap32 swaps lowest 16 bits with highest 16 bits of a uint32.
+// swap16 swaps lowest 16 bits with highest 16 bits of a uint32.
 //
 //go:inline
-func swap32(b uint32) uint32 {
+func swap16(b uint32) uint32 {
 	return (b >> 16) | (b << 16)
+}
+
+func swap16be(b uint32) uint32 {
+	b = swap16(b)
+	b0 := b & 0xff
+	b1 := (b >> 8) & 0xff
+	b2 := (b >> 16) & 0xff
+	b3 := (b >> 24) & 0xff
+	return b0<<24 | b1<<16 | b2<<8 | b3
+}
+
+func (d *Device) read32_swapped(addr uint32) uint32 {
+	cmd := cmd_word(false, true, FuncBus, addr, 4)
+	cmd = swap16be(cmd)
+	d.csEnable(true)
+	d.spiRead(cmd, d.spiBuf[:4], 0)
+	d.csEnable(false)
+	return swap16(binary.BigEndian.Uint32(d.spiBuf[:4]))
+}
+func (d *Device) write32_swapped(addr uint32, value uint32) {
+	cmd := cmd_word(true, true, FuncBus, addr, 4)
+	cmd = swap16be(cmd)
+	value = swap16(value)
+	binary.BigEndian.PutUint32(d.spiBuf[:], value)
+	d.csEnable(true)
+	d.spiWrite(cmd, d.spiBuf[:4])
+	d.csEnable(false)
 }

@@ -8,13 +8,13 @@ import _ "embed"
 var (
 
 	// Of raw size 225240.
-	//go:embed firmware/wififw.bin
+	//go:embed cyrw/firmware/wififw.bin
 	wifiFW string
 	// Of raw size 232408 bytes
-	//go:embed firmware/wifibtfw.bin
+	//go:embed cyrw/firmware/wifibtfw.bin
 	wifibtFW string
 	// Of raw size 6164 bytes.
-	//go:embed firmware/btfw.bin
+	//go:embed cyrw/firmware/btfw.bin
 	btFW string
 )
 
