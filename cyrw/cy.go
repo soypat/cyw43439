@@ -96,6 +96,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	// Load NVRAM
 	const chipRAMSize = 512 * 1024
 	nvramLen := align(uint32(len(nvram43439)), 4)
+	d.debug("flashing nvram")
 	err = d.bp_writestring(ramAddr+chipRAMSize-4-nvramLen, nvram43439)
 	if err != nil {
 		return err
@@ -112,6 +113,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	if !d.core_is_up(whd.CORE_WLAN_ARM) {
 		return errors.New("core not up after reset")
 	}
+	d.debug("core up")
 	retries := 256
 	for {
 		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
@@ -152,10 +154,10 @@ func (d *Device) Init(cfg Config) (err error) {
 
 func (d *Device) status() Status {
 	sinceStat := time.Since(d.lastStatusGet)
-	if sinceStat > 100*time.Millisecond {
-		d.busStatus, _ = d.read32(FuncBus, whd.SPI_STATUS_REGISTER)
-	} else if sinceStat < 12*time.Microsecond {
+	if sinceStat < 12*time.Microsecond {
 		runtime.Gosched() // Probably in hot loop.
+	} else {
+		d.busStatus, _ = d.read32(FuncBus, whd.SPI_STATUS_REGISTER)
 	}
 	return Status(d.busStatus)
 }
@@ -224,7 +226,7 @@ func (d *Device) bp_writestring(addr uint32, data string) error {
 	sliceHdr := reflect.SliceHeader{
 		Data: hdr.Data,
 		Len:  hdr.Len,
-		Cap:  align(hdr.Len, 4),
+		Cap:  align(hdr.Len, 4), // Round capacity up. Not used yet.
 	}
 	return d.bp_write(addr, *(*[]byte)(unsafe.Pointer(&sliceHdr)))
 }
@@ -237,11 +239,14 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	// var buf [maxTxSize]byte
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
-	d.debug("bp_write", slog.Uint64("addr", uint64(addr)), slog.String("first16", hex.EncodeToString(data[:min(len(data), 16)])))
+	d.debug("bp_write",
+		slog.Uint64("addr", uint64(addr)),
+		slog.String("last16", hex.EncodeToString(data[max(0, len(data)-16):])), // mismatch with reference?
+	)
 	var buf [maxTxSize/4 + 1]uint32
 	buf8 := unsafeAs[uint32, byte](buf[1:]) // Slice excluding first word reserved for command.
 	for err == nil && len(data) > 0 {
-		// Calculate address and length of next write.
+		// Calculate address and length of next write to ensure transfer doesn't cross a window boundary.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
 		windowRemaining := 0x8000 - windowOffset // windowsize - windowoffset
 		length := min(min(uint32(len(data)), maxTxSize), windowRemaining)
@@ -258,6 +263,7 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 		data = data[length:]
 	}
 	d.lastStatusGet = time.Now()
+	d.debug("bp_write:done", slog.String("status", d.status().String()))
 	return nil
 }
 

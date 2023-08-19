@@ -92,7 +92,7 @@ func main() {
 }
 
 func (bus *BusCtl) run(sdio, enable, clk, output string) error {
-	const fmtMsg = "cmd×%2d %s data=%#x\n"
+	const fmtMsg = "cmd×%2d %s data=%#x"
 	commands, err := bus.processSpiFiles(sdio, clk, enable)
 	if err != nil {
 		return err
@@ -129,11 +129,18 @@ func (bus *BusCtl) run(sdio, enable, clk, output string) error {
 				action.Data = append(data, make([]byte, 4-len(action.Data)%4)...)
 			}
 		}
-
-		_, err = fmt.Fprintf(fp, fmtMsg, action.Num, action.Cmd.String(), action.Data)
+		if action.Cmd.Size < uint32(len(action.Data)) {
+			// Print a space demarcating end of the command data.
+			// Anything after space is "garbage" data and not actually part of the command.
+			fmt.Fprintf(fp, fmtMsg, action.Num, action.Cmd.String(), action.Data[:action.Cmd.Size])
+			_, err = fmt.Fprintf(fp, " %x", action.Data[action.Cmd.Size:])
+		} else {
+			_, err = fmt.Fprintf(fp, fmtMsg, action.Num, action.Cmd.String(), action.Data)
+		}
 		if err != nil {
 			return err
 		}
+		fmt.Fprintln(fp)
 		if timings != nil {
 			fmt.Fprintf(timings, "t=%f\tdata=%#x\n", action.Start, action.Data)
 		}
