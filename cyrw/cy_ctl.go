@@ -11,19 +11,24 @@ import (
 
 func (d *Device) initBus() error {
 	d.Reset()
+	retries := 1000
 	for {
 		got := d.read32_swapped(whd.SPI_READ_TEST_REGISTER)
 		if got == whd.TEST_PATTERN {
 			break
+		} else if retries <= 0 {
+			return errors.New("spi test failed:" + hex32(got))
 		}
+		retries--
+	}
+	const TestPattern = 0x12345678
+	const spiRegTestRW = 0x18
+	d.write32_swapped(spiRegTestRW, TestPattern)
+	got := d.read32_swapped(spiRegTestRW)
+	if got != TestPattern {
+		return errors.New("spi test failed:" + hex32(got) + " wanted " + hex32(TestPattern))
 	}
 
-	const spiRegTestRW = 0x18
-	d.write32_swapped(spiRegTestRW, whd.TEST_PATTERN)
-	got := d.read32_swapped(spiRegTestRW)
-	if got != whd.TEST_PATTERN {
-		return errors.New("spi test failed:" + hex32(got))
-	}
 	// Address 0x0000 registers.
 	const (
 		// 0=16bit word, 1=32bit word transactions.
@@ -40,11 +45,14 @@ func (d *Device) initBus() error {
 		// 132275 is Pico-sdk's default value.
 		// NOTE: embassy uses little endian words and StatusEnablePos.
 		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | (0 << EndianessBigPos) |
-			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
+			(1 << InterruptPolPos) | (1 << WakeUpPos) |
 			(1 << InterruptWithStatusPos) | (1 << StatusEnablePos)
 	)
+	val := d.read32_swapped(0)
+
 	d.write32_swapped(whd.SPI_BUS_CONTROL, setupValue)
 	got, err := d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
+	println("current bus ctl", hex32(val), "writing:", hex32(setupValue), " got:", hex32(got))
 	if err != nil || got != whd.TEST_PATTERN {
 		return errjoin(errors.New("spi RO test failed:"+hex32(got)), err)
 	}

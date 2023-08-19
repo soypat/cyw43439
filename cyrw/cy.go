@@ -1,7 +1,6 @@
 package cyrw
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"reflect"
@@ -10,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/soypat/cyw43439/whd"
+	"golang.org/x/exp/constraints"
 	"tinygo.org/x/drivers"
 )
 
@@ -17,7 +17,7 @@ type OutputPin func(bool)
 
 func DefaultConfig() Config {
 	return Config{
-		Firmware: wifiFW,
+		Firmware: wifiFW2,
 	}
 }
 
@@ -25,20 +25,21 @@ func DefaultConfig() Config {
 type Device struct {
 	mu              sync.Mutex
 	pwr             OutputPin
-	cs              OutputPin
 	busStatus       uint32
 	backplaneWindow uint32
-	spi             drivers.SPI
-	// Low level SPI buffers for readn and writen.
-	spiBuf    [4 + whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE]byte
-	spicmdBuf [4]byte
+	spi             spibus
+	// rwBuf used for read* and write* functions.
+	rwBuf   [2]uint32
+	_auxbuf [2048 / 4]uint32
 }
 
 func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
 	d := &Device{
 		pwr: pwr,
-		cs:  cs,
-		spi: spi,
+		spi: spibus{
+			spi: spi,
+			cs:  cs,
+		},
 	}
 	return d
 }
@@ -52,8 +53,10 @@ func hex32(u uint32) string {
 }
 
 func (d *Device) Init(cfg Config) (err error) {
-	d.initBus()
-
+	err = d.initBus()
+	if err != nil {
+		return errjoin(errors.New("failed to init bus"), err)
+	}
 	d.write8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR, 0x08) // BACKPLANE_ALP_AVAIL_REQ
 	for {
 		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
@@ -114,16 +117,43 @@ func (d *Device) Reset() {
 }
 
 func (d *Device) wlan_read(dst []byte) error {
-	return d.readbytes(FuncWLAN, 0, dst)
-}
-
-func (d *Device) wlan_write(data []byte) error {
-	// return d.writebytes(FuncWLAN, 0, data)
 	panic("not implemented yet")
 }
 
-func (d *Device) bp_read(addr uint32, dst []byte) error {
-	return d.readbytes(FuncBackplane, addr, dst)
+func (d *Device) wlan_write(data []byte) error {
+	panic("not implemented yet")
+}
+
+func (d *Device) bp_read(addr uint32, data []byte) (err error) {
+	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
+	// var buf [maxTxSize]byte
+	alignedLen := align(uint32(len(data)), 4)
+	data = data[:alignedLen]
+	var buf [maxTxSize/4 + 1]uint32
+	buf8 := unsafeAs[uint32, byte](buf[:])
+	for len(data) > 0 {
+		// Calculate address and length of next write.
+		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
+		windowRemaining := 0x8000 - windowOffset // windowsize - windowoffset
+		length := min(min(uint32(len(data)), maxTxSize), windowRemaining)
+
+		err = d.backplane_setwindow(addr)
+		if err != nil {
+			return err
+		}
+		cmd := cmd_word(false, true, FuncBackplane, windowOffset, length)
+
+		// round `buf` to word boundary, add one extra word for the response delay byte.
+		d.busStatus, err = d.spi.cmd_read(cmd, buf[:(length+3)/4+1])
+		if err != nil {
+			return err
+		}
+		// when writing out the data, we skip the response-delay byte.
+		copy(data[:length], buf8[1:])
+		addr += length
+		data = data[length:]
+	}
+	return err
 }
 
 // bp_writestring exists to leverage static string data which is always put in flash.
@@ -142,44 +172,26 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	// var buf [maxTxSize]byte
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
-
+	var buf [maxTxSize/4 + 1]uint32
+	buf8 := unsafeAs[uint32, byte](buf[:])
 	for err == nil && len(data) > 0 {
 		// Calculate address and length of next write.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
 		windowRemaining := 0x8000 - windowOffset // windowsize - windowoffset
 		length := min(min(uint32(len(data)), maxTxSize), windowRemaining)
+		copy(buf8[1:], data[:length])
 
-		cmd := cmd_word(true, true, FuncBackplane, addr, length)
-		d.csEnable(true)
-		err = d.spiWrite(cmd, data[:length])
-		d.csEnable(false)
-		// println("addr", addr, "length", length, "len(data)", len(data), "windowRemaining", windowRemaining)
+		err = d.backplane_setwindow(addr)
+		if err != nil {
+			return err
+		}
+		buf[0] = cmd_word(true, true, FuncBackplane, windowOffset, length)
+
+		d.busStatus, err = d.spi.cmd_write(buf[:(length+3)/4+1])
 		addr += length
 		data = data[length:]
 	}
 	return nil
-}
-
-func (d *Device) readbytes(fn Function, addr uint32, dst []byte) error {
-	const maxReadPacket = 2040
-	length := uint32(len(dst))
-	alignedLen := align(length, 4)
-	if alignedLen > maxReadPacket && alignedLen > 0 {
-		return errors.New("buffer length must be length in 4..2040")
-	}
-	assert := fn != FuncBackplane || (length <= 64 && (addr+length) <= 0x8000)
-	if !assert {
-		return errors.New("bad argument to readbytes")
-	}
-	var padding uint8
-	if fn == FuncBackplane {
-		padding = 4
-	}
-	cmd := cmd_word(false, true, fn, addr, length+uint32(padding))
-	d.csEnable(true)
-	err := d.spiRead(cmd, dst, padding)
-	d.csEnable(false)
-	return err
 }
 
 func (d *Device) bp_read8(addr uint32) (uint8, error) {
@@ -283,36 +295,63 @@ func (d *Device) write8(fn Function, addr uint32, val uint8) error {
 // writen is primitive SPI write function for <= 4 byte writes.
 func (d *Device) writen(fn Function, addr, val, size uint32) (err error) {
 	cmd := cmd_word(true, true, fn, addr, size)
-	d.csEnable(true)
-	binary.LittleEndian.PutUint32(d.spiBuf[:], val)
-
-	err = d.spiWrite(cmd, d.spiBuf[:size])
-
-	d.csEnable(false)
+	d.rwBuf = [2]uint32{cmd, val}
+	d.busStatus, err = d.spi.cmd_write(d.rwBuf[:2])
 	return err
 }
 
 // readn is primitive SPI read function for <= 4 byte reads.
 func (d *Device) readn(fn Function, addr, size uint32) (result uint32, err error) {
+	cmd := cmd_word(false, true, fn, addr, size)
+	buf := d.rwBuf[:]
 	var padding uint32
 	if fn == FuncBackplane {
-		padding = whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE
+		padding = 1
 	}
-	cmd := cmd_word(false, true, fn, addr, size+padding)
-	d.csEnable(true)
-
-	err = d.spiRead(cmd, d.spiBuf[:4+padding], 0)
-
-	d.csEnable(false)
-	return binary.LittleEndian.Uint32(d.spiBuf[padding : 4+padding]), err
+	d.busStatus, err = d.spi.cmd_read(cmd, buf[:1+padding])
+	return buf[padding], err
 }
 
-//go:inline
-func (d *Device) responseDelay(padding uint8) {
-	// Wait for response.
-	for i := uint8(0); i < padding; i++ {
-		d.spi.Transfer(0)
+func (d *Device) read32_swapped(addr uint32) uint32 {
+	cmd := cmd_word(false, true, FuncBus, addr, 4)
+	cmd = swap16(cmd)
+	buf := d.rwBuf[:1]
+	d.spi.cmd_read(cmd, buf)
+	return swap16(buf[0])
+}
+func (d *Device) write32_swapped(addr uint32, value uint32) {
+	cmd := cmd_word(true, true, FuncBus, addr, 4)
+	d.rwBuf = [2]uint32{swap16(cmd), swap16(value)}
+	d.spi.cmd_write(d.rwBuf[:2])
+}
+
+func u32AsU8(buf []uint32) []byte {
+	return unsafeAs[uint32, byte](buf)
+}
+
+// unsafeAs converts a slice of F to a slice of T.
+func unsafeAs[F, T constraints.Unsigned](buf []F) []T {
+	fSize := unsafe.Sizeof(F(0))
+	tSize := unsafe.Sizeof(T(0))
+	ptr := unsafe.Pointer(&buf[0])
+	if fSize > tSize {
+		// Common case, i.e: uint32->byte
+		return unsafe.Slice((*T)(ptr), len(buf)*int(fSize/tSize))
 	}
+	div := int(tSize / fSize)
+	if uintptr(ptr)%tSize != 0 {
+		panic("unaligned pointer")
+	}
+	// i.e: byte->uint32, expands slice.
+	return unsafe.Slice((*T)(ptr), align(uint32(len(buf)/div), uint32(div)))
+}
+
+func (d *Device) auxbuf8() []byte {
+	return unsafeAs[uint32, byte](d._auxbuf[:])
+}
+
+func (d *Device) auxbuf() []uint32 {
+	return d._auxbuf[:]
 }
 
 //go:inline
@@ -342,22 +381,4 @@ func swap16be(b uint32) uint32 {
 	b2 := (b >> 16) & 0xff
 	b3 := (b >> 24) & 0xff
 	return b0<<24 | b1<<16 | b2<<8 | b3
-}
-
-func (d *Device) read32_swapped(addr uint32) uint32 {
-	cmd := cmd_word(false, true, FuncBus, addr, 4)
-	cmd = swap16be(cmd)
-	d.csEnable(true)
-	d.spiRead(cmd, d.spiBuf[:4], 0)
-	d.csEnable(false)
-	return swap16(binary.BigEndian.Uint32(d.spiBuf[:4]))
-}
-func (d *Device) write32_swapped(addr uint32, value uint32) {
-	cmd := cmd_word(true, true, FuncBus, addr, 4)
-	cmd = swap16be(cmd)
-	value = swap16(value)
-	binary.BigEndian.PutUint32(d.spiBuf[:], value)
-	d.csEnable(true)
-	d.spiWrite(cmd, d.spiBuf[:4])
-	d.csEnable(false)
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/soypat/cyw43439/whd"
+	"golang.org/x/exp/constraints"
 )
 
 var ErrDataNotAvailable = errors.New("requested data not available")
@@ -165,18 +166,18 @@ type _integer = interface {
 }
 
 // align rounds `val` up to nearest multiple of `align`.
-func align[T _uinteger](val, align T) T {
+func align[T constraints.Unsigned](val, align T) T {
 	return (val + align - 1) &^ (align - 1)
 }
 
-func max[T _integer](a, b T) T {
+func max[T constraints.Integer](a, b T) T {
 	if a > b {
 		return a
 	}
 	return b
 }
 
-func min[T _integer](a, b T) T {
+func min[T constraints.Integer](a, b T) T {
 	if a < b {
 		return a
 	}

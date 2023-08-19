@@ -6,7 +6,10 @@ import _ "embed"
 // when developing.
 
 var (
-
+	//go:embed firmware/43439A0_clm.bin
+	clmFW string
+	//go:embed firmware/43439A0.bin
+	wifiFW2 string
 	// Of raw size 225240.
 	//go:embed firmware/wififw.bin
 	wifiFW string

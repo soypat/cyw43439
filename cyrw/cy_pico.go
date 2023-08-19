@@ -7,7 +7,16 @@ import (
 	"machine"
 
 	"github.com/soypat/cyw43439"
+	"tinygo.org/x/drivers"
 )
+
+type spibus struct {
+	cs  OutputPin
+	spi drivers.SPI
+	// Low level SPI buffers for readn and writen.
+	wbuf [1]uint32
+	rbuf [1]uint32
+}
 
 func DefaultNew() *Device {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
@@ -53,77 +62,53 @@ const (
 	sdPin      = machine.GPIO24
 )
 
-// spiRead performs the gSPI Read action.
-func (d *Device) spiRead(cmd uint32, r []byte, padding uint8) error {
-	buf := d.spicmdBuf[:4]
+var _busOrder = binary.LittleEndian
+
+func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {
+	d.csEnable(true)
 	if sharedDATA {
 		sdPin.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
-	binary.LittleEndian.PutUint32(buf[:], cmd) // !LE
-	d.spi.Tx(buf[:], nil)
+	d.transfer(cmd)
 	if sharedDATA {
 		sdPin.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
-	d.responseDelay(padding) // Needed due to response delay.
-
-	return d.spi.Tx(nil, r)
-}
-
-// spiWrite performs the gSPI Write action. Does not control CS pin.
-func (d *Device) spiWrite(cmd uint32, w []byte) error {
-	if sharedDATA {
-		sdPin.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	for i := range buf {
+		buf[i], err = d.transfer(0)
 	}
-	buf := d.spicmdBuf[:4]
-	binary.LittleEndian.PutUint32(buf[:], cmd) // !LE
-	err := d.spi.Tx(buf[:], nil)
-	if err != nil {
-		return err
-	}
-	return d.spi.Tx(w, nil)
-}
-
-// Write32S writes register and swaps big-endian 16bit word length. Used only at initialization.
-func (d *Device) Write32S(fn Function, addr, val uint32) error {
-	if sharedDATA {
-		sdPin.Configure(machine.PinConfig{Mode: machine.PinOutput})
-	}
-	cmd := cmd_word(true, true, fn, addr, 4)
-	buf := d.spicmdBuf[:4]
-	d.csEnable(true)
-	binary.BigEndian.PutUint32(buf[:], swap16(cmd))
-	err := d.spi.Tx(buf[:], nil)
-	if err != nil {
-		d.csEnable(false)
-		return err
-	}
-	binary.BigEndian.PutUint32(buf[:], swap16(val))
-	err = d.spi.Tx(buf[:], nil)
+	status, _ = d.transfer(0)
 	d.csEnable(false)
-	return err
+	return status, err
 }
 
-// Read32S reads register and swaps big-endian 16bit word length. Used only at initialization.
-func (d *Device) Read32S(fn Function, addr uint32) (uint32, error) {
+func (d *spibus) cmd_write(buf []uint32) (status uint32, err error) {
+	d.csEnable(true)
 	if sharedDATA {
 		sdPin.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
-
-	cmd := cmd_word(false, true, fn, addr, 4)
-	buf := d.spicmdBuf[:4]
-	d.csEnable(true)
-	binary.BigEndian.PutUint32(buf[:], swap16(cmd))
-	d.spi.Tx(buf[:], nil)
+	for i := range buf {
+		d.transfer(buf[i])
+	}
 	if sharedDATA {
 		sdPin.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
-	err := d.spi.Tx(nil, buf[:])
-	result := swap16(binary.BigEndian.Uint32(buf[:]))
+	status, _ = d.transfer(0)
 	d.csEnable(false)
-	return result, err
+	return status, err
 }
 
-func (d *Device) csEnable(b bool) {
+func (d *spibus) transfer(c uint32) (uint32, error) {
+	var busOrder = binary.BigEndian
+	wbuf := u32AsU8(d.wbuf[:1])
+	busOrder.PutUint32(wbuf[:4], c)
+	rbuf := u32AsU8(d.rbuf[:1])
+	for i := range wbuf {
+		rbuf[i], _ = d.spi.Transfer(wbuf[i])
+	}
+	return busOrder.Uint32(rbuf[:]), nil
+}
+
+func (d *spibus) csEnable(b bool) {
 	d.cs(!b)
 	machine.GPIO1.Set(!b) // When mocking.
 }
