@@ -39,20 +39,20 @@ func (d *Device) initBus() error {
 		InterruptWithStatusPos = 0x2*8 + 1
 		// 132275 is Pico-sdk's default value.
 		// NOTE: embassy uses little endian words and StatusEnablePos.
-		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | (1 << EndianessBigPos) |
+		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | (0 << EndianessBigPos) |
 			(1 << InterruptPolPos) | (1 << WakeUpPos) | (0x4 << ResponseDelayPos) |
-			(1 << InterruptWithStatusPos) // | (1 << StatusEnablePos)
+			(1 << InterruptWithStatusPos) | (1 << StatusEnablePos)
 	)
 	d.write32_swapped(whd.SPI_BUS_CONTROL, setupValue)
 	got, err := d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
 	if err != nil || got != whd.TEST_PATTERN {
-		return errors.Join(errors.New("spi RO test failed:"+hex32(got)), err)
+		return errjoin(errors.New("spi RO test failed:"+hex32(got)), err)
 	}
 
 	d.write32(FuncBus, spiRegTestRW, ^uint32(whd.TEST_PATTERN))
 	got, err = d.read32(FuncBus, spiRegTestRW)
 	if err != nil || got != ^uint32(whd.TEST_PATTERN) {
-		return errors.Join(errors.New("spi RW test failed:"+hex32(got)), err)
+		return errjoin(errors.New("spi RW test failed:"+hex32(got)), err)
 	}
 	return nil
 }

@@ -65,6 +65,7 @@ func (d *Device) spiRead(cmd uint32, r []byte, padding uint8) error {
 		sdPin.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
 	d.responseDelay(padding) // Needed due to response delay.
+
 	return d.spi.Tx(nil, r)
 }
 
