@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/saleae"
 	"github.com/soypat/saleae/analyzers"
 	"golang.org/x/exp/constraints"
@@ -34,6 +35,9 @@ type BusCtl struct {
 }
 
 func main() {
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
+	slog.SetDefault(slog.New(handler))
+	slog.Debug("hello")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "cywanalyze - Process Binary Saleae digital data files corresponding to CYW43439 transactions.\n\tUsage:\n")
 		flag.PrintDefaults()

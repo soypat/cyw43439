@@ -4,10 +4,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"reflect"
+	"runtime"
 	"sync"
 	"time"
 	"unsafe"
 
+	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 	"golang.org/x/exp/constraints"
 	"tinygo.org/x/drivers"
@@ -24,8 +26,10 @@ func DefaultConfig() Config {
 // type OutputPin func(bool)
 type Device struct {
 	mu              sync.Mutex
+	log             logstate
 	pwr             OutputPin
 	busStatus       uint32
+	lastStatusGet   time.Time
 	backplaneWindow uint32
 	spi             spibus
 	// rwBuf used for read* and write* functions.
@@ -53,10 +57,13 @@ func hex32(u uint32) string {
 }
 
 func (d *Device) Init(cfg Config) (err error) {
+
+	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	err = d.initBus()
 	if err != nil {
 		return errjoin(errors.New("failed to init bus"), err)
 	}
+	d.backplaneWindow = 0xaaaa_aaaa
 	d.write8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR, 0x08) // BACKPLANE_ALP_AVAIL_REQ
 	for {
 		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
@@ -66,7 +73,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	}
 
 	chip_id, _ := d.bp_read16(0x1800_0000)
-	println("chipID:", chip_id)
+
 	// Upload firmware.
 	err = d.core_disable(whd.CORE_WLAN_ARM)
 	if err != nil {
@@ -79,7 +86,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	d.bp_write32(whd.SOCSRAM_BASE_ADDRESS+0x10, 3)
 	d.bp_write32(whd.SOCSRAM_BASE_ADDRESS+0x44, 0)
 
-	println("flashing firmware")
+	d.debug("flashing firmware", slog.Uint64("chip_id", uint64(chip_id)), slog.Int("fwlen", len(cfg.Firmware)))
 	var ramAddr uint32 // Start at ATCM_RAM_BASE_ADDRESS = 0.
 	err = d.bp_writestring(ramAddr, cfg.Firmware)
 	if err != nil {
@@ -105,8 +112,52 @@ func (d *Device) Init(cfg Config) (err error) {
 	if !d.core_is_up(whd.CORE_WLAN_ARM) {
 		return errors.New("core not up after reset")
 	}
+	retries := 256
+	for {
+		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
+		if got&0x80 != 0 {
+			break
+		}
+		if retries <= 0 {
+			return errors.New("timeout waiting for chip clock")
+		}
+		retries--
+	}
 
+	// "Set up the interrupt mask and enable interrupts"
+	d.write16(FuncBus, whd.SPI_INTERRUPT_ENABLE_REGISTER, whd.F2_PACKET_AVAILABLE)
+
+	// ""Lower F2 Watermark to avoid DMA Hang in F2 when SD Clock is stopped.""
+	// "Sounds scary..."
+	// yea it does
+	const REG_BACKPLANE_FUNCTION2_WATERMARK = 0x10008
+	d.write8(FuncBackplane, REG_BACKPLANE_FUNCTION2_WATERMARK, 32)
+
+	// Wait for wifi startup.
+	retries = 1000
+	for !d.status().F2RxReady() {
+		retries--
+		if retries <= 0 {
+			return errors.New("wifi startup timeout")
+		}
+	}
+
+	// Clear pulls.
+	d.write8(FuncBackplane, whd.SDIO_PULL_UP, 0)
+	d.read8(FuncBackplane, whd.SDIO_PULL_UP)
+
+	d.debug("wifi init done")
 	return nil
+}
+
+func (d *Device) status() Status {
+	sinceStat := time.Since(d.lastStatusGet)
+	if sinceStat > 100*time.Millisecond {
+		d.busStatus, _ = d.read32(FuncBus, whd.SPI_STATUS_REGISTER)
+	} else if sinceStat < 12*time.Microsecond {
+		runtime.Gosched() // Probably in hot loop.
+	}
+	return Status(d.busStatus)
 }
 
 func (d *Device) Reset() {
@@ -116,12 +167,22 @@ func (d *Device) Reset() {
 	time.Sleep(250 * time.Millisecond)
 }
 
-func (d *Device) wlan_read(dst []byte) error {
-	panic("not implemented yet")
+func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
+	cmd := cmd_word(false, true, FuncWLAN, 0, uint32(lenInBytes))
+	lenU32 := (lenInBytes + 3) / 4
+	d.busStatus, err = d.spi.cmd_read(cmd, buf[:lenU32])
+	d.lastStatusGet = time.Now()
+	return err
 }
 
-func (d *Device) wlan_write(data []byte) error {
-	panic("not implemented yet")
+func (d *Device) wlan_write(data []uint32) (err error) {
+	var buf [513]uint32
+	cmd := cmd_word(true, true, FuncWLAN, 0, uint32(len(data)*4))
+	buf[0] = cmd
+	copy(buf[1:], data)
+	d.busStatus, err = d.spi.cmd_write(buf[:len(data)+1])
+	d.lastStatusGet = time.Now()
+	return err
 }
 
 func (d *Device) bp_read(addr uint32, data []byte) (err error) {
@@ -153,6 +214,7 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 		addr += length
 		data = data[length:]
 	}
+	d.lastStatusGet = time.Now()
 	return err
 }
 
@@ -168,18 +230,22 @@ func (d *Device) bp_writestring(addr uint32, data string) error {
 }
 
 func (d *Device) bp_write(addr uint32, data []byte) (err error) {
+	if addr%4 != 0 {
+		return errors.New("addr must be 4-byte aligned")
+	}
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	// var buf [maxTxSize]byte
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
+	d.debug("bp_write", slog.Uint64("addr", uint64(addr)), slog.String("first16", hex.EncodeToString(data[:min(len(data), 16)])))
 	var buf [maxTxSize/4 + 1]uint32
-	buf8 := unsafeAs[uint32, byte](buf[:])
+	buf8 := unsafeAs[uint32, byte](buf[1:]) // Slice excluding first word reserved for command.
 	for err == nil && len(data) > 0 {
 		// Calculate address and length of next write.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
 		windowRemaining := 0x8000 - windowOffset // windowsize - windowoffset
 		length := min(min(uint32(len(data)), maxTxSize), windowRemaining)
-		copy(buf8[1:], data[:length])
+		copy(buf8[:length], data[:length])
 
 		err = d.backplane_setwindow(addr)
 		if err != nil {
@@ -191,6 +257,7 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 		addr += length
 		data = data[length:]
 	}
+	d.lastStatusGet = time.Now()
 	return nil
 }
 
@@ -250,7 +317,8 @@ func (d *Device) backplane_setwindow(addr uint32) (err error) {
 	currentWindow := d.backplaneWindow
 	addr = addr &^ whd.BACKPLANE_ADDR_MASK
 	if addr == currentWindow {
-		return nil // early return.
+		d.backplaneWindow = addr // Does this line have effect?
+		return nil
 	}
 
 	if (addr & 0xff000000) != currentWindow&0xff000000 {
@@ -264,7 +332,7 @@ func (d *Device) backplane_setwindow(addr uint32) (err error) {
 	}
 
 	if err != nil {
-		d.backplaneWindow = 0
+		d.backplaneWindow = 0xaaaa_aaaa
 		return err
 	}
 	d.backplaneWindow = addr
@@ -297,6 +365,7 @@ func (d *Device) writen(fn Function, addr, val, size uint32) (err error) {
 	cmd := cmd_word(true, true, fn, addr, size)
 	d.rwBuf = [2]uint32{cmd, val}
 	d.busStatus, err = d.spi.cmd_write(d.rwBuf[:2])
+	d.lastStatusGet = time.Now()
 	return err
 }
 
@@ -309,6 +378,7 @@ func (d *Device) readn(fn Function, addr, size uint32) (result uint32, err error
 		padding = 1
 	}
 	d.busStatus, err = d.spi.cmd_read(cmd, buf[:1+padding])
+	d.lastStatusGet = time.Now()
 	return buf[padding], err
 }
 
@@ -352,6 +422,19 @@ func (d *Device) auxbuf8() []byte {
 
 func (d *Device) auxbuf() []uint32 {
 	return d._auxbuf[:]
+}
+
+func (d *Device) debug(msg string, attrs ...slog.Attr) {
+	print(msg)
+	print(" ")
+	for _, a := range attrs {
+		print(a.Key)
+		print("=")
+		print(a.Value.String())
+		print(" ")
+	}
+	println()
+	// slog.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...) // Is panicking.
 }
 
 //go:inline

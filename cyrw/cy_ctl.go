@@ -1,9 +1,11 @@
 package cyrw
 
 import (
+	"encoding/binary"
 	"errors"
 	"time"
 
+	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 )
 
@@ -11,7 +13,7 @@ import (
 
 func (d *Device) initBus() error {
 	d.Reset()
-	retries := 1000
+	retries := 128
 	for {
 		got := d.read32_swapped(whd.SPI_READ_TEST_REGISTER)
 		if got == whd.TEST_PATTERN {
@@ -138,4 +140,56 @@ func coreaddress(coreID uint8) (v uint32) {
 		panic("bad core id")
 	}
 	return v
+}
+
+func (d *Device) init_log() error {
+	const (
+		ramBase           = 0
+		ramSize           = 512 * 1024
+		socram_srmem_size = 64 * 1024
+	)
+	const addr = ramBase + ramSize - 4 + socram_srmem_size
+	sharedAddr, err := d.bp_read32(addr)
+	if err != nil {
+		return err
+	}
+	shared := make([]byte, 32)
+	d.bp_read(sharedAddr, shared)
+	smem := decodeSharedMem(shared)
+	d.log.addr = smem.console_addr + 8
+	d.debug("log addr",
+		slog.Uint64("sharedAddr", uint64(sharedAddr)),
+		slog.Uint64("consoleAddr", uint64(d.log.addr)),
+	)
+	return nil
+}
+
+type sharedMem struct {
+	flags            uint32
+	trap_addr        uint32
+	assert_exp_addr  uint32
+	assert_file_addr uint32
+	assert_line      uint32
+	console_addr     uint32
+	msgtrace_addr    uint32
+	fwid             uint32
+}
+
+func decodeSharedMem(buf []byte) (s sharedMem) {
+	s.flags = binary.LittleEndian.Uint32(buf[0:4])
+	s.trap_addr = binary.LittleEndian.Uint32(buf[4:8])
+	s.assert_exp_addr = binary.LittleEndian.Uint32(buf[8:12])
+	s.assert_file_addr = binary.LittleEndian.Uint32(buf[12:16])
+	s.assert_line = binary.LittleEndian.Uint32(buf[16:20])
+	s.console_addr = binary.LittleEndian.Uint32(buf[20:24])
+	s.msgtrace_addr = binary.LittleEndian.Uint32(buf[24:28])
+	s.fwid = binary.LittleEndian.Uint32(buf[28:32])
+	return s
+}
+
+type logstate struct {
+	addr     uint32
+	last_idx int
+	buf      [256]byte
+	bufcount int
 }
