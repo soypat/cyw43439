@@ -26,15 +26,20 @@ func DefaultConfig() Config {
 // type OutputPin func(bool)
 type Device struct {
 	mu              sync.Mutex
-	log             logstate
 	pwr             OutputPin
-	busStatus       uint32
 	lastStatusGet   time.Time
-	backplaneWindow uint32
 	spi             spibus
-	// rwBuf used for read* and write* functions.
-	rwBuf   [2]uint32
-	_auxbuf [2048 / 4]uint32
+	log             logstate
+	backplaneWindow uint32
+	ioctlID         uint16
+	sdpcmSeq        uint8
+
+	rwBuf         [2]uint32        // rwBuf used for read* and write* functions.
+	_sendIoctlBuf [2048 / 4]uint32 // _sendIoctlBuf used only in sendIoctl and tx.
+	// We define headers in the Device struct to alleviate stack growth. Also used along with _sendIoctlBuf
+	auxSDPCMHeader whd.SDPCMHeader
+	auxCDCHeader   whd.CDCHeader
+	auxBDCHeader   whd.BDCHeader
 }
 
 func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
@@ -57,7 +62,6 @@ func hex32(u uint32) string {
 }
 
 func (d *Device) Init(cfg Config) (err error) {
-
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	err = d.initBus()
 	if err != nil {
@@ -152,14 +156,16 @@ func (d *Device) Init(cfg Config) (err error) {
 	return nil
 }
 
+// status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
 func (d *Device) status() Status {
 	sinceStat := time.Since(d.lastStatusGet)
 	if sinceStat < 12*time.Microsecond {
 		runtime.Gosched() // Probably in hot loop.
 	} else {
-		d.busStatus, _ = d.read32(FuncBus, whd.SPI_STATUS_REGISTER)
+		got, _ := d.read32(FuncBus, whd.SPI_STATUS_REGISTER) // Explicitly get Status.
+		return Status(got)
 	}
-	return Status(d.busStatus)
+	return d.spi.Status()
 }
 
 func (d *Device) Reset() {
@@ -172,7 +178,7 @@ func (d *Device) Reset() {
 func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
 	cmd := cmd_word(false, true, FuncWLAN, 0, uint32(lenInBytes))
 	lenU32 := (lenInBytes + 3) / 4
-	d.busStatus, err = d.spi.cmd_read(cmd, buf[:lenU32])
+	_, err = d.spi.cmd_read(cmd, buf[:lenU32])
 	d.lastStatusGet = time.Now()
 	return err
 }
@@ -182,7 +188,7 @@ func (d *Device) wlan_write(data []uint32) (err error) {
 	cmd := cmd_word(true, true, FuncWLAN, 0, uint32(len(data)*4))
 	buf[0] = cmd
 	copy(buf[1:], data)
-	d.busStatus, err = d.spi.cmd_write(buf[:len(data)+1])
+	_, err = d.spi.cmd_write(buf[:len(data)+1])
 	d.lastStatusGet = time.Now()
 	return err
 }
@@ -207,7 +213,7 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 		cmd := cmd_word(false, true, FuncBackplane, windowOffset, length)
 
 		// round `buf` to word boundary, add one extra word for the response delay byte.
-		d.busStatus, err = d.spi.cmd_read(cmd, buf[:(length+3)/4+1])
+		_, err = d.spi.cmd_read(cmd, buf[:(length+3)/4+1])
 		if err != nil {
 			return err
 		}
@@ -258,7 +264,7 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 		}
 		buf[0] = cmd_word(true, true, FuncBackplane, windowOffset, length)
 
-		d.busStatus, err = d.spi.cmd_write(buf[:(length+3)/4+1])
+		_, err = d.spi.cmd_write(buf[:(length+3)/4+1])
 		addr += length
 		data = data[length:]
 	}
@@ -370,7 +376,7 @@ func (d *Device) write8(fn Function, addr uint32, val uint8) error {
 func (d *Device) writen(fn Function, addr, val, size uint32) (err error) {
 	cmd := cmd_word(true, true, fn, addr, size)
 	d.rwBuf = [2]uint32{cmd, val}
-	d.busStatus, err = d.spi.cmd_write(d.rwBuf[:2])
+	_, err = d.spi.cmd_write(d.rwBuf[:2])
 	d.lastStatusGet = time.Now()
 	return err
 }
@@ -383,7 +389,7 @@ func (d *Device) readn(fn Function, addr, size uint32) (result uint32, err error
 	if fn == FuncBackplane {
 		padding = 1
 	}
-	d.busStatus, err = d.spi.cmd_read(cmd, buf[:1+padding])
+	_, err = d.spi.cmd_read(cmd, buf[:1+padding])
 	d.lastStatusGet = time.Now()
 	return buf[padding], err
 }
@@ -420,14 +426,6 @@ func unsafeAs[F, T constraints.Unsigned](buf []F) []T {
 	}
 	// i.e: byte->uint32, expands slice.
 	return unsafe.Slice((*T)(ptr), align(uint32(len(buf)/div), uint32(div)))
-}
-
-func (d *Device) auxbuf8() []byte {
-	return unsafeAs[uint32, byte](d._auxbuf[:])
-}
-
-func (d *Device) auxbuf() []uint32 {
-	return d._auxbuf[:]
 }
 
 func (d *Device) debug(msg string, attrs ...slog.Attr) {

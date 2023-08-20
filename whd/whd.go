@@ -70,6 +70,7 @@ const (
 	SDPCM_HEADER_LEN = 12
 	IOCTL_HEADER_LEN = 16
 	BDC_HEADER_LEN   = 4
+	CDC_HEADER_LEN   = 16
 )
 
 const (

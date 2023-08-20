@@ -8,9 +8,9 @@ import (
 
 type SDPCMHeader struct {
 	Size            uint16
-	SizeCom         uint16
+	SizeCom         uint16 // complement of size, so ^Size.
 	Seq             uint8
-	ChanAndFlags    uint8
+	ChanAndFlags    uint8 // Channel types: Control=0; Event=1; Data=2.
 	NextLength      uint8
 	HeaderLength    uint8
 	WirelessFlowCtl uint8
@@ -103,6 +103,33 @@ func DecodeBDCHeader(b []byte) (hdr BDCHeader) {
 	_ = b[3]
 	copy(hdr.arrayptr()[:], b)
 	return hdr
+}
+
+type CDCHeader struct {
+	Cmd    uint32
+	Length uint32
+	Flags  uint16
+	ID     uint16
+	Status uint32
+}
+
+func DecodeCDCHeader(b []byte) (hdr CDCHeader) {
+	_ = b[CDC_HEADER_LEN-1]
+	hdr.Cmd = binary.LittleEndian.Uint32(b)
+	hdr.Length = binary.LittleEndian.Uint32(b[4:])
+	hdr.Flags = binary.LittleEndian.Uint16(b[8:])
+	hdr.ID = binary.LittleEndian.Uint16(b[10:])
+	hdr.Status = binary.LittleEndian.Uint32(b[12:])
+	return hdr
+}
+
+func (cdc *CDCHeader) Put(b []byte) {
+	_ = b[15]
+	binary.LittleEndian.PutUint32(b, cdc.Cmd)
+	binary.LittleEndian.PutUint32(b[4:], cdc.Length)
+	binary.LittleEndian.PutUint16(b[8:], cdc.Flags)
+	binary.LittleEndian.PutUint16(b[10:], cdc.ID)
+	binary.LittleEndian.PutUint32(b[12:], cdc.Status)
 }
 
 type AsyncEvent struct {

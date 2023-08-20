@@ -14,8 +14,9 @@ type spibus struct {
 	cs  OutputPin
 	spi drivers.SPI
 	// Low level SPI buffers for readn and writen.
-	wbuf [1]uint32
-	rbuf [1]uint32
+	wbuf   [1]uint32
+	rbuf   [1]uint32
+	status uint32
 }
 
 func DefaultNew() *Device {
@@ -76,9 +77,9 @@ func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {
 	for i := range buf {
 		buf[i], err = d.transfer(0)
 	}
-	status, _ = d.transfer(0)
+	d.status, _ = d.transfer(0)
 	d.csEnable(false)
-	return status, err
+	return d.status, err
 }
 
 func (d *spibus) cmd_write(buf []uint32) (status uint32, err error) {
@@ -93,9 +94,9 @@ func (d *spibus) cmd_write(buf []uint32) (status uint32, err error) {
 	if sharedDATA {
 		sdPin.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
 	}
-	status, _ = d.transfer(0)
+	d.status, _ = d.transfer(0)
 	d.csEnable(false)
-	return status, err
+	return d.status, err
 }
 
 func (d *spibus) transfer(c uint32) (uint32, error) {
@@ -112,4 +113,8 @@ func (d *spibus) transfer(c uint32) (uint32, error) {
 func (d *spibus) csEnable(b bool) {
 	d.cs(!b)
 	machine.GPIO1.Set(!b) // When mocking.
+}
+
+func (d *spibus) Status() Status {
+	return Status(d.status)
 }
