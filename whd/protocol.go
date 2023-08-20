@@ -9,17 +9,19 @@ import (
 type SDPCMHeader struct {
 	Size            uint16
 	SizeCom         uint16 // complement of size, so ^Size.
-	Seq             uint8
-	ChanAndFlags    uint8 // Channel types: Control=0; Event=1; Data=2.
-	NextLength      uint8
-	HeaderLength    uint8
-	WirelessFlowCtl uint8
-	BusDataCredit   uint8
+	Seq             uint8  // Rx/Tx sequence number
+	ChanAndFlags    uint8  // 4 MSB Channel number, 4 LSB arbitrary flag
+			       // channel types: Control=0; Event=1; Data=2.
+	NextLength      uint8  // length of next data frame, reserved for Tx
+	HeaderLength    uint8  // data offset
+	WirelessFlowCtl uint8  // flow control bits, reserved for Tx
+	BusDataCredit   uint8  // maximum Sequence number allowed by firmware for Tx
 	Reserved        [2]uint8
 }
 
 func (s SDPCMHeader) Type() SDPCMHeaderType { return SDPCMHeaderType(s.ChanAndFlags & 0xf) }
 
+// TODO(sfeldma) I think this can be replaced by decode() below
 func DecodeSDPCMHeader(b []byte) (hdr SDPCMHeader) {
 	_ = b[SDPCM_HEADER_LEN-1]
 	hdr.Size = binary.LittleEndian.Uint16(b)
@@ -41,9 +43,44 @@ func (s *SDPCMHeader) arrayPtr() *[12]byte {
 
 // Put puts all 12 bytes of sdpcmHeader in dst. Panics if dst is shorter than 12 bytes in length.
 func (s *SDPCMHeader) Put(dst []byte) {
-	_ = dst[11]
+	_ = dst[SDPCM_HEADER_LEN-1]
 	ptr := s.arrayPtr()[:]
 	copy(dst, ptr)
+}
+
+func (s *SPDCMHeader) decode(packet []byte) {
+	_ = packet[SDPCM_HEADER_LEN-1]
+	s.Size = binary.LittleEndian.Uint16(packet)
+	s.SizeCom = binary.LittleEndian.Uint16(packet[2:])
+	s.Seq = packet[4]
+	s.ChanAndFlags = packet[5]
+	s.NextLength = packet[6]
+	s.HeaderLength = packet[7]
+	s.WirelessFlowCtl = packet[8]
+	s.BusDataCredit = packet[9]
+	copy(s.Reserved[:], packet[10:])
+}
+
+func (s *SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
+	if len(packet) < SDPCM_HEADER_LEN {
+		err = errors.New("packet shorter than sdpcm hdr, len=", strconv.Itoa(len(packet)))
+		return
+	}
+
+	s.decode(packet)
+
+	if s.Size != !s.SizeCom {
+		err = errors.New("sdpcm hdr size complement mismatch")
+		return
+	}
+
+	if s.Size != len(packet) {
+		err = errors.New("sdpcm hdr size doesn't match packet length from SPI")
+		return
+	}
+
+	payload = packet[SDPCM_HEADER_LEN:]
+	return
 }
 
 type IoctlHeader struct {

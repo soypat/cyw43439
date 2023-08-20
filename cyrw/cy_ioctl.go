@@ -99,7 +99,10 @@ func (d *Device) check_status(buf []uint32) error {
 				return err
 			}
 			buf8 := u32AsU8(buf[:])
-			d.rx(buf8[:length])
+			err := d.rx(buf8[:length])
+			if err != nil {
+				return err
+			}
 		} else {
 			break
 		}
@@ -107,6 +110,50 @@ func (d *Device) check_status(buf []uint32) error {
 	return nil
 }
 
-func (d *Device) rx(packet []byte) {
-	// Hey scott, wanna program this one? https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
+func (d *Device) updateCredit(sdpcmHdr whd.SDPCMHeader) {
+	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L467
+	switch sdpcmHdr.Type() {
+	case whd.CONTROL_HEADER, whd.ASYNCEVENT_HEADER, whd.DATA_HEADER:
+		max := sdpcmHdr.BusDataCredit
+		// TODO(sfeldma) not sure about this math, rust had:
+		// if sdpcm_seq_max.wrapping_sub(self.sdpcm_seq) > 0x40
+		if (max - d.sdpcmSeq) > 0x40 {
+			max = d.sdpcmSeq + 2
+		}
+		d.sdpcmSeqMax = max
+	}
+}
+
+func (d *Device) rx_control(payload []byte) error {
+}
+
+func (d *Device) rx_event(payload []byte) error {
+}
+
+func (d *Device) rx_data(payload []byte) error {
+}
+
+func (d *Device) rx(packet []byte) error {
+	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
+	d.debug("rx", slog.Int("len", len(packet)))
+
+	var sdpcmHdr whd.SDPCMHeader
+
+	payload, err := sdpcmHdr.Parse(packet)
+	if err != nil {
+		return err
+	}
+
+	d.updateCredit(sdpcmHdr)
+
+	switch sdpcmHdr.Type() {
+	case whd.CONTROL_HEADER:
+		return d.rx_control(payload)
+	case whd.ASYNCEVENT_HEADER:
+		return d.rx_event(payload)
+	case whd.DATA_HEADER:
+		return d.rx_data(payload)
+	}
+
+	return errors.New("unknown sdpcm hdr type")
 }
