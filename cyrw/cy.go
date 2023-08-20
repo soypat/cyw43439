@@ -33,6 +33,7 @@ type Device struct {
 	backplaneWindow uint32
 	ioctlID         uint16
 	sdpcmSeq        uint8
+	mac             [6]byte
 	// uint32 buffers to ensure alignment of buffers.
 	rwBuf         [2]uint32        // rwBuf used for read* and write* functions.
 	_sendIoctlBuf [2048 / 4]uint32 // _sendIoctlBuf used only in sendIoctl and tx.

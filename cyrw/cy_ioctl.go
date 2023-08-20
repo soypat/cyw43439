@@ -1,6 +1,7 @@
 package cyrw
 
 import (
+	"encoding/hex"
 	"errors"
 	"strconv"
 
@@ -14,6 +15,20 @@ const (
 	ioctlGET = whd.SDPCM_GET
 	ioctlSET = whd.SDPCM_SET
 )
+
+type eventMask struct {
+	iface  uint32
+	events [24]uint8
+}
+
+func (e *eventMask) Unset(event whd.AsyncEventType) {
+	e.events[event/8] &= ^(1 << (event % 8))
+}
+
+func (e *eventMask) Put(buf []byte) {
+	_busOrder.PutUint32(buf, e.iface)
+	copy(buf[1:], e.events[:])
+}
 
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
@@ -52,20 +67,36 @@ func (d *Device) tx(packet []byte) (err error) {
 }
 
 func (d *Device) get_iovar(VAR string, iface whd.IoctlInterface) (_ uint32, err error) {
-	d.debug("get_iovar")
 	const iovarOffset = 256 + 3
 	buf8 := u32AsU8(d._iovarBuf[iovarOffset:])
+	_, err = d.get_iovar_n(VAR, iface, buf8[:4])
+	return _busOrder.Uint32(buf8), err
+}
+
+func (d *Device) get_iovar_n(VAR string, iface whd.IoctlInterface, res []byte) (plen int, err error) {
+	buf8 := u32AsU8(d._iovarBuf[:])
 
 	length := copy(buf8[:], VAR)
 	buf8[length] = 0
 	length++
-	_busOrder.PutUint32(buf8[length:], 0)
-
-	err = d.doIoctlGet(whd.WLC_GET_VAR, iface, buf8[:length+4])
-	return _busOrder.Uint32(buf8[length:]), err
+	for i := 0; i < len(res); i++ {
+		buf8[length+i] = 0 // Zero out where we'll read.
+	}
+	totalLen := max(len(VAR)+1, len(res))
+	d.debug("get_iovar_n:ini", slog.String("var", VAR), slog.String("buf", hex.EncodeToString(buf8[:totalLen])))
+	plen, err = d.doIoctlGet(whd.WLC_GET_VAR, iface, buf8[:totalLen])
+	if plen > len(res) {
+		plen = len(res) // TODO: implement this correctly here and in IoctlGet.
+	}
+	d.debug("get_iovar_n:end", slog.String("var", VAR), slog.String("buf", hex.EncodeToString(buf8[:totalLen])))
+	copy(res[:], buf8[:plen])
+	return plen, err
 }
 
-func (d *Device) get_iovar_n(VAR string, iface whd.IoctlInterface)
+// reference: ioctl_set_u32
+func (d *Device) set_ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, val uint32) error {
+	return d.doIoctl(whd.SDPCM_SET, cmd, iface, u32PtrTo4U8(&val)[:4])
+}
 
 func (d *Device) set_iovar(VAR string, iface whd.IoctlInterface, val uint32) error {
 	buf8 := u32AsU8(d._iovarBuf[256:]) // Safe to get offset.
@@ -75,6 +106,7 @@ func (d *Device) set_iovar(VAR string, iface whd.IoctlInterface, val uint32) err
 
 func (d *Device) set_iovar2(VAR string, iface whd.IoctlInterface, val0, val1 uint32) error {
 	buf8 := u32AsU8(d._iovarBuf[256+1:]) // Safe to get offset.
+
 	copy(buf8[:4], u32PtrTo4U8(&val0)[:4])
 	copy(buf8[4:8], u32PtrTo4U8(&val1)[:4])
 	return d.set_iovar_n(VAR, iface, buf8[:8])
@@ -96,8 +128,10 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 	return d.doIoctlSet(whd.WLC_SET_VAR, iface, buf8[:length])
 }
 
-func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
-	return d.doIoctl(ioctlGET, cmd, iface, data)
+func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (_ int, err error) {
+	err = d.doIoctl(ioctlGET, cmd, iface, data)
+	println("doIoctlGet not correctly implemented yet")
+	return len(data), err // TODO: implement this correctly.
 }
 
 func (d *Device) doIoctlSet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
@@ -115,7 +149,7 @@ func (d *Device) doIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.IoctlIn
 	}
 	d.debug("doIoctl", slog.String("cmd", cmd.String()), slog.Int("len", len(data)))
 	err := d.sendIoctl(kind, cmd, iface, data)
-	if err != nil {
+	if err != nil || kind == whd.SDPCM_SET {
 		return err
 	}
 	// Should poll SDPCM for read operations to complete succesfully.
@@ -124,7 +158,7 @@ func (d *Device) doIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.IoctlIn
 
 // sendIoctl sends a SDPCM+CDC ioctl command to the device with data.
 func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
-	d.debug("sendIoctl", slog.Int("cmd", int(cmd)), slog.Int("len", len(data)))
+	// d.debug("sendIoctl", slog.Int("cmd", int(cmd)), slog.Int("len", len(data)))
 	buf := d._sendIoctlBuf[:]
 	buf8 := u32AsU8(buf)
 
@@ -156,7 +190,7 @@ func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.Ioctl
 	copy(buf8[whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN:], data)
 	totalLen = align(totalLen, 4)
 
-	d.debug("sendIoctl", slog.Int("totalLen", int(totalLen)))
+	// d.debug("sendIoctl", slog.Int("totalLen", int(totalLen)))
 	return d.wlan_write(buf[:totalLen/4])
 }
 
