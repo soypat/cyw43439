@@ -3,6 +3,7 @@ package cyrw
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/soypat/cyw43439/internal/slog"
@@ -30,6 +31,37 @@ func (e *eventMask) Put(buf []byte) {
 	copy(buf[1:], e.events[:])
 }
 
+func (e *eventMask) Size() int {
+	return 4 + len(e.events)
+}
+
+// reference: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/runner.rs#L225
+func (d *Device) singleRun() error {
+	// We do not loop in here, let user call Poll for now until we understand async mechanics at play better.
+	d.log_read()
+	if !d.has_credit() {
+		d.warn("TX:stalled")
+		return d.handle_irq(d._rxBuf[:])
+	}
+	// For now just do this?
+	return d.handle_irq(d._rxBuf[:])
+}
+
+func (d *Device) update_credit(hdr *whd.SDPCMHeader) {
+	if hdr.ChanAndFlags&0xf >= 3 {
+		return // Not Control, Data or Event channel.
+	}
+	seqMax := hdr.BusDataCredit
+	if seqMax-d.sdpcmSeq > 0x40 {
+		seqMax = d.sdpcmSeq + 2
+	}
+	d.sdpcmSeqMax = seqMax
+}
+
+func (d *Device) has_credit() bool {
+	return d.sdpcmSeq != d.sdpcmSeqMax && (d.sdpcmSeqMax-d.sdpcmSeq)&0x80 == 0
+}
+
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
 	// reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L247
@@ -53,7 +85,7 @@ func (d *Device) tx(packet []byte) (err error) {
 		ChanAndFlags: 2, // Data channel.
 		HeaderLength: whd.SDPCM_HEADER_LEN + PADDING_SIZE,
 	}
-	d.auxSDPCMHeader.Put(buf8[:whd.SDPCM_HEADER_LEN])
+	d.auxSDPCMHeader.Put(_busOrder, buf8[:whd.SDPCM_HEADER_LEN])
 
 	d.auxBDCHeader = whd.BDCHeader{
 		Flags: 2 << 4, // BDC version.
@@ -83,7 +115,7 @@ func (d *Device) get_iovar_n(VAR string, iface whd.IoctlInterface, res []byte) (
 		buf8[length+i] = 0 // Zero out where we'll read.
 	}
 	totalLen := max(len(VAR)+1, len(res))
-	d.debug("get_iovar_n:ini", slog.String("var", VAR), slog.String("buf", hex.EncodeToString(buf8[:totalLen])))
+	d.debug("get_iovar_n:ini", slog.String("var", VAR), slog.Int("reslen", len(res)), slog.String("buf", hex.EncodeToString(buf8[:totalLen])))
 	plen, err = d.doIoctlGet(whd.WLC_GET_VAR, iface, buf8[:totalLen])
 	if plen > len(res) {
 		plen = len(res) // TODO: implement this correctly here and in IoctlGet.
@@ -158,13 +190,15 @@ func (d *Device) doIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.IoctlIn
 
 // sendIoctl sends a SDPCM+CDC ioctl command to the device with data.
 func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
-	// d.debug("sendIoctl", slog.Int("cmd", int(cmd)), slog.Int("len", len(data)))
+	d.debug("sendIoctl", slog.Int("kind", int(kind)), slog.String("cmd", cmd.String()), slog.Int("len", len(data)))
+	defer d.check_status(d._rxBuf[:])
+
 	buf := d._sendIoctlBuf[:]
 	buf8 := u32AsU8(buf)
 
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + whd.CDC_HEADER_LEN + len(data))
-	if int(totalLen) > len(buf) {
-		return errors.New("ioctl data too large " + strconv.Itoa(len(buf)))
+	if int(totalLen) > len(buf8) {
+		return errors.New("ioctl data too large " + strconv.Itoa(len(data)))
 	}
 	sdpcmSeq := d.sdpcmSeq
 	d.sdpcmSeq++
@@ -177,7 +211,7 @@ func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.Ioctl
 		ChanAndFlags: 0, // Channel type control.
 		HeaderLength: whd.SDPCM_HEADER_LEN,
 	}
-	d.auxSDPCMHeader.Put(buf8[:whd.SDPCM_HEADER_LEN])
+	d.auxSDPCMHeader.Put(_busOrder, buf8[:whd.SDPCM_HEADER_LEN])
 
 	d.auxCDCHeader = whd.CDCHeader{
 		Cmd:    cmd,
@@ -185,13 +219,30 @@ func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.Ioctl
 		Flags:  uint16(kind) | (uint16(iface) << whd.CDCF_IOC_IF_SHIFT),
 		ID:     d.ioctlID,
 	}
-	d.auxCDCHeader.Put(buf8[whd.SDPCM_HEADER_LEN:])
+	d.auxCDCHeader.Put(_busOrder, buf8[whd.SDPCM_HEADER_LEN:])
+	s := hex.EncodeToString(buf8[whd.SDPCM_HEADER_LEN : whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN])
+	d.debug("sendIoctl:cdc", slog.String("cdc", s))
+	fmt.Printf("cdc_struct=%+v\n", d.auxCDCHeader)
 
 	copy(buf8[whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN:], data)
 	totalLen = align(totalLen, 4)
 
-	// d.debug("sendIoctl", slog.Int("totalLen", int(totalLen)))
 	return d.wlan_write(buf[:totalLen/4])
+}
+
+// handle_irq waits for IRQ on F2 packet available
+func (d *Device) handle_irq(buf []uint32) (err error) {
+	irq := d.getInterrupts()
+	d.debug("handle_irq", slog.String("irq", irq.String()))
+
+	if irq.IsF2Available() {
+		err = d.check_status(buf)
+	}
+	if err == nil && irq.IsDataAvailable() {
+		d.warn("irq data unavail, clearing")
+		err = d.write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, 1)
+	}
+	return err
 }
 
 // check_status handles F2 events while status register is set.
@@ -205,6 +256,7 @@ func (d *Device) check_status(buf []uint32) error {
 				return err
 			}
 			buf8 := u32AsU8(buf[:])
+			d.debug("rx", slog.Int("len", int(length)))
 			d.rx(buf8[:length])
 		} else {
 			break

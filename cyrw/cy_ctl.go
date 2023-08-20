@@ -142,13 +142,14 @@ func coreaddress(coreID uint8) (v uint32) {
 	return v
 }
 
-func (d *Device) init_log() error {
+func (d *Device) log_init() error {
+	d.debug("log_init")
 	const (
 		ramBase           = 0
 		ramSize           = 512 * 1024
 		socram_srmem_size = 64 * 1024
 	)
-	const addr = ramBase + ramSize - 4 + socram_srmem_size
+	const addr = ramBase + ramSize - 4 - socram_srmem_size
 	sharedAddr, err := d.bp_read32(addr)
 	if err != nil {
 		return err
@@ -161,6 +162,44 @@ func (d *Device) init_log() error {
 		slog.Uint64("sharedAddr", uint64(sharedAddr)),
 		slog.Uint64("consoleAddr", uint64(d.log.addr)),
 	)
+	return nil
+}
+
+func (d *Device) log_read() error {
+	d.debug("log_read")
+	buf8 := u32AsU8(d._sendIoctlBuf[:])
+	err := d.bp_read(d.log.addr, buf8[:16])
+	if err != nil {
+		return err
+	}
+	smem := decodeSharedMemLog(buf8[:16])
+	idx := smem.idx
+	if idx == d.log.last_idx {
+		d.debug("CYLOG: no new data")
+		return nil // Pointer not moved, nothing to do.
+	}
+
+	err = d.bp_read(smem.buf, buf8[:])
+	if err != nil {
+		return err
+	}
+
+	for d.log.last_idx != idx {
+		b := buf8[d.log.last_idx]
+		if b == '\r' || b == '\n' {
+			if d.log.bufcount != 0 {
+				d.info("CYLOG", slog.String("msg", string(d.log.buf[:d.log.bufcount])))
+				d.log.bufcount = 0
+			}
+		} else if d.log.bufcount < uint32(len(d.log.buf)) {
+			d.log.buf[d.log.bufcount] = b
+			d.log.bufcount++
+		}
+		d.log.last_idx++
+		if d.log.last_idx == 0x400 {
+			d.log.last_idx = 0
+		}
+	}
 	return nil
 }
 
@@ -189,7 +228,23 @@ func decodeSharedMem(buf []byte) (s sharedMem) {
 
 type logstate struct {
 	addr     uint32
-	last_idx int
+	last_idx uint32
 	buf      [256]byte
-	bufcount int
+	bufcount uint32
+}
+
+// sharedMemLog has size 4*4=16
+type sharedMemLog struct {
+	buf     uint32
+	bufSize uint32
+	idx     uint32
+	outIdx  uint32
+}
+
+func decodeSharedMemLog(buf []byte) (s sharedMemLog) {
+	s.buf = binary.LittleEndian.Uint32(buf[0:4])
+	s.bufSize = binary.LittleEndian.Uint32(buf[4:8])
+	s.idx = binary.LittleEndian.Uint32(buf[8:12])
+	s.outIdx = binary.LittleEndian.Uint32(buf[12:16])
+	return s
 }

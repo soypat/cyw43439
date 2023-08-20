@@ -3,6 +3,7 @@ package cyrw
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"sync"
@@ -20,6 +21,7 @@ type OutputPin func(bool)
 func DefaultConfig() Config {
 	return Config{
 		Firmware: wifiFW2,
+		CLM:      clmFW,
 	}
 }
 
@@ -33,11 +35,13 @@ type Device struct {
 	backplaneWindow uint32
 	ioctlID         uint16
 	sdpcmSeq        uint8
+	sdpcmSeqMax     uint8
 	mac             [6]byte
 	// uint32 buffers to ensure alignment of buffers.
 	rwBuf         [2]uint32        // rwBuf used for read* and write* functions.
 	_sendIoctlBuf [2048 / 4]uint32 // _sendIoctlBuf used only in sendIoctl and tx.
-	_iovarBuf     [2048 / 4]uint32
+	_iovarBuf     [2048 / 4]uint32 // _iovarBuf used in get_iovar* and set_iovar* calls.
+	_rxBuf        [2048 / 4]uint32 // Used in check_status->rx calls and handle_irq.
 	// We define headers in the Device struct to alleviate stack growth. Also used along with _sendIoctlBuf
 	auxSDPCMHeader whd.SDPCMHeader
 	auxCDCHeader   whd.CDCHeader
@@ -51,12 +55,14 @@ func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
 			spi: spi,
 			cs:  cs,
 		},
+		sdpcmSeqMax: 1,
 	}
 	return d
 }
 
 type Config struct {
 	Firmware string
+	CLM      string
 }
 
 func hex32(u uint32) string {
@@ -154,8 +160,16 @@ func (d *Device) Init(cfg Config) (err error) {
 	d.write8(FuncBackplane, whd.SDIO_PULL_UP, 0)
 	d.read8(FuncBackplane, whd.SDIO_PULL_UP)
 
-	d.debug("wifi init done")
-	return nil
+	err = d.log_init()
+	if err != nil {
+		return err
+	}
+
+	d.debug("base init done")
+	if cfg.CLM == "" {
+		return nil
+	}
+	return d.initControl(cfg.CLM)
 }
 
 func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
@@ -185,6 +199,14 @@ func (d *Device) Reset() {
 	time.Sleep(20 * time.Millisecond)
 	d.pwr(true)
 	time.Sleep(250 * time.Millisecond)
+}
+
+func (d *Device) getInterrupts() Interrupts {
+	irq, err := d.read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
+	if err != nil {
+		return 0
+	}
+	return Interrupts(irq)
 }
 
 func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
@@ -451,6 +473,10 @@ func unsafeAsSlice[F, T constraints.Unsigned](buf []F) []T {
 	return unsafe.Slice((*T)(ptr), align(uint32(len(buf)/div), uint32(div)))
 }
 
+func (d *Device) warn(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelWarn, msg, attrs...)
+}
+
 func (d *Device) info(msg string, attrs ...slog.Attr) {
 	d.logattrs(slog.LevelInfo, msg, attrs...)
 }
@@ -460,12 +486,22 @@ func (d *Device) debug(msg string, attrs ...slog.Attr) {
 }
 
 func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
+	const logAttrs = true
+	print(level.String())
+	print(" ")
 	print(msg)
-	for _, a := range attrs {
-		print(" ")
-		print(a.Key)
-		print("=")
-		print(a.Value.String())
+	if logAttrs {
+		for _, a := range attrs {
+			print(" ")
+			print(a.Key)
+			print("=")
+			if a.Value.Kind() == slog.KindAny {
+				fmt.Printf("%+v", a.Value.Any())
+				// fmt.Print(a.Value.Any()) // Getting hard faults in Value.String()
+			} else {
+				print(a.Value.String())
+			}
+		}
 	}
 	println()
 	// slog.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...) // Is segfaulting.

@@ -20,10 +20,11 @@ type SDPCMHeader struct {
 
 func (s SDPCMHeader) Type() SDPCMHeaderType { return SDPCMHeaderType(s.ChanAndFlags & 0xf) }
 
-func DecodeSDPCMHeader(b []byte) (hdr SDPCMHeader) {
+// DecodeSDPCMHeader c-ref:LittleEndian
+func DecodeSDPCMHeader(order binary.ByteOrder, b []byte) (hdr SDPCMHeader) {
 	_ = b[SDPCM_HEADER_LEN-1]
-	hdr.Size = binary.LittleEndian.Uint16(b)
-	hdr.SizeCom = binary.LittleEndian.Uint16(b[2:])
+	hdr.Size = order.Uint16(b)
+	hdr.SizeCom = order.Uint16(b[2:])
 	hdr.Seq = b[4]
 	hdr.ChanAndFlags = b[5]
 	hdr.NextLength = b[6]
@@ -34,16 +35,18 @@ func DecodeSDPCMHeader(b []byte) (hdr SDPCMHeader) {
 	return hdr
 }
 
-func (s *SDPCMHeader) arrayPtr() *[12]byte {
-	const mustBe12 = unsafe.Sizeof(SDPCMHeader{}) // Will fail to compile when size changes.
-	return (*[mustBe12]byte)(unsafe.Pointer(s))
-}
-
 // Put puts all 12 bytes of sdpcmHeader in dst. Panics if dst is shorter than 12 bytes in length.
-func (s *SDPCMHeader) Put(dst []byte) {
+func (s *SDPCMHeader) Put(order binary.ByteOrder, dst []byte) {
 	_ = dst[11]
-	ptr := s.arrayPtr()[:]
-	copy(dst, ptr)
+	order.PutUint16(dst, s.Size)
+	order.PutUint16(dst[2:], s.SizeCom)
+	dst[4] = s.Seq
+	dst[5] = s.ChanAndFlags
+	dst[6] = s.NextLength
+	dst[7] = s.HeaderLength
+	dst[8] = s.WirelessFlowCtl
+	dst[9] = s.BusDataCredit
+	copy(dst[10:], s.Reserved[:])
 }
 
 type IoctlHeader struct {
@@ -57,25 +60,23 @@ func (io *IoctlHeader) ID() uint16 {
 	return uint16((io.Flags & CDCF_IOC_ID_MASK) >> CDCF_IOC_ID_SHIFT)
 }
 
-func DecodeIoctlHeader(b []byte) (hdr IoctlHeader) {
+// DecodeIoctlHeader c-ref:LittleEndian
+func DecodeIoctlHeader(order binary.ByteOrder, b []byte) (hdr IoctlHeader) {
 	_ = b[IOCTL_HEADER_LEN-1]
-	hdr.Cmd = SDPCMCommand(binary.LittleEndian.Uint32(b))
-	hdr.Len = binary.LittleEndian.Uint32(b[4:])
-	hdr.Flags = binary.LittleEndian.Uint32(b[8:])
-	hdr.Status = binary.LittleEndian.Uint32(b[12:])
+	hdr.Cmd = SDPCMCommand(order.Uint32(b))
+	hdr.Len = order.Uint32(b[4:])
+	hdr.Flags = order.Uint32(b[8:])
+	hdr.Status = order.Uint32(b[12:])
 	return hdr
 }
 
-func (io *IoctlHeader) arrayPtr() *[16]byte {
-	const mustBe16 = unsafe.Sizeof(IoctlHeader{}) // Will fail to compile when size changes.
-	return (*[mustBe16]byte)(unsafe.Pointer(io))
-}
-
 // Put puts all 16 bytes of ioctlHeader in dst. Panics if dst is shorter than 16 bytes in length.
-func (io *IoctlHeader) Put(dst []byte) {
+func (io *IoctlHeader) Put(order binary.ByteOrder, dst []byte) {
 	_ = dst[15]
-	ptr := io.arrayPtr()[:]
-	copy(dst, ptr)
+	order.PutUint32(dst, uint32(io.Cmd))
+	order.PutUint32(dst[4:], io.Len)
+	order.PutUint32(dst[8:], io.Flags)
+	order.PutUint32(dst[12:], io.Status)
 }
 
 type BDCHeader struct {
@@ -85,23 +86,20 @@ type BDCHeader struct {
 	DataOffset uint8
 }
 
-func (bdc *BDCHeader) arrayptr() *[4]byte {
-	return (*[4]byte)(unsafe.Pointer(bdc))
-}
-
-func (bdc *BDCHeader) ptr() *uint32 {
-	return (*uint32)(unsafe.Pointer(bdc))
-}
-
 func (bdc *BDCHeader) Put(b []byte) {
 	_ = b[3]
-	// ptr := bdc.uint32ptr()
-	copy(b, bdc.arrayptr()[:])
+	b[0] = bdc.Flags
+	b[1] = bdc.Priority
+	b[2] = bdc.Flags2
+	b[3] = bdc.DataOffset
 }
 
 func DecodeBDCHeader(b []byte) (hdr BDCHeader) {
 	_ = b[3]
-	copy(hdr.arrayptr()[:], b)
+	hdr.Flags = b[0]
+	hdr.Priority = b[1]
+	hdr.Flags2 = b[2]
+	hdr.DataOffset = b[3]
 	return hdr
 }
 
@@ -113,23 +111,25 @@ type CDCHeader struct {
 	Status uint32
 }
 
-func DecodeCDCHeader(b []byte) (hdr CDCHeader) {
+// DecodeCDCHeader c-ref:LittleEndian
+func DecodeCDCHeader(order binary.ByteOrder, b []byte) (hdr CDCHeader) {
 	_ = b[CDC_HEADER_LEN-1]
-	hdr.Cmd = SDPCMCommand(binary.LittleEndian.Uint32(b))
-	hdr.Length = binary.LittleEndian.Uint32(b[4:])
-	hdr.Flags = binary.LittleEndian.Uint16(b[8:])
-	hdr.ID = binary.LittleEndian.Uint16(b[10:])
-	hdr.Status = binary.LittleEndian.Uint32(b[12:])
+	hdr.Cmd = SDPCMCommand(order.Uint32(b))
+	hdr.Length = order.Uint32(b[4:])
+	hdr.Flags = order.Uint16(b[8:])
+	hdr.ID = order.Uint16(b[10:])
+	hdr.Status = order.Uint32(b[12:])
 	return hdr
 }
 
-func (cdc *CDCHeader) Put(b []byte) {
+// Put c-ref:LittleEndian
+func (cdc *CDCHeader) Put(order binary.ByteOrder, b []byte) {
 	_ = b[15]
-	binary.LittleEndian.PutUint32(b, uint32(cdc.Cmd))
-	binary.LittleEndian.PutUint32(b[4:], cdc.Length)
-	binary.LittleEndian.PutUint16(b[8:], cdc.Flags)
-	binary.LittleEndian.PutUint16(b[10:], cdc.ID)
-	binary.LittleEndian.PutUint32(b[12:], cdc.Status)
+	order.PutUint32(b, uint32(cdc.Cmd))
+	order.PutUint32(b[4:], cdc.Length)
+	order.PutUint16(b[8:], cdc.Flags)
+	order.PutUint16(b[10:], cdc.ID)
+	order.PutUint32(b[12:], cdc.Status)
 }
 
 type AsyncEvent struct {
@@ -144,22 +144,23 @@ type AsyncEvent struct {
 	u         EventScanResult
 }
 
+// ParseAsyncEvent c-ref:BigEndian
 // reference: cyw43_ll_parse_async_event
-func ParseAsyncEvent(buf []byte) (ev AsyncEvent, err error) {
+func ParseAsyncEvent(order binary.ByteOrder, buf []byte) (ev AsyncEvent, err error) {
 	if len(buf) < 48 {
 		return ev, errors.New("buffer too small to parse async event")
 	}
-	ev.Flags = binary.BigEndian.Uint16(buf[2:])
-	ev.EventType = AsyncEventType(binary.BigEndian.Uint32(buf[4:]))
-	ev.Status = binary.BigEndian.Uint32(buf[8:])
-	ev.Reason = binary.BigEndian.Uint32(buf[12:])
+	ev.Flags = order.Uint16(buf[2:])
+	ev.EventType = AsyncEventType(order.Uint32(buf[4:]))
+	ev.Status = order.Uint32(buf[8:])
+	ev.Reason = order.Uint32(buf[12:])
 	const ifaceOffset = 12 + 4 + 30
 	ev.Interface = buf[ifaceOffset]
 	if ev.EventType == CYW43_EV_ESCAN_RESULT && ev.Status == CYW43_STATUS_PARTIAL {
 		if len(buf) < int(unsafe.Sizeof(ev)) {
 			return ev, errors.New("buffer too small to parse scan results")
 		}
-		ev.u, err = ParseScanResult(buf[48:])
+		ev.u, err = ParseScanResult(order, buf[48:])
 	}
 	return ev, err
 }
@@ -215,7 +216,7 @@ type EventScanResult struct {
 }
 
 // reference: cyw43_ll_wifi_parse_scan_result
-func ParseScanResult(buf []byte) (sr EventScanResult, err error) {
+func ParseScanResult(order binary.ByteOrder, buf []byte) (sr EventScanResult, err error) {
 	type scanresult struct {
 		buflen   uint32
 		version  uint32
@@ -259,4 +260,18 @@ type ScanOptions struct {
 	HomeTime    int32
 	ChannelNum  int32
 	ChannelList [1]uint16
+}
+
+type DownloadHeader struct {
+	Flags uint16 // VER=0x1000, NO_CRC=0x1, BEGIN=0x2, END=0x4
+	Type  uint16 // Download type.
+	Len   uint32
+	CRC   uint32
+}
+
+func (dh *DownloadHeader) Put(order binary.ByteOrder, b []byte) {
+	order.PutUint16(b[0:2], dh.Flags)
+	order.PutUint16(b[2:4], dh.Type)
+	order.PutUint32(b[4:8], dh.Len)
+	order.PutUint32(b[8:12], dh.CRC)
 }

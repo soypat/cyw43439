@@ -131,6 +131,23 @@ func (Int Interrupts) IsF2Available() bool {
 	return Int&(whd.F2_PACKET_AVAILABLE) != 0
 }
 
+func (Int Interrupts) IsDataAvailable() bool {
+	return Int&(whd.DATA_UNAVAILABLE) == 0
+}
+
+func (Int Interrupts) String() (s string) {
+	if Int == 0 {
+		return "no interrupts"
+	}
+	for i := 0; Int != 0; i++ {
+		if Int&1 != 0 {
+			s += irqmask(1<<i).String() + " "
+		}
+		Int >>= 1
+	}
+	return s
+}
+
 func GetCLM(firmware []byte) []byte {
 	clmAddr := align(uint32(len(firmware)), 512)
 	if uint32(cap(firmware)) < clmAddr+clmLen {
@@ -239,3 +256,25 @@ func (e *joinError) Error() string {
 func (e *joinError) Unwrap() []error {
 	return e.errs
 }
+
+//go:generate stringer -type=irqmask -output=interrupts_string.go -trimprefix=irq
+type irqmask uint16
+
+const (
+	irqDATA_UNAVAILABLE        irqmask = 0x0001 // Requested data not available; Clear by writing a "1"
+	irqF2_F3_FIFO_RD_UNDERFLOW irqmask = 0x0002
+	irqF2_F3_FIFO_WR_OVERFLOW  irqmask = 0x0004
+	irqCOMMAND_ERROR           irqmask = 0x0008 // Cleared by writing 1.
+	irqDATA_ERROR              irqmask = 0x0010 // Cleared by writing 1.
+	irqF2_PACKET_AVAILABLE     irqmask = 0x0020
+	irqF3_PACKET_AVAILABLE     irqmask = 0x0040
+	irqF1_OVERFLOW             irqmask = 0x0080 // Due to last write. Bkplane has pending write requests.
+	irqMISC_INTR0              irqmask = 0x0100
+	irqMISC_INTR1              irqmask = 0x0200
+	irqMISC_INTR2              irqmask = 0x0400
+	irqMISC_INTR3              irqmask = 0x0800
+	irqMISC_INTR4              irqmask = 0x1000
+	irqF1_INTR                 irqmask = 0x2000
+	irqF2_INTR                 irqmask = 0x4000
+	irqF3_INTR                 irqmask = 0x8000
+)
