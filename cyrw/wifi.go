@@ -85,7 +85,8 @@ func (d *Device) initControl(clm string) error {
 	evts.Unset(whd.EvPROBREQ_MSG)
 	evts.Unset(whd.EvPROBREQ_MSG_RX)
 	evts.Unset(whd.EvPROBRESP_MSG)
-	evts.Unset(whd.EvPROBRESP_MSG)
+	evts.Unset(whd.EvROAM)
+
 	return nil
 }
 
