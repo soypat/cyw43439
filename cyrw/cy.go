@@ -33,9 +33,10 @@ type Device struct {
 	backplaneWindow uint32
 	ioctlID         uint16
 	sdpcmSeq        uint8
-
+	// uint32 buffers to ensure alignment of buffers.
 	rwBuf         [2]uint32        // rwBuf used for read* and write* functions.
 	_sendIoctlBuf [2048 / 4]uint32 // _sendIoctlBuf used only in sendIoctl and tx.
+	_iovarBuf     [2048 / 4]uint32
 	// We define headers in the Device struct to alleviate stack growth. Also used along with _sendIoctlBuf
 	auxSDPCMHeader whd.SDPCMHeader
 	auxCDCHeader   whd.CDCHeader
@@ -156,6 +157,16 @@ func (d *Device) Init(cfg Config) (err error) {
 	return nil
 }
 
+func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
+	d.info("GPIOSet", slog.Uint64("wlGPIO", uint64(wlGPIO)), slog.Bool("value", value))
+	if wlGPIO >= 3 {
+		return errors.New("gpio out of range")
+	}
+	val0 := uint32(1) << wlGPIO
+	val1 := b2u32(value) << wlGPIO
+	return d.set_iovar2("gpioout", whd.WWD_STA_INTERFACE, val0, val1)
+}
+
 // status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
 func (d *Device) status() Status {
 	sinceStat := time.Since(d.lastStatusGet)
@@ -199,7 +210,7 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
 	var buf [maxTxSize/4 + 1]uint32
-	buf8 := unsafeAs[uint32, byte](buf[:])
+	buf8 := unsafeAsSlice[uint32, byte](buf[:])
 	for len(data) > 0 {
 		// Calculate address and length of next write.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
@@ -250,7 +261,7 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 		slog.String("last16", hex.EncodeToString(data[max(0, len(data)-16):])), // mismatch with reference?
 	)
 	var buf [maxTxSize/4 + 1]uint32
-	buf8 := unsafeAs[uint32, byte](buf[1:]) // Slice excluding first word reserved for command.
+	buf8 := unsafeAsSlice[uint32, byte](buf[1:]) // Slice excluding first word reserved for command.
 	for err == nil && len(data) > 0 {
 		// Calculate address and length of next write to ensure transfer doesn't cross a window boundary.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
@@ -408,11 +419,22 @@ func (d *Device) write32_swapped(addr uint32, value uint32) {
 }
 
 func u32AsU8(buf []uint32) []byte {
-	return unsafeAs[uint32, byte](buf)
+	return unsafeAsSlice[uint32, byte](buf)
 }
 
-// unsafeAs converts a slice of F to a slice of T.
-func unsafeAs[F, T constraints.Unsigned](buf []F) []T {
+func u32PtrTo4U8(buf *uint32) *[4]byte {
+	return (*[4]byte)(unsafe.Pointer(buf))
+}
+
+func unsafeAs[F, T constraints.Unsigned](ptr *F) *T {
+	if unsafe.Alignof(F(0)) < unsafe.Alignof(T(0)) {
+		panic("unsafeAs: F alignment < T alignment")
+	}
+	return (*T)(unsafe.Pointer(ptr))
+}
+
+// unsafeAsSlice converts a slice of F to a slice of T.
+func unsafeAsSlice[F, T constraints.Unsigned](buf []F) []T {
 	fSize := unsafe.Sizeof(F(0))
 	tSize := unsafe.Sizeof(T(0))
 	ptr := unsafe.Pointer(&buf[0])
@@ -428,17 +450,24 @@ func unsafeAs[F, T constraints.Unsigned](buf []F) []T {
 	return unsafe.Slice((*T)(ptr), align(uint32(len(buf)/div), uint32(div)))
 }
 
+func (d *Device) info(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelInfo, msg, attrs...)
+}
+
 func (d *Device) debug(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelDebug, msg, attrs...)
+}
+
+func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 	print(msg)
-	print(" ")
 	for _, a := range attrs {
+		print(" ")
 		print(a.Key)
 		print("=")
 		print(a.Value.String())
-		print(" ")
 	}
 	println()
-	// slog.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...) // Is panicking.
+	// slog.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...) // Is segfaulting.
 }
 
 //go:inline

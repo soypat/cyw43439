@@ -3,6 +3,8 @@
 
 package whd
 
+import "encoding/binary"
+
 // CountryCode returns the country code representation given an uppercase two character string.
 // Known countries:
 //   - WORLDWIDE      "XX" (use this if in doubt)
@@ -71,6 +73,7 @@ const (
 	IOCTL_HEADER_LEN = 16
 	BDC_HEADER_LEN   = 4
 	CDC_HEADER_LEN   = 16
+	DL_HEADER_LEN    = 12 // DownloadHeader size.
 )
 
 const (
@@ -583,3 +586,17 @@ const (
 	WIFI_JOIN_STATE_KEYED     = 0x0800
 	WIFI_JOIN_STATE_ALL       = 0x0e01
 )
+
+type DownloadHeader struct {
+	Flags uint16 // VER=0x1000, NO_CRC=0x1, BEGIN=0x2, END=0x4
+	Type  uint16 // Download type.
+	Len   uint32
+	CRC   uint32
+}
+
+func (dh *DownloadHeader) Put(b []byte) {
+	binary.BigEndian.PutUint16(b[0:2], dh.Flags)
+	binary.BigEndian.PutUint16(b[2:4], dh.Type)
+	binary.BigEndian.PutUint32(b[4:8], dh.Len)
+	binary.BigEndian.PutUint32(b[8:12], dh.CRC)
+}

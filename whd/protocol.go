@@ -106,7 +106,7 @@ func DecodeBDCHeader(b []byte) (hdr BDCHeader) {
 }
 
 type CDCHeader struct {
-	Cmd    uint32
+	Cmd    SDPCMCommand
 	Length uint32
 	Flags  uint16
 	ID     uint16
@@ -115,7 +115,7 @@ type CDCHeader struct {
 
 func DecodeCDCHeader(b []byte) (hdr CDCHeader) {
 	_ = b[CDC_HEADER_LEN-1]
-	hdr.Cmd = binary.LittleEndian.Uint32(b)
+	hdr.Cmd = SDPCMCommand(binary.LittleEndian.Uint32(b))
 	hdr.Length = binary.LittleEndian.Uint32(b[4:])
 	hdr.Flags = binary.LittleEndian.Uint16(b[8:])
 	hdr.ID = binary.LittleEndian.Uint16(b[10:])
@@ -125,7 +125,7 @@ func DecodeCDCHeader(b []byte) (hdr CDCHeader) {
 
 func (cdc *CDCHeader) Put(b []byte) {
 	_ = b[15]
-	binary.LittleEndian.PutUint32(b, cdc.Cmd)
+	binary.LittleEndian.PutUint32(b, uint32(cdc.Cmd))
 	binary.LittleEndian.PutUint32(b[4:], cdc.Length)
 	binary.LittleEndian.PutUint16(b[8:], cdc.Flags)
 	binary.LittleEndian.PutUint16(b[10:], cdc.ID)
