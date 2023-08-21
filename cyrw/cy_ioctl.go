@@ -254,8 +254,10 @@ func (d *Device) check_status(buf []uint32) error {
 				return err
 			}
 			buf8 := u32AsU8(buf[:])
-			d.debug("rx", slog.Int("len", int(length)))
-			d.rx(buf8[:length])
+			err = d.rx(buf8[:length])
+			if err != nil {
+				return err
+			}
 		} else {
 			break
 		}
@@ -263,6 +265,71 @@ func (d *Device) check_status(buf []uint32) error {
 	return nil
 }
 
-func (d *Device) rx(packet []byte) {
-	// Hey scott, wanna program this one? https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
+func (d *Device) updateCredit(sdpcmHdr whd.SDPCMHeader) {
+	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L467
+	switch sdpcmHdr.Type() {
+	case whd.CONTROL_HEADER, whd.ASYNCEVENT_HEADER, whd.DATA_HEADER:
+		max := sdpcmHdr.BusDataCredit
+		// TODO(sfeldma) not sure about this math, rust had:
+		// if sdpcm_seq_max.wrapping_sub(self.sdpcm_seq) > 0x40
+		if (max - d.sdpcmSeq) > 0x40 {
+			max = d.sdpcmSeq + 2
+		}
+		d.sdpcmSeqMax = max
+	}
+}
+
+func (d *Device) rxControl(packet []byte) error {
+	d.debug("rxControl", slog.Int("len", len(packet)))
+	cdcHdr := whd.DecodeCDCHeader(_busOrder, packet)
+	response, err := cdcHdr.Parse(packet)
+	if err != nil {
+		return err
+	}
+	d.debug("rxControl:cdc", slog.String("resp", string(response)))
+	if cdcHdr.ID == d.ioctlID {
+		if cdcHdr.Status != 0 {
+			return errors.New("IOCTL error:" + strconv.Itoa(int(cdcHdr.Status)))
+		}
+		// TODO(sfeldma) rust -> Go
+		// self.ioctl_state.ioctl_done(response);
+	}
+	return nil
+}
+
+func (d *Device) rxEvent(packet []byte) error {
+	d.debug("rxEvent", slog.Int("len", len(packet)))
+	return nil
+}
+
+func (d *Device) rxData(packet []byte) error {
+	d.debug("rxData", slog.Int("len", len(packet)))
+	bdcHdr := whd.DecodeBDCHeader(packet)
+	d.debug("rxData:bdc", slog.Any("bdc", &bdcHdr))
+	// TODO(sfeldma) send payload up as new rx eth packet
+	return nil
+}
+
+func (d *Device) rx(packet []byte) error {
+	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
+	d.debug("rx", slog.Int("len", len(packet)))
+
+	sdpcmHdr := whd.DecodeSDPCMHeader(_busOrder, packet)
+	payload, err := sdpcmHdr.Parse(packet)
+	if err != nil {
+		return err
+	}
+
+	d.updateCredit(sdpcmHdr)
+
+	switch sdpcmHdr.Type() {
+	case whd.CONTROL_HEADER:
+		return d.rxControl(payload)
+	case whd.ASYNCEVENT_HEADER:
+		return d.rxEvent(payload)
+	case whd.DATA_HEADER:
+		return d.rxData(payload)
+	}
+
+	return errors.New("unknown sdpcm hdr type")
 }

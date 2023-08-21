@@ -3,18 +3,20 @@ package whd
 import (
 	"encoding/binary"
 	"errors"
+	"strconv"
 	"unsafe"
 )
 
 type SDPCMHeader struct {
-	Size            uint16
-	SizeCom         uint16 // complement of size, so ^Size.
-	Seq             uint8
-	ChanAndFlags    uint8 // Channel types: Control=0; Event=1; Data=2.
-	NextLength      uint8
-	HeaderLength    uint8
-	WirelessFlowCtl uint8
-	BusDataCredit   uint8
+	Size         uint16
+	SizeCom      uint16 // complement of size, so ^Size.
+	Seq          uint8  // Rx/Tx sequence number
+	ChanAndFlags uint8  // 4 MSB Channel number, 4 LSB arbitrary flag
+	// channel types: Control=0; Event=1; Data=2.
+	NextLength      uint8 // length of next data frame, reserved for Tx
+	HeaderLength    uint8 // data offset
+	WirelessFlowCtl uint8 // flow control bits, reserved for Tx
+	BusDataCredit   uint8 // maximum Sequence number allowed by firmware for Tx
 	Reserved        [2]uint8
 }
 
@@ -49,6 +51,26 @@ func (s *SDPCMHeader) Put(order binary.ByteOrder, dst []byte) {
 	copy(dst[10:], s.Reserved[:])
 }
 
+func (s *SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
+	if len(packet) < SDPCM_HEADER_LEN+int(s.Size) {
+		err = errors.New("packet shorter than sdpcm hdr, len=" + strconv.Itoa(len(packet)))
+		return
+	}
+
+	if s.Size != ^s.SizeCom {
+		err = errors.New("sdpcm hdr size complement mismatch")
+		return
+	}
+
+	if int(s.Size) != len(packet) {
+		err = errors.New("sdpcm hdr size doesn't match packet length from SPI")
+		return
+	}
+
+	payload = packet[SDPCM_HEADER_LEN:]
+	return
+}
+
 type IoctlHeader struct {
 	Cmd    SDPCMCommand
 	Len    uint32
@@ -81,9 +103,10 @@ func (io *IoctlHeader) Put(order binary.ByteOrder, dst []byte) {
 
 type BDCHeader struct {
 	Flags      uint8
-	Priority   uint8
+	Priority   uint8 // 802.1d Priority (low 3 bits)
 	Flags2     uint8
-	DataOffset uint8
+	DataOffset uint8 // Offset from end of BDC header to packet data, in
+	// 4-uint8_t words. Leaves room for optional headers.
 }
 
 func (bdc *BDCHeader) Put(b []byte) {
@@ -130,6 +153,15 @@ func (cdc *CDCHeader) Put(order binary.ByteOrder, b []byte) {
 	order.PutUint16(b[8:], cdc.Flags)
 	order.PutUint16(b[10:], cdc.ID)
 	order.PutUint32(b[12:], cdc.Status)
+}
+
+func (cdc CDCHeader) Parse(packet []byte) (payload []byte, err error) {
+	if len(packet) < CDC_HEADER_LEN+int(cdc.Length) {
+		err = errors.New("packet shorter than cdc hdr, len=" + strconv.Itoa(len(packet)))
+		return
+	}
+	payload = packet[CDC_HEADER_LEN:]
+	return
 }
 
 type AsyncEvent struct {
