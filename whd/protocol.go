@@ -101,9 +101,10 @@ func (io *IoctlHeader) Put(dst []byte) {
 
 type BDCHeader struct {
 	Flags      uint8
-	Priority   uint8
+	Priority   uint8 // 802.1d Priority (low 3 bits)
 	Flags2     uint8
-	DataOffset uint8
+	DataOffset uint8 // Offset from end of BDC header to packet data, in
+			 // 4-uint8_t words. Leaves room for optional headers.
 }
 
 func (bdc *BDCHeader) arrayptr() *[4]byte {
@@ -124,6 +125,16 @@ func DecodeBDCHeader(b []byte) (hdr BDCHeader) {
 	_ = b[3]
 	copy(hdr.arrayptr()[:], b)
 	return hdr
+}
+
+func (bdc BDCHeader) Parse(packet []byte) (payload []byte, err error) {
+	if len(packet) < BDC_HEADER_LEN {
+		err = errors.New("packet shorter than bdc hdr, len=", strconv.Itoa(len(packet)))
+		return
+	}
+	packetStart := 4 * uint(bdc.DataOffset)
+	payload = packet[packetStart:]
+	return
 }
 
 type CDCHeader struct {

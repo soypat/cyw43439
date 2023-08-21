@@ -124,10 +124,10 @@ func (d *Device) updateCredit(sdpcmHdr whd.SDPCMHeader) {
 	}
 }
 
-func (d *Device) rxControl(payload []byte) error {
-	d.debug("rxControl", slog.Int("len", len(payload)))
-	cdcHdr := DecodeCDCHeader(payload)
-	response, err := cdcHdr.Parse(payload)
+func (d *Device) rxControl(packet []byte) error {
+	d.debug("rxControl", slog.Int("len", len(packet)))
+	cdcHdr := DecodeCDCHeader(packet)
+	response, err := cdcHdr.Parse(packet)
 	if err != nil {
 		return err
 	}
@@ -141,12 +141,19 @@ func (d *Device) rxControl(payload []byte) error {
 	return nil
 }
 
-func (d *Device) rxEvent(payload []byte) error {
-	d.debug("rxEvent", slog.Int("len", len(payload)))
+func (d *Device) rxEvent(packet []byte) error {
+	d.debug("rxEvent", slog.Int("len", len(packet)))
 }
 
-func (d *Device) rxData(payload []byte) error {
-	d.debug("rxData", slog.Int("len", len(payload)))
+func (d *Device) rxData(packet []byte) error {
+	d.debug("rxData", slog.Int("len", len(packet)))
+	bdcHdr := DecodeBDCHeader(packet)
+	payload, err := bdcHdr.Parse(packet)
+	if err != nil {
+		return err
+	}
+	// TODO(sfeldma) send payload up as new rx eth packet
+	return nil
 }
 
 func (d *Device) rx(packet []byte) error {
