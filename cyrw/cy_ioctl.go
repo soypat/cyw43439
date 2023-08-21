@@ -125,12 +125,28 @@ func (d *Device) updateCredit(sdpcmHdr whd.SDPCMHeader) {
 }
 
 func (d *Device) rxControl(payload []byte) error {
+	d.debug("rxControl", slog.Int("len", len(payload)))
+	cdcHdr := DecodeCDCHeader(payload)
+	response, err := cdcHdr.Parse(payload)
+	if err != nil {
+		return err
+	}
+	if cdcHdr.ID == d.ioctlID {
+		if cdcHdr.Status != 0 {
+			return errors.New("IOCTL error", cdcHdr.Status)
+		}
+		// TODO(sfeldma) rust -> Go
+		// self.ioctl_state.ioctl_done(response);
+	}
+	return nil
 }
 
 func (d *Device) rxEvent(payload []byte) error {
+	d.debug("rxEvent", slog.Int("len", len(payload)))
 }
 
 func (d *Device) rxData(payload []byte) error {
+	d.debug("rxData", slog.Int("len", len(payload)))
 }
 
 func (d *Device) rx(packet []byte) error {

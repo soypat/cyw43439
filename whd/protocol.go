@@ -153,6 +153,15 @@ func (cdc *CDCHeader) Put(b []byte) {
 	binary.LittleEndian.PutUint32(b[12:], cdc.Status)
 }
 
+func (cdc CDCHeader) Parse(packet []byte) (payload []byte, err error) {
+	if len(packet) < CDC_HEADER_LEN {
+		err = errors.New("packet shorter than cdc hdr, len=", strconv.Itoa(len(packet)))
+		return
+	}
+	payload = packet[CDC_HEADER_LEN:]
+	return
+}
+
 type AsyncEvent struct {
 	_         uint16
 	Flags     uint16
