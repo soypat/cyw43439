@@ -4,10 +4,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 )
+
+const noPacket = whd.SDPCMHeaderType(0xff)
 
 type ioctlType uint8
 
@@ -47,14 +50,15 @@ func (d *Device) singleRun() error {
 }
 
 func (d *Device) update_credit(hdr *whd.SDPCMHeader) {
-	if hdr.ChanAndFlags&0xf >= 3 {
-		return // Not Control, Data or Event channel.
+	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L467
+	switch hdr.Type() {
+	case whd.CONTROL_HEADER, whd.ASYNCEVENT_HEADER, whd.DATA_HEADER:
+		max := hdr.BusDataCredit
+		if (max - d.sdpcmSeq) > 0x40 {
+			max = d.sdpcmSeq + 2
+		}
+		d.sdpcmSeqMax = max
 	}
-	seqMax := hdr.BusDataCredit
-	if seqMax-d.sdpcmSeq > 0x40 {
-		seqMax = d.sdpcmSeq + 2
-	}
-	d.sdpcmSeqMax = seqMax
 }
 
 func (d *Device) has_credit() bool {
@@ -77,14 +81,14 @@ func (d *Device) tx(packet []byte) (err error) {
 	seq := d.sdpcmSeq
 	d.sdpcmSeq++ // Go wraps around on overflow by default.
 
-	d.auxSDPCMHeader = whd.SDPCMHeader{
+	d.lastSDPCMHeader = whd.SDPCMHeader{
 		Size:         uint16(totalLen), // TODO does this len need to be rounded up to u32?
 		SizeCom:      ^uint16(totalLen),
 		Seq:          uint8(seq),
 		ChanAndFlags: 2, // Data channel.
 		HeaderLength: whd.SDPCM_HEADER_LEN + PADDING_SIZE,
 	}
-	d.auxSDPCMHeader.Put(_busOrder, buf8[:whd.SDPCM_HEADER_LEN])
+	d.lastSDPCMHeader.Put(_busOrder, buf8[:whd.SDPCM_HEADER_LEN])
 
 	d.auxBDCHeader = whd.BDCHeader{
 		Flags: 2 << 4, // BDC version.
@@ -126,7 +130,7 @@ func (d *Device) get_iovar_n(VAR string, iface whd.IoctlInterface, res []byte) (
 
 // reference: ioctl_set_u32
 func (d *Device) set_ioctl(cmd whd.SDPCMCommand, iface whd.IoctlInterface, val uint32) error {
-	return d.doIoctl(whd.SDPCM_SET, cmd, iface, u32PtrTo4U8(&val)[:4])
+	return d.doIoctlSet(cmd, iface, u32PtrTo4U8(&val)[:4])
 }
 
 func (d *Device) set_iovar(VAR string, iface whd.IoctlInterface, val uint32) error {
@@ -160,17 +164,27 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 }
 
 func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (_ int, err error) {
-	err = d.doIoctl(ioctlGET, cmd, iface, data)
-	println("doIoctlGet not correctly implemented yet")
-	return len(data), err // TODO: implement this correctly.
+	err = d.sendIoctl(ioctlGET, cmd, iface, data)
+	if err != nil {
+		return 0, err
+	}
+	packet, err := d.pollForIoctl(d.ioctlID, d._sendIoctlBuf[:])
+	if err != nil {
+		d.logerr("sendIoctl:resp", slog.String("err", err.Error()))
+		return 0, err
+	}
+	d.debug("sendIoctl:resp", slog.String("resp", string(packet)))
+
+	return copy(data[:], packet), nil
 }
 
 func (d *Device) doIoctlSet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
-	return d.doIoctl(ioctlSET, cmd, iface, data)
+	defer d.check_status(d._sendIoctlBuf[:])
+	return d.sendIoctl(ioctlSET, cmd, iface, data)
 }
 
-// doIoctl should probably loop until they complete succesfully?
-func (d *Device) doIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) error {
+// sendIoctl sends a SDPCM+CDC ioctl command to the device with data.
+func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
 	if !iface.IsValid() {
 		return errors.New("invalid ioctl interface")
 	} else if !cmd.IsValid() {
@@ -178,24 +192,12 @@ func (d *Device) doIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.IoctlIn
 	} else if kind != whd.SDPCM_GET && kind != whd.SDPCM_SET {
 		return errors.New("invalid ioctl kind")
 	}
-	d.debug("doIoctl", slog.String("cmd", cmd.String()), slog.Int("len", len(data)))
-	err := d.sendIoctl(kind, cmd, iface, data)
-	if err != nil || kind == whd.SDPCM_SET {
-		return err
-	}
-	// Should poll SDPCM for read operations to complete succesfully.
-	return nil
-}
-
-// sendIoctl sends a SDPCM+CDC ioctl command to the device with data.
-func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
 	d.debug("sendIoctl", slog.Int("kind", int(kind)), slog.String("cmd", cmd.String()), slog.Int("len", len(data)))
-	defer d.check_status(d._rxBuf[:])
 
 	buf := d._sendIoctlBuf[:]
 	buf8 := u32AsU8(buf)
 
-	totalLen := uint32(whd.SDPCM_HEADER_LEN + whd.CDC_HEADER_LEN + len(data))
+	totalLen := uint32(whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN + len(data))
 	if int(totalLen) > len(buf8) {
 		return errors.New("ioctl data too large " + strconv.Itoa(len(data)))
 	}
@@ -203,14 +205,14 @@ func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.Ioctl
 	d.sdpcmSeq++
 	d.ioctlID++
 
-	d.auxSDPCMHeader = whd.SDPCMHeader{
+	d.lastSDPCMHeader = whd.SDPCMHeader{
 		Size:         uint16(totalLen), // 2 TODO does this len need to be rounded up to u32?
 		SizeCom:      ^uint16(totalLen),
 		Seq:          uint8(sdpcmSeq),
 		ChanAndFlags: 0, // Channel type control.
 		HeaderLength: whd.SDPCM_HEADER_LEN,
 	}
-	d.auxSDPCMHeader.Put(_busOrder, buf8[:whd.SDPCM_HEADER_LEN])
+	d.lastSDPCMHeader.Put(_busOrder, buf8[:whd.SDPCM_HEADER_LEN])
 
 	d.auxCDCHeader = whd.CDCHeader{
 		Cmd:    cmd,
@@ -222,9 +224,10 @@ func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.Ioctl
 	s := hex.EncodeToString(buf8[whd.SDPCM_HEADER_LEN : whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN])
 	d.debug("sendIoctl:cdc", slog.String("cdc", s), slog.Any("cdc_struct", &d.auxCDCHeader))
 
-	copy(buf8[whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN:], data)
-	totalLen = align(totalLen, 4)
+	// d.debug("sendIoctl:cdc", slog.Any("cdc_struct", &d.auxCDCHeader))
 
+	copy(buf8[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], data)
+	totalLen = align(totalLen, 4)
 	return d.wlan_write(buf[:totalLen/4])
 }
 
@@ -243,6 +246,27 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 	return err
 }
 
+func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) {
+	for retries := 0; retries < 10; retries++ {
+		status := d.status()
+		if !status.F2PacketAvailable() {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		length := status.F2PacketLength()
+		err := d.wlan_read(buf[:], int(length))
+		if err != nil {
+			return nil, err
+		}
+		buf8 := u32AsU8(buf[:])
+		offset, plen, hdrType, err := d.rx(buf8[:length])
+		if hdrType == whd.CONTROL_HEADER {
+			return buf8[offset : offset+plen], err
+		}
+	}
+	return nil, errors.New("timeout")
+}
+
 // check_status handles F2 events while status register is set.
 func (d *Device) check_status(buf []uint32) error {
 	for {
@@ -254,7 +278,7 @@ func (d *Device) check_status(buf []uint32) error {
 				return err
 			}
 			buf8 := u32AsU8(buf[:])
-			err = d.rx(buf8[:length])
+			_, _, _, err = d.rx(buf8[:length])
 			if err != nil {
 				return err
 			}
@@ -265,71 +289,67 @@ func (d *Device) check_status(buf []uint32) error {
 	return nil
 }
 
-func (d *Device) updateCredit(sdpcmHdr whd.SDPCMHeader) {
-	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L467
-	switch sdpcmHdr.Type() {
-	case whd.CONTROL_HEADER, whd.ASYNCEVENT_HEADER, whd.DATA_HEADER:
-		max := sdpcmHdr.BusDataCredit
-		// TODO(sfeldma) not sure about this math, rust had:
-		// if sdpcm_seq_max.wrapping_sub(self.sdpcm_seq) > 0x40
-		if (max - d.sdpcmSeq) > 0x40 {
-			max = d.sdpcmSeq + 2
-		}
-		d.sdpcmSeqMax = max
+func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, err error) {
+	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
+	d.lastSDPCMHeader = whd.DecodeSDPCMHeader(_busOrder, packet)
+	hdrType := d.lastSDPCMHeader.Type()
+	d.debug("rx", slog.Int("len", len(packet)), slog.String("hdr", hdrType.String()))
+	payload, err := d.lastSDPCMHeader.Parse(packet)
+	if err != nil {
+		return 0, 0, noPacket, err
 	}
+	d.update_credit(&d.lastSDPCMHeader)
+
+	// Other Rx methods received the payload without SDPCM header.
+	switch hdrType {
+	case whd.CONTROL_HEADER:
+		plen = d.lastSDPCMHeader.Size - whd.SDPCM_HEADER_LEN - whd.IOCTL_HEADER_LEN
+		offset = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
+		err = d.rxControl(payload)
+
+	case whd.ASYNCEVENT_HEADER:
+		err = d.rxEvent(payload)
+
+	case whd.DATA_HEADER:
+		err = d.rxData(payload)
+
+	default:
+		err = errors.New("unknown sdpcm hdr type")
+	}
+	if err != nil {
+		d.logerr("rx", slog.String("err", err.Error()))
+	}
+	return offset, plen, hdrType, err
 }
 
-func (d *Device) rxControl(packet []byte) error {
-	d.debug("rxControl", slog.Int("len", len(packet)))
-	cdcHdr := whd.DecodeCDCHeader(_busOrder, packet)
-	response, err := cdcHdr.Parse(packet)
-	if err != nil {
-		return err
-	}
-	d.debug("rxControl:cdc", slog.String("resp", string(response)))
-	if cdcHdr.ID == d.ioctlID {
-		if cdcHdr.Status != 0 {
-			return errors.New("IOCTL error:" + strconv.Itoa(int(cdcHdr.Status)))
+func (d *Device) rxControl(packet []byte) (err error) {
+	d.auxCDCHeader = whd.DecodeCDCHeader(_busOrder, packet)
+	d.debug("rxControl", slog.Int("len", len(packet)), slog.Int("id", int(d.auxCDCHeader.ID)), slog.Any("cdc", &d.auxCDCHeader))
+	if d.auxCDCHeader.ID == d.ioctlID {
+		if d.auxCDCHeader.Status != 0 {
+			return errors.New("IOCTL error:" + strconv.Itoa(int(d.auxCDCHeader.Status)))
 		}
-		// TODO(sfeldma) rust -> Go
-		// self.ioctl_state.ioctl_done(response);
 	}
+	// d.debug("rxControl:cdc", slog.String("resp", string(response)))
+	// if cdcHdr.ID == d.ioctlID {
+	// 	if cdcHdr.Status != 0 {
+	// 		return errors.New("IOCTL error:" + strconv.Itoa(int(cdcHdr.Status)))
+	// 	}
+	// 	// TODO(sfeldma) rust -> Go
+	// 	// self.ioctl_state.ioctl_done(response);
+	// }
 	return nil
 }
 
-func (d *Device) rxEvent(packet []byte) error {
+func (d *Device) rxEvent(packet []byte) (err error) {
 	d.debug("rxEvent", slog.Int("len", len(packet)))
 	return nil
 }
 
-func (d *Device) rxData(packet []byte) error {
+func (d *Device) rxData(packet []byte) (err error) {
 	d.debug("rxData", slog.Int("len", len(packet)))
 	bdcHdr := whd.DecodeBDCHeader(packet)
 	d.debug("rxData:bdc", slog.Any("bdc", &bdcHdr))
 	// TODO(sfeldma) send payload up as new rx eth packet
 	return nil
-}
-
-func (d *Device) rx(packet []byte) error {
-	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
-	d.debug("rx", slog.Int("len", len(packet)))
-
-	sdpcmHdr := whd.DecodeSDPCMHeader(_busOrder, packet)
-	payload, err := sdpcmHdr.Parse(packet)
-	if err != nil {
-		return err
-	}
-
-	d.updateCredit(sdpcmHdr)
-
-	switch sdpcmHdr.Type() {
-	case whd.CONTROL_HEADER:
-		return d.rxControl(payload)
-	case whd.ASYNCEVENT_HEADER:
-		return d.rxEvent(payload)
-	case whd.DATA_HEADER:
-		return d.rxData(payload)
-	}
-
-	return errors.New("unknown sdpcm hdr type")
 }

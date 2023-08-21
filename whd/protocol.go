@@ -3,6 +3,7 @@ package whd
 import (
 	"encoding/binary"
 	"errors"
+	"runtime"
 	"strconv"
 	"unsafe"
 )
@@ -52,22 +53,58 @@ func (s *SDPCMHeader) Put(order binary.ByteOrder, dst []byte) {
 }
 
 func (s *SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
-	if len(packet) < SDPCM_HEADER_LEN+int(s.Size) {
-		err = errors.New("packet shorter than sdpcm hdr, len=" + strconv.Itoa(len(packet)))
+	if len(packet) < int(s.Size) {
+		err = errors.New("packet shorter than sdpcm hdr, expected=" + strconv.Itoa(int(s.Size)))
 		return
 	}
-
 	if s.Size != ^s.SizeCom {
 		err = errors.New("sdpcm hdr size complement mismatch")
 		return
 	}
+	payload = packet[SDPCM_HEADER_LEN:]
+	return
+}
 
-	if int(s.Size) != len(packet) {
-		err = errors.New("sdpcm hdr size doesn't match packet length from SPI")
+type CDCHeader struct {
+	Cmd       SDPCMCommand
+	Length    uint32
+	Flags     uint16
+	ID        uint16
+	Status    uint32
+	FlagsWire uint32 // Flags over the wire, WHD defines Flags as 32 bits.
+}
+
+// DecodeCDCHeader c-ref:LittleEndian
+func DecodeCDCHeader(order binary.ByteOrder, b []byte) (hdr CDCHeader) {
+	// Reference: https://github.com/Infineon/wifi-host-driver/blob/ad3bad006082488163cfb5d5613dcd2bdaddca90/WiFi_Host_Driver/src/whd_cdc_bdc.c#L518-L519
+	_ = b[CDC_HEADER_LEN-1]
+	hdr.Cmd = SDPCMCommand(order.Uint32(b))
+	hdr.Length = order.Uint32(b[4:])
+
+	flags := dtoh32(order.Uint32(b[8:]))
+	hdr.Flags = uint16(flags & 0xffff)
+	hdr.ID = uint16((flags & CDCF_IOC_ID_MASK) >> CDCF_IOC_ID_SHIFT)
+
+	hdr.Status = order.Uint32(b[12:])
+	return hdr
+}
+
+// Put c-ref:LittleEndian
+func (cdc *CDCHeader) Put(order binary.ByteOrder, b []byte) {
+	_ = b[15]
+	flags := uint32(cdc.ID)<<CDCF_IOC_ID_SHIFT | uint32(cdc.Flags)
+	order.PutUint32(b, uint32(cdc.Cmd))
+	order.PutUint32(b[4:], cdc.Length)
+	order.PutUint32(b[8:], htod32(flags))
+	order.PutUint32(b[12:], cdc.Status)
+}
+
+func (cdc CDCHeader) Parse(packet []byte) (payload []byte, err error) {
+	if len(packet) < CDC_HEADER_LEN+int(cdc.Length) {
+		err = errors.New("packet shorter than cdc hdr, len=" + strconv.Itoa(len(packet)))
 		return
 	}
-
-	payload = packet[SDPCM_HEADER_LEN:]
+	payload = packet[CDC_HEADER_LEN:]
 	return
 }
 
@@ -76,6 +113,15 @@ type IoctlHeader struct {
 	Len    uint32
 	Flags  uint32
 	Status uint32
+}
+
+func MakeIoctlHeader(cmd SDPCMCommand, len uint32, kind uint8, iface IoctlInterface, id uint16) IoctlHeader {
+	flags := uint32(id<<16)&0xffff_0000 | uint32(kind) | uint32(iface)<<12 // look for CDCF_IOC* identifiers in pico-sdk
+	return IoctlHeader{
+		Cmd:   cmd,
+		Len:   len & 0xffff,
+		Flags: flags,
+	}
 }
 
 func (io *IoctlHeader) ID() uint16 {
@@ -124,44 +170,6 @@ func DecodeBDCHeader(b []byte) (hdr BDCHeader) {
 	hdr.Flags2 = b[2]
 	hdr.DataOffset = b[3]
 	return hdr
-}
-
-type CDCHeader struct {
-	Cmd    SDPCMCommand
-	Length uint32
-	Flags  uint16
-	ID     uint16
-	Status uint32
-}
-
-// DecodeCDCHeader c-ref:LittleEndian
-func DecodeCDCHeader(order binary.ByteOrder, b []byte) (hdr CDCHeader) {
-	_ = b[CDC_HEADER_LEN-1]
-	hdr.Cmd = SDPCMCommand(order.Uint32(b))
-	hdr.Length = order.Uint32(b[4:])
-	hdr.Flags = order.Uint16(b[8:])
-	hdr.ID = order.Uint16(b[10:])
-	hdr.Status = order.Uint32(b[12:])
-	return hdr
-}
-
-// Put c-ref:LittleEndian
-func (cdc *CDCHeader) Put(order binary.ByteOrder, b []byte) {
-	_ = b[15]
-	order.PutUint32(b, uint32(cdc.Cmd))
-	order.PutUint32(b[4:], cdc.Length)
-	order.PutUint16(b[8:], cdc.Flags)
-	order.PutUint16(b[10:], cdc.ID)
-	order.PutUint32(b[12:], cdc.Status)
-}
-
-func (cdc CDCHeader) Parse(packet []byte) (payload []byte, err error) {
-	if len(packet) < CDC_HEADER_LEN+int(cdc.Length) {
-		err = errors.New("packet shorter than cdc hdr, len=" + strconv.Itoa(len(packet)))
-		return
-	}
-	payload = packet[CDC_HEADER_LEN:]
-	return
 }
 
 type AsyncEvent struct {
@@ -307,3 +315,36 @@ func (dh *DownloadHeader) Put(order binary.ByteOrder, b []byte) {
 	order.PutUint32(b[4:8], dh.Len)
 	order.PutUint32(b[8:12], dh.CRC)
 }
+
+// dtoh32 device to host 32 bit.
+func dtoh32(v uint32) uint32 {
+	switch runtime.GOARCH {
+	// Little endian architecture.
+	case "arm", "amd64":
+		return v
+
+	// Big endian architecture.
+	case "XXX":
+		return swap32(v)
+	}
+	panic("please define your architecture in whd/protocol.go")
+}
+
+// dtoh32 host to device 32 bit.
+func htod32(v uint32) uint32 {
+	switch runtime.GOARCH {
+	// Little endian architecture.
+	case "arm", "amd64":
+		return v
+
+	// Big endian architecture.
+	case "XXX":
+		return swap32(v)
+	}
+	panic("please define your architecture in whd/protocol.go")
+}
+
+func swap32(v uint32) uint32 {
+	return (v&0xff)<<24 | (v&0xff00)<<8 | (v&0xff0000)>>8 | (v&0xff000000)>>24
+}
+func swap16(v uint16) uint16 { return (v&0xff)<<8 | (v&0xff00)>>8 }

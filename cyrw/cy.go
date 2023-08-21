@@ -43,9 +43,10 @@ type Device struct {
 	_iovarBuf     [2048 / 4]uint32 // _iovarBuf used in get_iovar* and set_iovar* calls.
 	_rxBuf        [2048 / 4]uint32 // Used in check_status->rx calls and handle_irq.
 	// We define headers in the Device struct to alleviate stack growth. Also used along with _sendIoctlBuf
-	auxSDPCMHeader whd.SDPCMHeader
-	auxCDCHeader   whd.CDCHeader
-	auxBDCHeader   whd.BDCHeader
+	lastSDPCMHeader whd.SDPCMHeader
+	// auxCDCHeader    whd.CDCHeader
+	auxCDCHeader whd.CDCHeader
+	auxBDCHeader whd.BDCHeader
 }
 
 func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
@@ -471,6 +472,10 @@ func unsafeAsSlice[F, T constraints.Unsigned](buf []F) []T {
 	}
 	// i.e: byte->uint32, expands slice.
 	return unsafe.Slice((*T)(ptr), align(uint32(len(buf)/div), uint32(div)))
+}
+
+func (d *Device) logerr(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelError, msg, attrs...)
 }
 
 func (d *Device) warn(msg string, attrs ...slog.Attr) {
