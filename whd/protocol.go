@@ -21,7 +21,6 @@ type SDPCMHeader struct {
 
 func (s SDPCMHeader) Type() SDPCMHeaderType { return SDPCMHeaderType(s.ChanAndFlags & 0xf) }
 
-// TODO(sfeldma) I think this can be replaced by decode() below
 func DecodeSDPCMHeader(b []byte) (hdr SDPCMHeader) {
 	_ = b[SDPCM_HEADER_LEN-1]
 	hdr.Size = binary.LittleEndian.Uint16(b)
@@ -48,26 +47,11 @@ func (s *SDPCMHeader) Put(dst []byte) {
 	copy(dst, ptr)
 }
 
-func (s *SPDCMHeader) decode(packet []byte) {
-	_ = packet[SDPCM_HEADER_LEN-1]
-	s.Size = binary.LittleEndian.Uint16(packet)
-	s.SizeCom = binary.LittleEndian.Uint16(packet[2:])
-	s.Seq = packet[4]
-	s.ChanAndFlags = packet[5]
-	s.NextLength = packet[6]
-	s.HeaderLength = packet[7]
-	s.WirelessFlowCtl = packet[8]
-	s.BusDataCredit = packet[9]
-	copy(s.Reserved[:], packet[10:])
-}
-
-func (s *SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
+func (s SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
 	if len(packet) < SDPCM_HEADER_LEN {
 		err = errors.New("packet shorter than sdpcm hdr, len=", strconv.Itoa(len(packet)))
 		return
 	}
-
-	s.decode(packet)
 
 	if s.Size != !s.SizeCom {
 		err = errors.New("sdpcm hdr size complement mismatch")

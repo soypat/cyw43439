@@ -124,21 +124,20 @@ func (d *Device) updateCredit(sdpcmHdr whd.SDPCMHeader) {
 	}
 }
 
-func (d *Device) rx_control(payload []byte) error {
+func (d *Device) rxControl(payload []byte) error {
 }
 
-func (d *Device) rx_event(payload []byte) error {
+func (d *Device) rxEvent(payload []byte) error {
 }
 
-func (d *Device) rx_data(payload []byte) error {
+func (d *Device) rxData(payload []byte) error {
 }
 
 func (d *Device) rx(packet []byte) error {
 	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
 	d.debug("rx", slog.Int("len", len(packet)))
 
-	var sdpcmHdr whd.SDPCMHeader
-
+	sdpcmHdr := DecodeSDPCMHeader(packet)
 	payload, err := sdpcmHdr.Parse(packet)
 	if err != nil {
 		return err
@@ -148,11 +147,11 @@ func (d *Device) rx(packet []byte) error {
 
 	switch sdpcmHdr.Type() {
 	case whd.CONTROL_HEADER:
-		return d.rx_control(payload)
+		return d.rxControl(payload)
 	case whd.ASYNCEVENT_HEADER:
-		return d.rx_event(payload)
+		return d.rxEvent(payload)
 	case whd.DATA_HEADER:
-		return d.rx_data(payload)
+		return d.rxData(payload)
 	}
 
 	return errors.New("unknown sdpcm hdr type")
