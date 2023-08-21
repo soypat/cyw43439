@@ -254,7 +254,7 @@ func (d *Device) check_status(buf []uint32) error {
 				return err
 			}
 			buf8 := u32AsU8(buf[:])
-			err := d.rx(buf8[:length])
+			err = d.rx(buf8[:length])
 			if err != nil {
 				return err
 			}
@@ -281,14 +281,15 @@ func (d *Device) updateCredit(sdpcmHdr whd.SDPCMHeader) {
 
 func (d *Device) rxControl(packet []byte) error {
 	d.debug("rxControl", slog.Int("len", len(packet)))
-	cdcHdr := DecodeCDCHeader(packet)
+	cdcHdr := whd.DecodeCDCHeader(_busOrder, packet)
 	response, err := cdcHdr.Parse(packet)
 	if err != nil {
 		return err
 	}
+	d.debug("rxControl:cdc", slog.String("resp", string(response)))
 	if cdcHdr.ID == d.ioctlID {
 		if cdcHdr.Status != 0 {
-			return errors.New("IOCTL error", cdcHdr.Status)
+			return errors.New("IOCTL error:" + strconv.Itoa(int(cdcHdr.Status)))
 		}
 		// TODO(sfeldma) rust -> Go
 		// self.ioctl_state.ioctl_done(response);
@@ -298,15 +299,13 @@ func (d *Device) rxControl(packet []byte) error {
 
 func (d *Device) rxEvent(packet []byte) error {
 	d.debug("rxEvent", slog.Int("len", len(packet)))
+	return nil
 }
 
 func (d *Device) rxData(packet []byte) error {
 	d.debug("rxData", slog.Int("len", len(packet)))
-	bdcHdr := DecodeBDCHeader(packet)
-	payload, err := bdcHdr.Parse(packet)
-	if err != nil {
-		return err
-	}
+	bdcHdr := whd.DecodeBDCHeader(packet)
+	d.debug("rxData:bdc", slog.Any("bdc", &bdcHdr))
 	// TODO(sfeldma) send payload up as new rx eth packet
 	return nil
 }
@@ -315,7 +314,7 @@ func (d *Device) rx(packet []byte) error {
 	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
 	d.debug("rx", slog.Int("len", len(packet)))
 
-	sdpcmHdr := DecodeSDPCMHeader(packet)
+	sdpcmHdr := whd.DecodeSDPCMHeader(_busOrder, packet)
 	payload, err := sdpcmHdr.Parse(packet)
 	if err != nil {
 		return err

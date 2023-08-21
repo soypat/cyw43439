@@ -3,19 +3,20 @@ package whd
 import (
 	"encoding/binary"
 	"errors"
+	"strconv"
 	"unsafe"
 )
 
 type SDPCMHeader struct {
-	Size            uint16
-	SizeCom         uint16 // complement of size, so ^Size.
-	Seq             uint8  // Rx/Tx sequence number
-	ChanAndFlags    uint8  // 4 MSB Channel number, 4 LSB arbitrary flag
-			       // channel types: Control=0; Event=1; Data=2.
-	NextLength      uint8  // length of next data frame, reserved for Tx
-	HeaderLength    uint8  // data offset
-	WirelessFlowCtl uint8  // flow control bits, reserved for Tx
-	BusDataCredit   uint8  // maximum Sequence number allowed by firmware for Tx
+	Size         uint16
+	SizeCom      uint16 // complement of size, so ^Size.
+	Seq          uint8  // Rx/Tx sequence number
+	ChanAndFlags uint8  // 4 MSB Channel number, 4 LSB arbitrary flag
+	// channel types: Control=0; Event=1; Data=2.
+	NextLength      uint8 // length of next data frame, reserved for Tx
+	HeaderLength    uint8 // data offset
+	WirelessFlowCtl uint8 // flow control bits, reserved for Tx
+	BusDataCredit   uint8 // maximum Sequence number allowed by firmware for Tx
 	Reserved        [2]uint8
 }
 
@@ -51,17 +52,17 @@ func (s *SDPCMHeader) Put(order binary.ByteOrder, dst []byte) {
 }
 
 func (s *SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
-	if len(packet) < SDPCM_HEADER_LEN {
-		err = errors.New("packet shorter than sdpcm hdr, len=", strconv.Itoa(len(packet)))
+	if len(packet) < SDPCM_HEADER_LEN+int(s.Size) {
+		err = errors.New("packet shorter than sdpcm hdr, len=" + strconv.Itoa(len(packet)))
 		return
 	}
 
-	if s.Size != !s.SizeCom {
+	if s.Size != ^s.SizeCom {
 		err = errors.New("sdpcm hdr size complement mismatch")
 		return
 	}
 
-	if s.Size != len(packet) {
+	if int(s.Size) != len(packet) {
 		err = errors.New("sdpcm hdr size doesn't match packet length from SPI")
 		return
 	}
@@ -105,7 +106,7 @@ type BDCHeader struct {
 	Priority   uint8 // 802.1d Priority (low 3 bits)
 	Flags2     uint8
 	DataOffset uint8 // Offset from end of BDC header to packet data, in
-			 // 4-uint8_t words. Leaves room for optional headers.
+	// 4-uint8_t words. Leaves room for optional headers.
 }
 
 func (bdc *BDCHeader) Put(b []byte) {
@@ -123,16 +124,6 @@ func DecodeBDCHeader(b []byte) (hdr BDCHeader) {
 	hdr.Flags2 = b[2]
 	hdr.DataOffset = b[3]
 	return hdr
-}
-
-func (bdc *BDCHeader) Parse(packet []byte) (payload []byte, err error) {
-	if len(packet) < BDC_HEADER_LEN {
-		err = errors.New("packet shorter than bdc hdr, len=", strconv.Itoa(len(packet)))
-		return
-	}
-	packetStart := 4 * uint(bdc.DataOffset)
-	payload = packet[packetStart:]
-	return
 }
 
 type CDCHeader struct {
@@ -165,8 +156,8 @@ func (cdc *CDCHeader) Put(order binary.ByteOrder, b []byte) {
 }
 
 func (cdc CDCHeader) Parse(packet []byte) (payload []byte, err error) {
-	if len(packet) < CDC_HEADER_LEN {
-		err = errors.New("packet shorter than cdc hdr, len=", strconv.Itoa(len(packet)))
+	if len(packet) < CDC_HEADER_LEN+int(cdc.Length) {
+		err = errors.New("packet shorter than cdc hdr, len=" + strconv.Itoa(len(packet)))
 		return
 	}
 	payload = packet[CDC_HEADER_LEN:]
