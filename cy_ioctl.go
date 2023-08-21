@@ -223,7 +223,7 @@ func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMC
 		Len:   length & 0xffff,
 		Flags: flags,
 	}
-	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
+	header.Put(binary.LittleEndian, d.buf[whd.SDPCM_HEADER_LEN:])
 	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
 	d.debug("sendIoctl", slog.String("hdr.Cmd", header.Cmd.String()), slog.Uint64("hdr.Len", uint64(header.Len)), slog.Uint64("hdr.Flags", uint64(header.Flags)), slog.Uint64("hdr.Status", uint64(header.Status)))
 	return d.sendSDPCMCommon(whd.CONTROL_HEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
@@ -385,7 +385,7 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, bufWithFreeFirst12Byt
 		ChanAndFlags: uint8(kind),
 		HeaderLength: headerLength,
 	}
-	header.Put(w)
+	header.Put(binary.LittleEndian, w)
 	d.sdpcmTxSequence++
 	return d.WriteBytes(FuncWLAN, 0, w)
 }
@@ -749,7 +749,7 @@ var (
 func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
 	d.debug("sdpcmProcessRxPacket", slog.Int("len", len(buf)))
 	const badHeader = whd.UNKNOWN_HEADER
-	hdr := whd.DecodeSDPCMHeader(buf)
+	hdr := whd.DecodeSDPCMHeader(binary.LittleEndian, buf)
 	switch {
 	case hdr.Size != ^hdr.SizeCom&0xffff:
 		return 0, 0, badHeader, err2InvalidPacket
@@ -785,7 +785,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 			// TODO(soypat): This error case is not specified in the reference.
 			return 0, 0, badHeader, errors.New("undefined control packet error, size too large")
 		}
-		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
+		ioctlHeader := whd.DecodeIoctlHeader(binary.LittleEndian, buf[payloadOffset:])
 		id := ioctlHeader.ID()
 		if id != d.sdpcmRequestedIoctlID {
 			return 0, 0, badHeader, err6IgnoreWrongIDPacket

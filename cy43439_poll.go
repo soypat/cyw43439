@@ -1,6 +1,7 @@
 package cyw43439
 
 import (
+	"encoding/binary"
 	"errors"
 	"time"
 
@@ -129,7 +130,7 @@ func (d *Device) sendEthernet(itf uint8, buf []byte) error {
 
 func (d *Device) handleAsyncEvent(payload []byte) error {
 	d.debug("handleAsyncEvent", slog.Int("plen", len(payload)))
-	as, err := whd.ParseAsyncEvent(payload)
+	as, err := whd.ParseAsyncEvent(binary.BigEndian, payload)
 	if err != nil {
 		return err
 	}

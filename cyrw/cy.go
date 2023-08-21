@@ -3,6 +3,7 @@ package cyrw
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"reflect"
 	"runtime"
 	"sync"
@@ -20,6 +21,7 @@ type OutputPin func(bool)
 func DefaultConfig() Config {
 	return Config{
 		Firmware: wifiFW2,
+		CLM:      clmFW,
 	}
 }
 
@@ -33,9 +35,13 @@ type Device struct {
 	backplaneWindow uint32
 	ioctlID         uint16
 	sdpcmSeq        uint8
-
+	sdpcmSeqMax     uint8
+	mac             [6]byte
+	// uint32 buffers to ensure alignment of buffers.
 	rwBuf         [2]uint32        // rwBuf used for read* and write* functions.
 	_sendIoctlBuf [2048 / 4]uint32 // _sendIoctlBuf used only in sendIoctl and tx.
+	_iovarBuf     [2048 / 4]uint32 // _iovarBuf used in get_iovar* and set_iovar* calls.
+	_rxBuf        [2048 / 4]uint32 // Used in check_status->rx calls and handle_irq.
 	// We define headers in the Device struct to alleviate stack growth. Also used along with _sendIoctlBuf
 	auxSDPCMHeader whd.SDPCMHeader
 	auxCDCHeader   whd.CDCHeader
@@ -49,12 +55,14 @@ func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
 			spi: spi,
 			cs:  cs,
 		},
+		sdpcmSeqMax: 1,
 	}
 	return d
 }
 
 type Config struct {
 	Firmware string
+	CLM      string
 }
 
 func hex32(u uint32) string {
@@ -152,8 +160,26 @@ func (d *Device) Init(cfg Config) (err error) {
 	d.write8(FuncBackplane, whd.SDIO_PULL_UP, 0)
 	d.read8(FuncBackplane, whd.SDIO_PULL_UP)
 
-	d.debug("wifi init done")
-	return nil
+	err = d.log_init()
+	if err != nil {
+		return err
+	}
+	d.log_read()
+	d.debug("base init done")
+	if cfg.CLM == "" {
+		return nil
+	}
+	return d.initControl(cfg.CLM)
+}
+
+func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
+	d.info("GPIOSet", slog.Uint64("wlGPIO", uint64(wlGPIO)), slog.Bool("value", value))
+	if wlGPIO >= 3 {
+		return errors.New("gpio out of range")
+	}
+	val0 := uint32(1) << wlGPIO
+	val1 := b2u32(value) << wlGPIO
+	return d.set_iovar2("gpioout", whd.WWD_STA_INTERFACE, val0, val1)
 }
 
 // status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
@@ -173,6 +199,14 @@ func (d *Device) Reset() {
 	time.Sleep(20 * time.Millisecond)
 	d.pwr(true)
 	time.Sleep(250 * time.Millisecond)
+}
+
+func (d *Device) getInterrupts() Interrupts {
+	irq, err := d.read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
+	if err != nil {
+		return 0
+	}
+	return Interrupts(irq)
 }
 
 func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
@@ -199,7 +233,7 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
 	var buf [maxTxSize/4 + 1]uint32
-	buf8 := unsafeAs[uint32, byte](buf[:])
+	buf8 := unsafeAsSlice[uint32, byte](buf[:])
 	for len(data) > 0 {
 		// Calculate address and length of next write.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
@@ -250,7 +284,7 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 		slog.String("last16", hex.EncodeToString(data[max(0, len(data)-16):])), // mismatch with reference?
 	)
 	var buf [maxTxSize/4 + 1]uint32
-	buf8 := unsafeAs[uint32, byte](buf[1:]) // Slice excluding first word reserved for command.
+	buf8 := unsafeAsSlice[uint32, byte](buf[1:]) // Slice excluding first word reserved for command.
 	for err == nil && len(data) > 0 {
 		// Calculate address and length of next write to ensure transfer doesn't cross a window boundary.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
@@ -408,11 +442,22 @@ func (d *Device) write32_swapped(addr uint32, value uint32) {
 }
 
 func u32AsU8(buf []uint32) []byte {
-	return unsafeAs[uint32, byte](buf)
+	return unsafeAsSlice[uint32, byte](buf)
 }
 
-// unsafeAs converts a slice of F to a slice of T.
-func unsafeAs[F, T constraints.Unsigned](buf []F) []T {
+func u32PtrTo4U8(buf *uint32) *[4]byte {
+	return (*[4]byte)(unsafe.Pointer(buf))
+}
+
+func unsafeAs[F, T constraints.Unsigned](ptr *F) *T {
+	if unsafe.Alignof(F(0)) < unsafe.Alignof(T(0)) {
+		panic("unsafeAs: F alignment < T alignment")
+	}
+	return (*T)(unsafe.Pointer(ptr))
+}
+
+// unsafeAsSlice converts a slice of F to a slice of T.
+func unsafeAsSlice[F, T constraints.Unsigned](buf []F) []T {
 	fSize := unsafe.Sizeof(F(0))
 	tSize := unsafe.Sizeof(T(0))
 	ptr := unsafe.Pointer(&buf[0])
@@ -428,17 +473,37 @@ func unsafeAs[F, T constraints.Unsigned](buf []F) []T {
 	return unsafe.Slice((*T)(ptr), align(uint32(len(buf)/div), uint32(div)))
 }
 
+func (d *Device) warn(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelWarn, msg, attrs...)
+}
+
+func (d *Device) info(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelInfo, msg, attrs...)
+}
+
 func (d *Device) debug(msg string, attrs ...slog.Attr) {
-	print(msg)
+	d.logattrs(slog.LevelDebug, msg, attrs...)
+}
+
+func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
+	const logAttrs = true
+	print(level.String())
 	print(" ")
-	for _, a := range attrs {
-		print(a.Key)
-		print("=")
-		print(a.Value.String())
-		print(" ")
+	print(msg)
+	if logAttrs {
+		for _, a := range attrs {
+			print(" ")
+			print(a.Key)
+			print("=")
+			if a.Value.Kind() == slog.KindAny {
+				fmt.Printf("%+v", a.Value.Any())
+			} else {
+				print(a.Value.String())
+			}
+		}
 	}
 	println()
-	// slog.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...) // Is panicking.
+	// slog.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...) // Is segfaulting.
 }
 
 //go:inline

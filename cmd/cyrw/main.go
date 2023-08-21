@@ -26,5 +26,15 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	println("finished program OK")
+
+	println("finished init OK")
+	cycle := true
+	for {
+		err = dev.GPIOSet(0, cycle)
+		if err != nil {
+			println(err.Error())
+		}
+		time.Sleep(time.Second / 2)
+		cycle = !cycle
+	}
 }
