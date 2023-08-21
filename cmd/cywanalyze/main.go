@@ -31,6 +31,7 @@ type BusCtl struct {
 	OmitReadData    bool
 	OmitRead        bool
 	OmitWrite       bool
+	OmitIneffectual bool
 	PadDataToWord   bool
 }
 
@@ -56,6 +57,7 @@ func main() {
 	omitReadData := flag.Bool("omit-read-data", false, "Choose to omit read data in output.")
 	omitReadAll := flag.Bool("omit-read", false, "Choose to omit read commands in output.")
 	omitWriteAll := flag.Bool("omit-write", false, "Choose to omit write commands in output.")
+	omitIneffectual := flag.Bool("omit-inef", false, "Omit data after the command size.")
 	padDataToWord := flag.Bool("pad-data", false, "Pad data to word size (4 bytes).")
 	flag.Parse()
 	if *flagInterpretWords == "" {
@@ -80,6 +82,7 @@ func main() {
 		OmitRead:        *omitReadAll,
 		OmitWrite:       *omitWriteAll,
 		PadDataToWord:   *padDataToWord,
+		OmitIneffectual: *omitIneffectual,
 	}
 	if BUS.OmitRead && BUS.OmitWrite {
 		log.Fatal("cannot omit both read and write commands")
@@ -128,6 +131,9 @@ func (bus *BusCtl) run(sdio, enable, clk, output string) error {
 				data = append(action.Data[unpadded:], data...)
 				action.Data = append(data, make([]byte, 4-len(action.Data)%4)...)
 			}
+		}
+		if bus.OmitIneffectual && action.Cmd.Size < uint32(len(action.Data)) {
+			action.Data = action.Data[:action.Cmd.Size]
 		}
 		if action.Cmd.Size < uint32(len(action.Data)) {
 			// Print a space demarcating end of the command data.

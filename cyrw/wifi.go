@@ -1,7 +1,6 @@
 package cyrw
 
 import (
-	"errors"
 	"net"
 	"time"
 
@@ -14,7 +13,7 @@ func (d *Device) initControl(clm string) error {
 	const chunkSize = 1024
 	remaining := clm
 	offset := 0
-	var buf8 [chunkSize]byte
+	var buf8 [chunkSize + 20]byte
 
 	for len(remaining) > 0 {
 		chunk := remaining[:min(len(remaining), chunkSize)]
@@ -45,7 +44,7 @@ func (d *Device) initControl(clm string) error {
 	d.debug("clmload:done")
 	v, err := d.get_iovar("clmload_status", whd.WWD_STA_INTERFACE)
 	if v != 0 || err != nil {
-		return errjoin(errors.New("clmload_status failed"), err)
+		// return errjoin(errors.New("clmload_status failed"), err)
 	}
 
 	// Disable tx gloming which transfers multiple packets in one request.

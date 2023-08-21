@@ -3,7 +3,6 @@ package cyrw
 import (
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strconv"
 
 	"github.com/soypat/cyw43439/internal/slog"
@@ -221,8 +220,7 @@ func (d *Device) sendIoctl(kind ioctlType, cmd whd.SDPCMCommand, iface whd.Ioctl
 	}
 	d.auxCDCHeader.Put(_busOrder, buf8[whd.SDPCM_HEADER_LEN:])
 	s := hex.EncodeToString(buf8[whd.SDPCM_HEADER_LEN : whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN])
-	d.debug("sendIoctl:cdc", slog.String("cdc", s))
-	fmt.Printf("cdc_struct=%+v\n", d.auxCDCHeader)
+	d.debug("sendIoctl:cdc", slog.String("cdc", s), slog.Any("cdc_struct", &d.auxCDCHeader))
 
 	copy(buf8[whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN:], data)
 	totalLen = align(totalLen, 4)

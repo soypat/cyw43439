@@ -164,7 +164,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	if err != nil {
 		return err
 	}
-
+	d.log_read()
 	d.debug("base init done")
 	if cfg.CLM == "" {
 		return nil
@@ -497,7 +497,6 @@ func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 			print("=")
 			if a.Value.Kind() == slog.KindAny {
 				fmt.Printf("%+v", a.Value.Any())
-				// fmt.Print(a.Value.Any()) // Getting hard faults in Value.String()
 			} else {
 				print(a.Value.String())
 			}
