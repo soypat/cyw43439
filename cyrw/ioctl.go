@@ -358,13 +358,13 @@ func (d *Device) rxControl(packet []byte) (err error) {
 func (d *Device) rxEvent(packet []byte) (dataoffset uint16, err error) {
 	bdc := whd.DecodeBDCHeader(packet)
 	dataoffset = whd.BDC_HEADER_LEN + 4*uint16(bdc.DataOffset)
-
+	_dataoffset := min(int(dataoffset), len(packet))
 	d.debug("rxEvent:bdc",
 		slog.Any("bdc", &bdc),
 		slog.Int("plen", len(packet)),
 		slog.Int("dataoffset", int(dataoffset)),
-		slog.String("data[:offset]", hex.EncodeToString(packet[:dataoffset])),
-		slog.String("data[offset:]", hex.EncodeToString(packet[dataoffset:])),
+		slog.String("data[:offset]", hex.EncodeToString(packet[:_dataoffset])),
+		slog.String("data[offset:]", hex.EncodeToString(packet[_dataoffset:])),
 	)
 	if int(dataoffset) > len(packet) {
 		return 0, errors.New("malformed event packet")
