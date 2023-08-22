@@ -176,7 +176,7 @@ func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	}
 	val0 := uint32(1) << wlGPIO
 	val1 := b2u32(value) << wlGPIO
-	return d.set_iovar2("gpioout", whd.WWD_STA_INTERFACE, val0, val1)
+	return d.set_iovar2("gpioout", whd.IF_STA, val0, val1)
 }
 
 // status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.

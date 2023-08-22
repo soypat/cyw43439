@@ -100,52 +100,13 @@ func (cdc *CDCHeader) Put(order binary.ByteOrder, b []byte) {
 	order.PutUint32(b[12:], cdc.Status)
 }
 
-func (cdc CDCHeader) Parse(packet []byte) (payload []byte, err error) {
+func (cdc *CDCHeader) Parse(packet []byte) (payload []byte, err error) {
 	if len(packet) < CDC_HEADER_LEN+int(cdc.Length) {
 		err = errors.New("packet shorter than cdc hdr, len=" + strconv.Itoa(len(packet)))
 		return
 	}
 	payload = packet[CDC_HEADER_LEN:]
 	return
-}
-
-type IoctlHeader struct {
-	Cmd    SDPCMCommand
-	Len    uint32
-	Flags  uint32
-	Status uint32
-}
-
-func MakeIoctlHeader(cmd SDPCMCommand, len uint32, kind uint8, iface IoctlInterface, id uint16) IoctlHeader {
-	flags := uint32(id<<16)&0xffff_0000 | uint32(kind) | uint32(iface)<<12 // look for CDCF_IOC* identifiers in pico-sdk
-	return IoctlHeader{
-		Cmd:   cmd,
-		Len:   len & 0xffff,
-		Flags: flags,
-	}
-}
-
-func (io *IoctlHeader) ID() uint16 {
-	return uint16((io.Flags & CDCF_IOC_ID_MASK) >> CDCF_IOC_ID_SHIFT)
-}
-
-// DecodeIoctlHeader c-ref:LittleEndian
-func DecodeIoctlHeader(order binary.ByteOrder, b []byte) (hdr IoctlHeader) {
-	_ = b[IOCTL_HEADER_LEN-1]
-	hdr.Cmd = SDPCMCommand(order.Uint32(b))
-	hdr.Len = order.Uint32(b[4:])
-	hdr.Flags = order.Uint32(b[8:])
-	hdr.Status = order.Uint32(b[12:])
-	return hdr
-}
-
-// Put puts all 16 bytes of ioctlHeader in dst. Panics if dst is shorter than 16 bytes in length.
-func (io *IoctlHeader) Put(order binary.ByteOrder, dst []byte) {
-	_ = dst[15]
-	order.PutUint32(dst, uint32(io.Cmd))
-	order.PutUint32(dst[4:], io.Len)
-	order.PutUint32(dst[8:], io.Flags)
-	order.PutUint32(dst[12:], io.Status)
 }
 
 type BDCHeader struct {
@@ -198,7 +159,8 @@ func ParseAsyncEvent(order binary.ByteOrder, buf []byte) (ev AsyncEvent, err err
 	const ifaceOffset = 12 + 4 + 30
 	ev.Interface = buf[ifaceOffset]
 	if ev.EventType == CYW43_EV_ESCAN_RESULT && ev.Status == CYW43_STATUS_PARTIAL {
-		if len(buf) < int(unsafe.Sizeof(ev)) {
+		const sizeStruct = unsafe.Sizeof(ev)
+		if len(buf) < int(sizeStruct) {
 			return ev, errors.New("buffer too small to parse scan results")
 		}
 		ev.u, err = ParseScanResult(order, buf[48:])
@@ -211,13 +173,13 @@ func (ev *AsyncEvent) EventScanResult() *EventScanResult {
 }
 
 type evscanresult struct {
-	Version      uint32  // 1
-	Length       uint32  // 2
-	BSSID        [6]byte // 3.5
-	BeaconPeriod uint16  // 4
-	Capability   uint16  // 4.5
-	SSIDLength   uint8   // 4.25
-	SSID         [32]byte
+	Version      uint32   // 0:4
+	Length       uint32   // 4:8
+	BSSID        [6]byte  // 8:14
+	BeaconPeriod uint16   // 14:16
+	SSIDLength   uint8    // 16:17
+	Capability   uint16   // 17:19
+	SSID         [32]byte //
 	RatesetCount uint32
 	RatesetRates [16]uint8
 	ChanSpec     uint16
@@ -318,9 +280,9 @@ func (dh *DownloadHeader) Put(order binary.ByteOrder, b []byte) {
 }
 
 type EventPacket struct {
-	EthHeader   eth.EthernetHeader
-	EventHeader EventHeader
-	Message     EventMessage
+	EthHeader   eth.EthernetHeader // 0:14
+	EventHeader EventHeader        // 14:24
+	Message     EventMessage       // 24:72
 }
 
 type EventHeader struct {

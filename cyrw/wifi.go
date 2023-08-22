@@ -50,13 +50,13 @@ func (d *Device) initControl(clm string) error {
 		n += whd.DL_HEADER_LEN
 		n += copy(buf8[20:], chunk)
 
-		err := d.doIoctlSet(whd.WLC_SET_VAR, whd.WWD_STA_INTERFACE, buf8[:n])
+		err := d.doIoctlSet(whd.WLC_SET_VAR, whd.IF_STA, buf8[:n])
 		if err != nil {
 			return err
 		}
 	}
 	d.debug("clmload:done")
-	v, err := d.get_iovar("clmload_status", whd.WWD_STA_INTERFACE)
+	v, err := d.get_iovar("clmload_status", whd.IF_STA)
 	if v != 0 || err != nil {
 		// return errjoin(errors.New("clmload_status failed"), err)
 	}
@@ -64,30 +64,30 @@ func (d *Device) initControl(clm string) error {
 	// Disable tx gloming which transfers multiple packets in one request.
 	// 'glom' is short for "conglomerate" which means "gather together into
 	// a compact mass".
-	d.set_iovar("bus:txglom", whd.WWD_STA_INTERFACE, 0)
-	d.set_iovar("apsta", whd.WWD_STA_INTERFACE, 1)
+	d.set_iovar("bus:txglom", whd.IF_STA, 0)
+	d.set_iovar("apsta", whd.IF_STA, 1)
 
 	// read MAC Address:
 
-	d.get_iovar_n("cur_etheraddr", whd.WWD_STA_INTERFACE, d.mac[:6])
+	d.get_iovar_n("cur_etheraddr", whd.IF_STA, d.mac[:6])
 	d.debug("MAC", slog.String("mac", d.MAC().String()))
 
 	country := whd.CountryCode("XX", 0)
-	d.set_iovar("country", whd.WWD_STA_INTERFACE, country)
+	d.set_iovar("country", whd.IF_STA, country)
 
 	// set country takes some time, next ioctls fail if we don't wait.
 	time.Sleep(100 * time.Millisecond)
 
 	// Set Antenna to chip antenna.
-	d.set_ioctl(whd.WLC_GET_ANTDIV, whd.WWD_STA_INTERFACE, 0)
+	d.set_ioctl(whd.WLC_GET_ANTDIV, whd.IF_STA, 0)
 
-	d.set_iovar("bus:txglom", whd.WWD_STA_INTERFACE, 0)
+	d.set_iovar("bus:txglom", whd.IF_STA, 0)
 	time.Sleep(100 * time.Millisecond)
 
-	d.set_iovar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
+	d.set_iovar("ampdu_ba_wsize", whd.IF_STA, 8)
 	time.Sleep(100 * time.Millisecond)
 
-	d.set_iovar("ampdu_mpdu", whd.WWD_STA_INTERFACE, 4)
+	d.set_iovar("ampdu_mpdu", whd.IF_STA, 4)
 	time.Sleep(100 * time.Millisecond)
 
 	// Ignore uninteresting/spammy events.
@@ -103,17 +103,17 @@ func (d *Device) initControl(clm string) error {
 	evts.Disable(whd.EvROAM)
 	buf := make([]byte, evts.Size())
 	evts.Put(buf)
-	d.set_iovar_n("bsscfg:event_msgs", whd.WWD_STA_INTERFACE, buf)
+	d.set_iovar_n("bsscfg:event_msgs", whd.IF_STA, buf)
 
 	time.Sleep(100 * time.Millisecond)
 
 	// Set wifi up.
-	d.doIoctlSet(whd.WLC_UP, whd.WWD_STA_INTERFACE, nil)
+	d.doIoctlSet(whd.WLC_UP, whd.IF_STA, nil)
 
 	time.Sleep(100 * time.Millisecond)
 
-	d.set_ioctl(whd.WLC_SET_GMODE, whd.WWD_STA_INTERFACE, 1) // Set GMODE=auto
-	d.set_ioctl(whd.WLC_SET_BAND, whd.WWD_STA_INTERFACE, 0)  // Set BAND=any
+	d.set_ioctl(whd.WLC_SET_GMODE, whd.IF_STA, 1) // Set GMODE=auto
+	d.set_ioctl(whd.WLC_SET_BAND, whd.IF_STA, 0)  // Set BAND=any
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -131,12 +131,12 @@ func (d *Device) set_power_management(mode powerManagementMode) error {
 	}
 	mode_num := mode.mode()
 	if mode_num == 0 {
-		d.set_iovar("pm2_sleep_ret", whd.WWD_STA_INTERFACE, uint32(mode.sleep_ret_ms()))
-		d.set_iovar("bcn_li_bcn", whd.WWD_STA_INTERFACE, uint32(mode.beacon_period()))
-		d.set_iovar("bcn_li_dtim", whd.WWD_STA_INTERFACE, uint32(mode.dtim_period()))
-		d.set_iovar("assoc_listen", whd.WWD_STA_INTERFACE, uint32(mode.assoc()))
+		d.set_iovar("pm2_sleep_ret", whd.IF_STA, uint32(mode.sleep_ret_ms()))
+		d.set_iovar("bcn_li_bcn", whd.IF_STA, uint32(mode.beacon_period()))
+		d.set_iovar("bcn_li_dtim", whd.IF_STA, uint32(mode.dtim_period()))
+		d.set_iovar("assoc_listen", whd.IF_STA, uint32(mode.assoc()))
 	}
-	return d.set_ioctl(whd.WLC_SET_PM, whd.WWD_STA_INTERFACE, uint32(mode_num))
+	return d.set_ioctl(whd.WLC_SET_PM, whd.IF_STA, uint32(mode_num))
 }
 
 func (d *Device) join_open(ssid string) error {
@@ -144,12 +144,11 @@ func (d *Device) join_open(ssid string) error {
 	if len(ssid) > 32 {
 		return errors.New("ssid too long")
 	}
-	const iface = whd.WWD_STA_INTERFACE
-	d.set_iovar("ampdu_ba_wsize", iface, 8)
-	d.set_ioctl(whd.WLC_SET_WSEC, iface, 0)
-	d.set_iovar2("bsscfg:sup_wpa", iface, 0, 0)
-	d.set_ioctl(whd.WLC_SET_INFRA, iface, 1)
-	d.set_ioctl(whd.WLC_SET_AUTH, iface, 0)
+	d.set_iovar("ampdu_ba_wsize", whd.IF_STA, 8)
+	d.set_ioctl(whd.WLC_SET_WSEC, whd.IF_STA, 0)
+	d.set_iovar2("bsscfg:sup_wpa", whd.IF_STA, 0, 0)
+	d.set_ioctl(whd.WLC_SET_INFRA, whd.IF_STA, 1)
+	d.set_ioctl(whd.WLC_SET_AUTH, whd.IF_STA, 0)
 
 	i := ssidInfo{
 		Length: uint32(len(ssid)),
@@ -176,7 +175,7 @@ func (d *Device) wait_for_join(ssid *ssidInfo) (err error) {
 	var buf [36]byte
 	ssid.Put(_busOrder, buf[:])
 
-	err = d.doIoctlSet(whd.WLC_GET_SSID, whd.WWD_STA_INTERFACE, buf[:36])
+	err = d.doIoctlSet(whd.WLC_GET_SSID, whd.IF_STA, buf[:36])
 	if err != nil {
 		return err
 	}

@@ -140,23 +140,24 @@ const (
 
 type IoctlInterface uint8
 
+// IoctlInterfaces.
 const (
-	WWD_STA_INTERFACE IoctlInterface = 0
-	WWD_AP_INTERFACE  IoctlInterface = 1
-	WWD_P2P_INTERFACE IoctlInterface = 2
+	IF_STA IoctlInterface = 0
+	IF_AP  IoctlInterface = 1
+	IF_P2P IoctlInterface = 2
 )
 
 func (i IoctlInterface) IsValid() bool {
-	return i <= WWD_P2P_INTERFACE
+	return i <= IF_P2P
 }
 
 func (i IoctlInterface) String() (s string) {
 	switch i {
-	case WWD_STA_INTERFACE:
+	case IF_STA:
 		s = "sta"
-	case WWD_AP_INTERFACE:
+	case IF_AP:
 		s = "ap"
-	case WWD_P2P_INTERFACE:
+	case IF_P2P:
 		s = "p2p"
 	default:
 		s = "unknown"
