@@ -43,9 +43,9 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "cywanalyze - Process Binary Saleae digital data files corresponding to CYW43439 transactions.\n\tUsage:\n")
 		flag.PrintDefaults()
 	}
-	sdio := flag.String("f-sd", "digital_4.bin", "Input filename: SPI SDO/SDI data.")
-	enable := flag.String("f-cs", "digital_2.bin", "Input filename: SPI CS/SS data.")
-	clk := flag.String("f-clk", "digital_1.bin", "Input filename: SPI CS data.")
+	sdio := flag.String("f-sd", "digital_1.bin", "Input filename: SPI SDO/SDI data.")
+	enable := flag.String("f-cs", "digital_0.bin", "Input filename: SPI CS/SS data.")
+	clk := flag.String("f-clk", "digital_2.bin", "Input filename: SPI CS data.")
 	output := flag.String("o-cmd", "commands.txt", "Output filename of CYW43439 command transactions.")
 
 	flag.StringVar(&timingsOutput, "o-time", "", "Output timing data to a file corresponding to output command history line-by-line.")

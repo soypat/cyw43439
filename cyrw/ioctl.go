@@ -24,8 +24,16 @@ type eventMask struct {
 	events [24]uint8
 }
 
-func (e *eventMask) Unset(event whd.AsyncEventType) {
+func (e *eventMask) Disable(event whd.AsyncEventType) {
 	e.events[event/8] &= ^(1 << (event % 8))
+}
+
+func (e *eventMask) Enable(event whd.AsyncEventType) {
+	e.events[event/8] |= 1 << (event % 8)
+}
+
+func (e *eventMask) IsEnabled(event whd.AsyncEventType) bool {
+	return e.events[event/8]&(1<<(event%8)) != 0
 }
 
 func (e *eventMask) Put(buf []byte) {
@@ -97,8 +105,7 @@ func (d *Device) tx(packet []byte) (err error) {
 
 	copy(buf8[whd.SDPCM_HEADER_LEN+PADDING_SIZE+whd.BDC_HEADER_LEN:], packet)
 
-	totalLen = align(totalLen, 4)
-	return d.wlan_write(buf[:totalLen/4])
+	return d.wlan_write(buf[:align(totalLen, 4)/4], totalLen)
 }
 
 func (d *Device) get_iovar(VAR string, iface whd.IoctlInterface) (_ uint32, err error) {
@@ -221,14 +228,10 @@ func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInte
 		ID:     d.ioctlID,
 	}
 	d.auxCDCHeader.Put(_busOrder, buf8[whd.SDPCM_HEADER_LEN:])
-	s := hex.EncodeToString(buf8[whd.SDPCM_HEADER_LEN : whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN])
-	d.debug("sendIoctl:cdc", slog.String("cdc", s), slog.Any("cdc_struct", &d.auxCDCHeader))
-
-	// d.debug("sendIoctl:cdc", slog.Any("cdc_struct", &d.auxCDCHeader))
 
 	copy(buf8[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], data)
-	totalLen = align(totalLen, 4)
-	return d.wlan_write(buf[:totalLen/4])
+
+	return d.wlan_write(buf[:align(totalLen, 4)/4], totalLen)
 }
 
 // handle_irq waits for IRQ on F2 packet available
@@ -342,7 +345,11 @@ func (d *Device) rxControl(packet []byte) (err error) {
 }
 
 func (d *Device) rxEvent(packet []byte) (err error) {
-	d.debug("rxEvent", slog.Int("len", len(packet)))
+	ae, err := whd.ParseAsyncEvent(_busOrder, packet)
+	d.debug("rxEvent", slog.Int("len", len(packet)), slog.Any("ae", &ae), slog.Any("err", err))
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -66,12 +66,11 @@ func (s *SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
 }
 
 type CDCHeader struct {
-	Cmd       SDPCMCommand
-	Length    uint32
-	Flags     uint16
-	ID        uint16
-	Status    uint32
-	FlagsWire uint32 // Flags over the wire, WHD defines Flags as 32 bits.
+	Cmd    SDPCMCommand
+	Length uint32
+	Flags  uint16
+	ID     uint16
+	Status uint32
 }
 
 // DecodeCDCHeader c-ref:LittleEndian

@@ -174,41 +174,6 @@ func getFWVersion(src string) (string, error) {
 	return fwVersion, nil
 }
 
-type _uinteger = interface {
-	~uint8 | ~uint16 | ~uint32 | ~uint64 | uintptr
-}
-
-type _integer = interface {
-	~int | _uinteger
-}
-
-// align rounds `val` up to nearest multiple of `align`.
-func align[T constraints.Unsigned](val, align T) T {
-	return (val + align - 1) &^ (align - 1)
-}
-
-func max[T constraints.Integer](a, b T) T {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min[T constraints.Integer](a, b T) T {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func (d *Device) lock() {
-	d.mu.Lock()
-}
-
-func (d *Device) unlock() {
-	d.mu.Unlock()
-}
-
 // errjoion returns an error that wraps the given errors.
 // Any nil error values are discarded.
 // errjoion returns nil if every value in errs is nil.
@@ -238,25 +203,6 @@ func errjoin(errs ...error) error {
 	return e
 }
 
-type joinError struct {
-	errs []error
-}
-
-func (e *joinError) Error() string {
-	var b []byte
-	for i, err := range e.errs {
-		if i > 0 {
-			b = append(b, '\n')
-		}
-		b = append(b, err.Error()...)
-	}
-	return string(b)
-}
-
-func (e *joinError) Unwrap() []error {
-	return e.errs
-}
-
 //go:generate stringer -type=irqmask -output=interrupts_string.go -trimprefix=irq
 type irqmask uint16
 
@@ -278,3 +224,193 @@ const (
 	irqF2_INTR                 irqmask = 0x4000
 	irqF3_INTR                 irqmask = 0x8000
 )
+
+type powerManagementMode uint8
+
+const (
+	// Custom, officially unsupported mode. Use at your own risk.
+	// All power-saving features set to their max at only a marginal decrease in power consumption
+	// as oppposed to `Aggressive`.
+	SuperSave = iota
+
+	// Aggressive power saving mode.
+	Aggressive
+
+	// The default mode.
+	PowerSave
+
+	// Performance is prefered over power consumption but still some power is conserved as opposed to
+	// `None`.
+	Performance
+
+	// Unlike all the other PM modes, this lowers the power consumption at all times at the cost of
+	// a much lower throughput.
+	ThroughputThrottling
+
+	// No power management is configured. This consumes the most power.
+	None
+)
+
+func (pm powerManagementMode) IsValid() bool {
+	return pm <= None
+}
+
+func (pm powerManagementMode) String() string {
+	switch pm {
+	case SuperSave:
+		return "SuperSave"
+	case Aggressive:
+		return "Aggressive"
+	case PowerSave:
+		return "PowerSave"
+	case Performance:
+		return "Performance"
+	case ThroughputThrottling:
+		return "ThroughputThrottling"
+	case None:
+		return "None"
+	default:
+		return "unknown"
+	}
+}
+func (pm powerManagementMode) sleep_ret_ms() uint16 {
+	switch pm {
+	case SuperSave:
+		return 2000
+	case Aggressive:
+		return 2000
+	case PowerSave:
+		return 200
+	case Performance:
+		return 20
+	default: // ThroughputThrottling, None
+		return 0 // value doesn't matter
+	}
+}
+
+func (pm powerManagementMode) beacon_period() uint8 {
+	switch pm {
+	case SuperSave:
+		return 255
+	case Aggressive:
+		return 1
+	case PowerSave:
+		return 1
+	case Performance:
+		return 1
+	default: // ThroughputThrottling, None
+		return 0 // value doesn't matter
+	}
+}
+
+func (pm powerManagementMode) dtim_period() uint8 {
+	switch pm {
+	case SuperSave:
+		return 255
+	case Aggressive:
+		return 1
+	case PowerSave:
+		return 1
+	case Performance:
+		return 1
+	default: // ThroughputThrottling, None
+		return 0 // value doesn't matter
+	}
+}
+
+func (pm powerManagementMode) assoc() uint8 {
+	switch pm {
+	case SuperSave:
+		return 255
+	case Aggressive:
+		return 10
+	case PowerSave:
+		return 10
+	case Performance:
+		return 1
+	default: // ThroughputThrottling, None
+		return 0 // value doesn't matter
+	}
+}
+
+// mode returns the WHD's internal mode number.
+func (pm powerManagementMode) mode() uint8 {
+	switch pm {
+	case ThroughputThrottling:
+		return 1
+	case None:
+		return 0
+	default:
+		return 2
+	}
+}
+
+type joinError struct {
+	errs []error
+}
+
+func (e *joinError) Error() string {
+	var b []byte
+	for i, err := range e.errs {
+		if i > 0 {
+			b = append(b, '\n')
+		}
+		b = append(b, err.Error()...)
+	}
+	return string(b)
+}
+
+func (e *joinError) Unwrap() []error {
+	return e.errs
+}
+
+type _uinteger = interface {
+	~uint8 | ~uint16 | ~uint32 | ~uint64 | uintptr
+}
+
+type _integer = interface {
+	~int | _uinteger
+}
+
+// align rounds `val` up to nearest multiple of `align`.
+func align[T constraints.Unsigned](val, align T) T {
+	return (val + align - 1) &^ (align - 1)
+}
+
+func max[T constraints.Integer](a, b T) T {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min[T constraints.Integer](a, b T) T {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+//go:inline
+func b2u32(b bool) uint32 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// swap16 swaps lowest 16 bits with highest 16 bits of a uint32.
+//
+//go:inline
+func swap16(b uint32) uint32 {
+	return (b >> 16) | (b << 16)
+}
+
+func swap16be(b uint32) uint32 {
+	b = swap16(b)
+	b0 := b & 0xff
+	b1 := (b >> 8) & 0xff
+	b2 := (b >> 16) & 0xff
+	b3 := (b >> 24) & 0xff
+	return b0<<24 | b1<<16 | b2<<8 | b3
+}

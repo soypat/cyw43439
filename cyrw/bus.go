@@ -1,213 +1,263 @@
 package cyrw
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
-	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 	"golang.org/x/exp/constraints"
-	"tinygo.org/x/drivers"
 )
 
-type OutputPin func(bool)
+// File based on runner.rs + bus.rs
 
-func DefaultConfig() Config {
-	return Config{
-		Firmware: wifiFW2,
-		CLM:      clmFW,
-	}
-}
-
-// type OutputPin func(bool)
-type Device struct {
-	mu              sync.Mutex
-	pwr             OutputPin
-	lastStatusGet   time.Time
-	spi             spibus
-	log             logstate
-	backplaneWindow uint32
-	ioctlID         uint16
-	sdpcmSeq        uint8
-	sdpcmSeqMax     uint8
-	mac             [6]byte
-	// uint32 buffers to ensure alignment of buffers.
-	rwBuf         [2]uint32        // rwBuf used for read* and write* functions.
-	_sendIoctlBuf [2048 / 4]uint32 // _sendIoctlBuf used only in sendIoctl and tx.
-	_iovarBuf     [2048 / 4]uint32 // _iovarBuf used in get_iovar* and set_iovar* calls.
-	_rxBuf        [2048 / 4]uint32 // Used in check_status->rx calls and handle_irq.
-	// We define headers in the Device struct to alleviate stack growth. Also used along with _sendIoctlBuf
-	lastSDPCMHeader whd.SDPCMHeader
-	// auxCDCHeader    whd.CDCHeader
-	auxCDCHeader whd.CDCHeader
-	auxBDCHeader whd.BDCHeader
-}
-
-func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
-	d := &Device{
-		pwr: pwr,
-		spi: spibus{
-			spi: spi,
-			cs:  cs,
-		},
-		sdpcmSeqMax: 1,
-	}
-	return d
-}
-
-type Config struct {
-	Firmware string
-	CLM      string
-}
-
-func hex32(u uint32) string {
-	return hex.EncodeToString([]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
-}
-
-func (d *Device) Init(cfg Config) (err error) {
-	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
-	err = d.initBus()
-	if err != nil {
-		return errjoin(errors.New("failed to init bus"), err)
-	}
-	d.backplaneWindow = 0xaaaa_aaaa
-	d.write8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR, 0x08) // BACKPLANE_ALP_AVAIL_REQ
+func (d *Device) initBus() error {
+	d.Reset()
+	retries := 128
 	for {
-		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
-		if got&0x40 != 0 {
-			break // ALP available-> clock OK.
-		}
-	}
-
-	chip_id, _ := d.bp_read16(0x1800_0000)
-
-	// Upload firmware.
-	err = d.core_disable(whd.CORE_WLAN_ARM)
-	if err != nil {
-		return err
-	}
-	err = d.core_reset(whd.CORE_SOCRAM, false)
-	if err != nil {
-		return err
-	}
-	d.bp_write32(whd.SOCSRAM_BASE_ADDRESS+0x10, 3)
-	d.bp_write32(whd.SOCSRAM_BASE_ADDRESS+0x44, 0)
-
-	d.debug("flashing firmware", slog.Uint64("chip_id", uint64(chip_id)), slog.Int("fwlen", len(cfg.Firmware)))
-	var ramAddr uint32 // Start at ATCM_RAM_BASE_ADDRESS = 0.
-	err = d.bp_writestring(ramAddr, cfg.Firmware)
-	if err != nil {
-		return err
-	}
-
-	// Load NVRAM
-	const chipRAMSize = 512 * 1024
-	nvramLen := align(uint32(len(nvram43439)), 4)
-	d.debug("flashing nvram")
-	err = d.bp_writestring(ramAddr+chipRAMSize-4-nvramLen, nvram43439)
-	if err != nil {
-		return err
-	}
-	nvramLenWords := nvramLen / 4
-	nvramLenMagic := ((^nvramLenWords) << 16) | nvramLenWords
-	d.bp_write32(ramAddr+chipRAMSize-4, nvramLenMagic)
-
-	// Start core.
-	err = d.core_reset(whd.CORE_WLAN_ARM, false)
-	if err != nil {
-		return err
-	}
-	if !d.core_is_up(whd.CORE_WLAN_ARM) {
-		return errors.New("core not up after reset")
-	}
-	d.debug("core up")
-	retries := 256
-	for {
-		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
-		if got&0x80 != 0 {
+		got := d.read32_swapped(whd.SPI_READ_TEST_REGISTER)
+		if got == whd.TEST_PATTERN {
 			break
-		}
-		if retries <= 0 {
-			return errors.New("timeout waiting for chip clock")
+		} else if retries <= 0 {
+			return errors.New("spi test failed:" + hex32(got))
 		}
 		retries--
 	}
-
-	// "Set up the interrupt mask and enable interrupts"
-	d.write16(FuncBus, whd.SPI_INTERRUPT_ENABLE_REGISTER, whd.F2_PACKET_AVAILABLE)
-
-	// ""Lower F2 Watermark to avoid DMA Hang in F2 when SD Clock is stopped.""
-	// "Sounds scary..."
-	// yea it does
-	const REG_BACKPLANE_FUNCTION2_WATERMARK = 0x10008
-	d.write8(FuncBackplane, REG_BACKPLANE_FUNCTION2_WATERMARK, 32)
-
-	// Wait for wifi startup.
-	retries = 1000
-	for !d.status().F2RxReady() {
-		retries--
-		if retries <= 0 {
-			return errors.New("wifi startup timeout")
-		}
+	const RWTestPattern = 0x12345678
+	const spiRegTestRW = 0x18
+	d.write32_swapped(spiRegTestRW, RWTestPattern)
+	got := d.read32_swapped(spiRegTestRW)
+	if got != RWTestPattern {
+		return errors.New("spi test failed:" + hex32(got) + " wanted " + hex32(RWTestPattern))
 	}
 
-	// Clear pulls.
-	d.write8(FuncBackplane, whd.SDIO_PULL_UP, 0)
-	d.read8(FuncBackplane, whd.SDIO_PULL_UP)
+	// Address 0x0000 registers.
+	const (
+		// 0=16bit word, 1=32bit word transactions.
+		WordLengthPos = 0
+		// Set to 1 for big endian words.
+		EndianessBigPos = 1 // 30
+		HiSpeedModePos  = 4
+		InterruptPolPos = 5
+		WakeUpPos       = 7
 
-	err = d.log_init()
-	if err != nil {
-		return err
+		ResponseDelayPos       = 0x1*8 + 0
+		StatusEnablePos        = 0x2*8 + 0
+		InterruptWithStatusPos = 0x2*8 + 1
+		// 132275 is Pico-sdk's default value.
+		// NOTE: embassy uses little endian words and StatusEnablePos.
+		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | (0 << EndianessBigPos) |
+			(1 << InterruptPolPos) | (1 << WakeUpPos) |
+			(1 << InterruptWithStatusPos) | (1 << StatusEnablePos)
+	)
+	val := d.read32_swapped(0)
+
+	d.write32_swapped(whd.SPI_BUS_CONTROL, setupValue)
+	got8, _ := d.read8(FuncBus, whd.SPI_BUS_CONTROL)
+	d.debug("read back bus ctl", slog.Uint64("got", uint64(got8)))
+
+	got, err := d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
+	println("current bus ctl", hex32(val), "writing:", hex32(setupValue), " got:", hex32(got))
+	if err != nil || got != whd.TEST_PATTERN {
+		return errjoin(errors.New("spi RO test failed:"+hex32(got)), err)
 	}
-	d.log_read()
-	d.debug("base init done")
-	if cfg.CLM == "" {
+
+	got, err = d.read32(FuncBus, spiRegTestRW)
+	if err != nil || got != RWTestPattern {
+		return errjoin(errors.New("spi RW test failed:"+hex32(got)), err)
+	}
+	return nil
+}
+
+func (d *Device) core_disable(coreID uint8) error {
+	base := coreaddress(coreID)
+
+	// Check if not already in reset.
+	d.bp_read8(base + whd.AI_RESETCTRL_OFFSET) // Dummy read.
+	r, _ := d.bp_read8(base + whd.AI_RESETCTRL_OFFSET)
+	if r&whd.AIRC_RESET != 0 {
 		return nil
 	}
-	return d.initControl(cfg.CLM)
-}
 
-func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
-	d.info("GPIOSet", slog.Uint64("wlGPIO", uint64(wlGPIO)), slog.Bool("value", value))
-	if wlGPIO >= 3 {
-		return errors.New("gpio out of range")
+	d.bp_write8(base+whd.AI_IOCTRL_OFFSET, 0)
+	d.bp_read8(base + whd.AI_IOCTRL_OFFSET) // Another dummy read.
+	time.Sleep(time.Millisecond)
+
+	d.bp_write8(base+whd.AI_RESETCTRL_OFFSET, whd.AIRC_RESET)
+	r, _ = d.bp_read8(base + whd.AI_RESETCTRL_OFFSET)
+	if r&whd.AIRC_RESET != 0 {
+		return nil
 	}
-	val0 := uint32(1) << wlGPIO
-	val1 := b2u32(value) << wlGPIO
-	return d.set_iovar2("gpioout", whd.WWD_STA_INTERFACE, val0, val1)
+	return errors.New("core disable failed")
 }
 
-// status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
-func (d *Device) status() Status {
-	sinceStat := time.Since(d.lastStatusGet)
-	if sinceStat < 12*time.Microsecond {
-		runtime.Gosched() // Probably in hot loop.
-	} else {
-		got, _ := d.read32(FuncBus, whd.SPI_STATUS_REGISTER) // Explicitly get Status.
-		return Status(got)
-	}
-	return d.spi.Status()
-}
-
-func (d *Device) Reset() {
-	d.pwr(false)
-	time.Sleep(20 * time.Millisecond)
-	d.pwr(true)
-	time.Sleep(250 * time.Millisecond)
-}
-
-func (d *Device) getInterrupts() Interrupts {
-	irq, err := d.read16(FuncBus, whd.SPI_INTERRUPT_REGISTER)
+func (d *Device) core_reset(coreID uint8, coreHalt bool) error {
+	err := d.core_disable(coreID)
 	if err != nil {
-		return 0
+		return err
 	}
-	return Interrupts(irq)
+	var cpuhaltFlag uint8
+	if coreHalt {
+		cpuhaltFlag = whd.SICF_CPUHALT
+	}
+	base := coreaddress(coreID)
+	const addr = 0x18103000 + whd.AI_IOCTRL_OFFSET
+	d.bp_write8(base+whd.AI_IOCTRL_OFFSET, whd.SICF_FGC|whd.SICF_CLOCK_EN|cpuhaltFlag)
+	d.bp_read8(base + whd.AI_IOCTRL_OFFSET) // Dummy read.
+
+	d.bp_write8(base+whd.AI_RESETCTRL_OFFSET, 0)
+	time.Sleep(time.Millisecond)
+
+	d.bp_write8(base+whd.AI_IOCTRL_OFFSET, whd.SICF_CLOCK_EN|cpuhaltFlag)
+	d.bp_read8(base + whd.AI_IOCTRL_OFFSET) // Dummy read.
+	time.Sleep(time.Millisecond)
+	return nil
+}
+
+// CoreIsActive returns if the specified core is not in reset.
+// Can be called with CORE_WLAN_ARM and CORE_SOCRAM global constants.
+// It may return true if communications are down (WL_REG_ON at low).
+//
+//	reference: device_core_is_up
+func (d *Device) core_is_up(coreID uint8) bool {
+	base := coreaddress(coreID)
+	reg, _ := d.bp_read8(base + whd.AI_IOCTRL_OFFSET)
+	if reg&(whd.SICF_FGC|whd.SICF_CLOCK_EN) != whd.SICF_CLOCK_EN {
+		return false
+	}
+	reg, _ = d.bp_read8(base + whd.AI_RESETCTRL_OFFSET)
+	return reg&whd.AIRC_RESET == 0
+}
+
+// coreaddress returns either WLAN=0x18103000  or  SOCRAM=0x18104000
+//
+//	reference: get_core_address
+func coreaddress(coreID uint8) (v uint32) {
+	switch coreID {
+	case whd.CORE_WLAN_ARM:
+		v = whd.WRAPPER_REGISTER_OFFSET + whd.WLAN_ARMCM3_BASE_ADDRESS
+	case whd.CORE_SOCRAM:
+		v = whd.WRAPPER_REGISTER_OFFSET + whd.SOCSRAM_BASE_ADDRESS
+	default:
+		panic("bad core id")
+	}
+	return v
+}
+
+func (d *Device) log_init() error {
+	d.debug("log_init")
+	const (
+		ramBase           = 0
+		ramSize           = 512 * 1024
+		socram_srmem_size = 64 * 1024
+	)
+	const addr = ramBase + ramSize - 4 - socram_srmem_size
+	sharedAddr, err := d.bp_read32(addr)
+	if err != nil {
+		return err
+	}
+	shared := make([]byte, 32)
+	d.bp_read(sharedAddr, shared)
+	caddr := _busOrder.Uint32(shared[20:])
+	smem := decodeSharedMem(_busOrder, shared)
+	d.log.addr = smem.console_addr + 8
+	d.debug("log addr",
+		slog.String("shared", hex.EncodeToString(shared)),
+		slog.String("shared[20:]", hex.EncodeToString(shared[20:])),
+		slog.Uint64("sharedAddr", uint64(sharedAddr)),
+		slog.Uint64("consoleAddr", uint64(d.log.addr)),
+		slog.Uint64("caddr", uint64(caddr)),
+	)
+	return nil
+}
+
+func (d *Device) log_read() error {
+	d.debug("log_read")
+	buf8 := u32AsU8(d._sendIoctlBuf[:])
+	err := d.bp_read(d.log.addr, buf8[:16])
+	if err != nil {
+		return err
+	}
+	smem := decodeSharedMemLog(_busOrder, buf8[:16])
+	idx := smem.idx
+	if idx == d.log.last_idx {
+		d.debug("CYLOG: no new data")
+		return nil // Pointer not moved, nothing to do.
+	}
+
+	err = d.bp_read(smem.buf, buf8[:])
+	if err != nil {
+		return err
+	}
+
+	for d.log.last_idx != idx {
+		b := buf8[d.log.last_idx]
+		if b == '\r' || b == '\n' {
+			if d.log.bufcount != 0 {
+				d.info("CYLOG", slog.String("msg", string(d.log.buf[:d.log.bufcount])))
+				d.log.bufcount = 0
+			}
+		} else if d.log.bufcount < uint32(len(d.log.buf)) {
+			d.log.buf[d.log.bufcount] = b
+			d.log.bufcount++
+		}
+		d.log.last_idx++
+		if d.log.last_idx == 0x400 {
+			d.log.last_idx = 0
+		}
+	}
+	return nil
+}
+
+type sharedMem struct {
+	flags            uint32 // offset 0x00
+	trap_addr        uint32 // offset 0x04
+	assert_exp_addr  uint32 // offset 0x08
+	assert_file_addr uint32 // offset 0x0c
+	assert_line      uint32 // offset 0x10
+	console_addr     uint32 // offset 0x14
+	msgtrace_addr    uint32 // offset 0x18
+	fwid             uint32 // offset 0x1c
+}
+
+func decodeSharedMem(order binary.ByteOrder, buf []byte) (s sharedMem) {
+	s.flags = order.Uint32(buf[0:4])
+	s.trap_addr = order.Uint32(buf[4:8])
+	s.assert_exp_addr = order.Uint32(buf[8:12])
+	s.assert_file_addr = order.Uint32(buf[12:16])
+	s.assert_line = order.Uint32(buf[16:20])
+	s.console_addr = order.Uint32(buf[20:24])
+	s.msgtrace_addr = order.Uint32(buf[24:28])
+	s.fwid = order.Uint32(buf[28:32])
+	return s
+}
+
+type logstate struct {
+	addr     uint32
+	last_idx uint32
+	buf      [256]byte
+	bufcount uint32
+}
+
+// sharedMemLog has size 4*4=16
+type sharedMemLog struct {
+	buf     uint32
+	bufSize uint32
+	idx     uint32
+	outIdx  uint32
+}
+
+func decodeSharedMemLog(order binary.ByteOrder, buf []byte) (s sharedMemLog) {
+	s.buf = order.Uint32(buf[0:4])
+	s.bufSize = order.Uint32(buf[4:8])
+	s.idx = order.Uint32(buf[8:12])
+	s.outIdx = order.Uint32(buf[12:16])
+	return s
 }
 
 func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
@@ -218,10 +268,9 @@ func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
 	return err
 }
 
-func (d *Device) wlan_write(data []uint32) (err error) {
+func (d *Device) wlan_write(data []uint32, plen uint32) (err error) {
 	var buf [513]uint32
-	cmd := cmd_word(true, true, FuncWLAN, 0, uint32(len(data)*4))
-	buf[0] = cmd
+	buf[0] = cmd_word(true, true, FuncWLAN, 0, plen)
 	copy(buf[1:], data)
 	_, err = d.spi.cmd_write(buf[:len(data)+1])
 	d.lastStatusGet = time.Now()
@@ -239,23 +288,23 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 		// Calculate address and length of next write.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
 		windowRemaining := 0x8000 - windowOffset // windowsize - windowoffset
-		length := min(min(uint32(len(data)), maxTxSize), windowRemaining)
+		lenBytes := min(min(uint32(len(data)), maxTxSize), windowRemaining)
 
 		err = d.backplane_setwindow(addr)
 		if err != nil {
 			return err
 		}
-		cmd := cmd_word(false, true, FuncBackplane, windowOffset, length)
+		cmd := cmd_word(false, true, FuncBackplane, windowOffset, lenBytes)
 
 		// round `buf` to word boundary, add one extra word for the response delay byte.
-		_, err = d.spi.cmd_read(cmd, buf[:(length+3)/4+1])
+		_, err = d.spi.cmd_read(cmd, buf[:(lenBytes+3)/4+1])
 		if err != nil {
 			return err
 		}
-		// when writing out the data, we skip the response-delay byte.
-		copy(data[:length], buf8[1:])
-		addr += length
-		data = data[length:]
+		// when writing out the data, we skip the response-delay *word* (4 bytes).
+		copy(data[:lenBytes], buf8[4:4+lenBytes])
+		addr += lenBytes
+		data = data[lenBytes:]
 	}
 	d.lastStatusGet = time.Now()
 	return err
@@ -267,7 +316,7 @@ func (d *Device) bp_writestring(addr uint32, data string) error {
 	sliceHdr := reflect.SliceHeader{
 		Data: hdr.Data,
 		Len:  hdr.Len,
-		Cap:  align(hdr.Len, 4), // Round capacity up. Not used yet.
+		Cap:  align(hdr.Len, 4),
 	}
 	return d.bp_write(addr, *(*[]byte)(unsafe.Pointer(&sliceHdr)))
 }
@@ -514,28 +563,4 @@ func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 //go:inline
 func cmd_word(write, autoInc bool, fn Function, addr uint32, sz uint32) uint32 {
 	return b2u32(write)<<31 | b2u32(autoInc)<<30 | uint32(fn)<<28 | (addr&0x1ffff)<<11 | sz
-}
-
-//go:inline
-func b2u32(b bool) uint32 {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// swap16 swaps lowest 16 bits with highest 16 bits of a uint32.
-//
-//go:inline
-func swap16(b uint32) uint32 {
-	return (b >> 16) | (b << 16)
-}
-
-func swap16be(b uint32) uint32 {
-	b = swap16(b)
-	b0 := b & 0xff
-	b1 := (b >> 8) & 0xff
-	b2 := (b >> 16) & 0xff
-	b3 := (b >> 24) & 0xff
-	return b0<<24 | b1<<16 | b2<<8 | b3
 }

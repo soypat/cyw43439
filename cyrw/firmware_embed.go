@@ -25,6 +25,7 @@ const (
 	wifiFWLen   = 224190
 	wifibtFWLen = 231077
 	clmLen      = 984
+	_nvramlen   = len(nvram43439)
 )
 
 const nvram43439 = "NVRAMRev=$Rev$" + "\x00" +
@@ -73,7 +74,7 @@ const nvram43439 = "NVRAMRev=$Rev$" + "\x00" +
 	"spurconfig=0x3" + "\x00" +
 	"glitch_based_crsmin=1" + "\x00" +
 	"btc_mode=1" + "\x00" +
-	"\x00\x00\x00" // C includes null terminator in strings.
+	"\x00\x00" // C includes null terminator in strings.
 
 	/*
 	   var (

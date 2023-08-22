@@ -27,10 +27,21 @@ func main() {
 		panic(err)
 	}
 
+	for {
+		dev.GPIOSet(0, true)
+		err = dev.WifiJoin("tinygo", "")
+		time.Sleep(time.Second)
+		dev.GPIOSet(0, false)
+		if err == nil {
+			break
+		}
+		println("wifi join failed:", err.Error())
+		time.Sleep(5 * time.Second)
+	}
+
 	println("finished init OK")
 	cycle := true
 	for {
-		err = dev.GPIOSet(0, cycle)
 		if err != nil {
 			println(err.Error())
 		}
