@@ -11,6 +11,7 @@ import (
 )
 
 func (d *Device) WifiJoin(ssid, password string) (err error) {
+	d.info("WifiJoin", slog.String("ssid", ssid), slog.Int("passlen", len(password)))
 	err = d.set_power_management(PowerSave)
 	if err != nil {
 		return err
@@ -18,7 +19,7 @@ func (d *Device) WifiJoin(ssid, password string) (err error) {
 	if password == "" {
 		return d.join_open(ssid)
 	}
-	return errors.New("not implemented")
+	return errors.New("wpa_auth not implemented")
 }
 
 func (d *Device) initControl(clm string) error {
@@ -124,6 +125,7 @@ func (d *Device) MAC() net.HardwareAddr {
 }
 
 func (d *Device) set_power_management(mode powerManagementMode) error {
+	d.debug("set_power_management", slog.String("mode", mode.String()))
 	if !mode.IsValid() {
 		return errors.New("invalid power management mode")
 	}
@@ -138,6 +140,7 @@ func (d *Device) set_power_management(mode powerManagementMode) error {
 }
 
 func (d *Device) join_open(ssid string) error {
+	d.debug("join_open", slog.String("ssid", ssid))
 	if len(ssid) > 32 {
 		return errors.New("ssid too long")
 	}

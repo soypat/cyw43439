@@ -181,9 +181,9 @@ func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data
 		d.logerr("sendIoctl:resp", slog.String("err", err.Error()))
 		return 0, err
 	}
-	d.debug("sendIoctl:resp", slog.String("resp", string(packet)))
-
-	return copy(data[:], packet), nil
+	n := copy(data[:], packet)
+	d.debug("sendIoctl:resp", slog.Int("responseLen", len(packet)), slog.Int("lenAvailable", len(data)), slog.String("resp", string(packet)))
+	return n, nil
 }
 
 func (d *Device) doIoctlSet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
@@ -238,7 +238,7 @@ func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInte
 // handle_irq waits for IRQ on F2 packet available
 func (d *Device) handle_irq(buf []uint32) (err error) {
 	irq := d.getInterrupts()
-	d.debug("handle_irq", slog.String("irq", irq.String()))
+	d.trace("handle_irq", slog.String("irq", irq.String()))
 
 	if irq.IsF2Available() {
 		err = d.check_status(buf)
@@ -252,6 +252,7 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 
 // pollForIoctl polls until a control/ioctl/cdc packet is received.
 func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) {
+	d.trace("pollForIoctl")
 	for retries := 0; retries < 10; retries++ {
 		status := d.status()
 		if !status.F2PacketAvailable() {
@@ -274,6 +275,7 @@ func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) 
 
 // check_status handles F2 events while status register is set.
 func (d *Device) check_status(buf []uint32) error {
+	d.trace("check_status")
 	d.log_read()
 	for {
 		status := d.status()
@@ -359,7 +361,7 @@ func (d *Device) rxEvent(packet []byte) (dataoffset uint16, err error) {
 	bdc := whd.DecodeBDCHeader(packet)
 	dataoffset = whd.BDC_HEADER_LEN + 4*uint16(bdc.DataOffset)
 	_dataoffset := min(int(dataoffset), len(packet))
-	d.debug("rxEvent:bdc",
+	d.debug("rxEvent",
 		slog.Any("bdc", &bdc),
 		slog.Int("plen", len(packet)),
 		slog.Int("dataoffset", int(dataoffset)),
@@ -387,9 +389,8 @@ func (d *Device) rxEvent(packet []byte) (dataoffset uint16, err error) {
 }
 
 func (d *Device) rxData(packet []byte) (err error) {
-	d.debug("rxData", slog.Int("len", len(packet)))
 	bdcHdr := whd.DecodeBDCHeader(packet)
-	d.debug("rxData:bdc", slog.Any("bdc", &bdcHdr))
+	d.debug("rxData", slog.Int("len", len(packet)), slog.Any("bdc", &bdcHdr))
 	// TODO(sfeldma) send payload up as new rx eth packet
 	return nil
 }

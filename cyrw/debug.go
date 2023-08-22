@@ -15,6 +15,8 @@ const (
 	currentLevel slog.Level = levelTrace + 1
 	levelTrace   slog.Level = slog.LevelDebug - 1
 	deviceLevel  slog.Level = slog.LevelError - 1
+	// dblogattrs decides whether to print key-value log attributes.
+	dblogattrs = true
 )
 
 func (d *Device) logerr(msg string, attrs ...slog.Attr) {
@@ -42,7 +44,7 @@ func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 	if level < currentLevel && !canPrintDeviceLog {
 		return
 	}
-	const logAttrs = true
+
 	var levelStr string
 	switch level {
 	case deviceLevel:
@@ -56,7 +58,7 @@ func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 	print(levelStr)
 	print(" ")
 	print(msg)
-	if logAttrs {
+	if dblogattrs {
 		for _, a := range attrs {
 			print(" ")
 			print(a.Key)
@@ -91,7 +93,7 @@ func (d *Device) log_init() error {
 	caddr := _busOrder.Uint32(shared[20:])
 	smem := decodeSharedMem(_busOrder, shared)
 	d.log.addr = smem.console_addr + 8
-	d.debug("log addr",
+	d.trace("log addr",
 		slog.String("shared", hex.EncodeToString(shared)),
 		slog.String("shared[20:]", hex.EncodeToString(shared[20:])),
 		slog.Uint64("sharedAddr", uint64(sharedAddr)),
@@ -101,6 +103,8 @@ func (d *Device) log_init() error {
 	return nil
 }
 
+// log_read reads the CY43439's internal logs and prints them to the structured logger
+// under the CY43 level.
 func (d *Device) log_read() error {
 	if !enableDeviceLog {
 		return nil
