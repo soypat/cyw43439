@@ -182,7 +182,7 @@ func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data
 		return 0, err
 	}
 	n := copy(data[:], packet)
-	d.debug("sendIoctl:resp", slog.Int("responseLen", len(packet)), slog.Int("lenAvailable", len(data)), slog.String("resp", string(packet)))
+	d.debug("sendIoctl:resp", slog.Int("lenResponse", len(packet)), slog.Int("lenAvailable", len(data)), slog.String("resp", string(packet)))
 	return n, nil
 }
 

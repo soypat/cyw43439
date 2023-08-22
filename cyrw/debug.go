@@ -3,6 +3,8 @@ package cyrw
 import (
 	"encoding/hex"
 	"fmt"
+	"reflect"
+	"unsafe"
 
 	"github.com/soypat/cyw43439/internal/slog"
 )
@@ -17,6 +19,8 @@ const (
 	deviceLevel  slog.Level = slog.LevelError - 1
 	// dblogattrs decides whether to print key-value log attributes.
 	dblogattrs = true
+	// print out raw bus transactions.
+	printLowestLevelBusTransactions = false
 )
 
 func (d *Device) logerr(msg string, attrs ...slog.Attr) {
@@ -144,4 +148,29 @@ func (d *Device) log_read() error {
 		}
 	}
 	return nil
+}
+
+func printLowLevelTx(cmd uint32, data []uint32) {
+	if !printLowestLevelBusTransactions {
+		return
+	}
+	var buf [8]byte
+	ptr := unsafe.Pointer(&buf[0])
+	strhdr := reflect.StringHeader{
+		Data: uintptr(ptr),
+		Len:  uintptr(len(buf)),
+	}
+	h := *(*string)(unsafe.Pointer(&strhdr))
+	const hextable = "0123456789abcdef"
+
+	hex.Encode(buf[:], u32PtrTo4U8(&cmd)[:])
+	print("tx: ")
+	print(h)
+
+	for _, d := range data {
+		hex.Encode(buf[:], u32PtrTo4U8(&d)[:])
+		print(" ")
+		print(h)
+	}
+	println()
 }

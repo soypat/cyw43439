@@ -79,6 +79,7 @@ func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {
 	}
 	d.status, _ = d.transfer(0)
 	d.csEnable(false)
+	printLowLevelTx(cmd, buf[:])
 	return d.status, err
 }
 
@@ -96,6 +97,7 @@ func (d *spibus) cmd_write(buf []uint32) (status uint32, err error) {
 	}
 	d.status, _ = d.transfer(0)
 	d.csEnable(false)
+	printLowLevelTx(buf[0], buf[1:])
 	return d.status, err
 }
 
