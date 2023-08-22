@@ -49,7 +49,7 @@ func (d *Device) initControl(clm string) error {
 		n += whd.DL_HEADER_LEN
 		n += copy(buf8[20:], chunk)
 
-		err := d.sendIoctl(ioctlSET, whd.WLC_SET_VAR, whd.WWD_STA_INTERFACE, buf8[:n])
+		err := d.doIoctlSet(whd.WLC_SET_VAR, whd.WWD_STA_INTERFACE, buf8[:n])
 		if err != nil {
 			return err
 		}

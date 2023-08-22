@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strconv"
 	"unsafe"
+
+	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
 
 type SDPCMHeader struct {
@@ -313,6 +315,87 @@ func (dh *DownloadHeader) Put(order binary.ByteOrder, b []byte) {
 	order.PutUint16(b[2:4], dh.Type)
 	order.PutUint32(b[4:8], dh.Len)
 	order.PutUint32(b[8:12], dh.CRC)
+}
+
+type EventPacket struct {
+	EthHeader   eth.EthernetHeader
+	EventHeader EventHeader
+	Message     EventMessage
+}
+
+type EventHeader struct {
+	Subtype     uint16  // 0:2
+	Length      uint16  // 2:4
+	Version     uint8   // 4:5
+	OUI         [3]byte // 5:8
+	UserSubtype uint16  // 8:10
+}
+
+type EventMessage struct {
+	Version   uint16         // 0:2
+	Flags     uint16         // 2:4
+	EventType AsyncEventType // 4:8
+	Status    uint32         // 8:12
+	Reason    uint32         // 12:16
+	AuthType  uint32         // 16:20
+	DataLen   uint32         // 20:24
+	Addr      [6]byte        // 24:30
+	IFName    [16]byte       // 30:46 Name of incoming packet interface.
+	IFIdx     uint8          // 46:47
+	BSSCfgIdx uint8          // 47:48
+}
+
+// DecodeEventPacket decodes a async event packet. Requires 72 byte buffer.
+func DecodeEventPacket(order binary.ByteOrder, buf []byte) (ev EventPacket, err error) {
+	const totalLen = 14 + 10 + 48
+	if len(buf) < totalLen {
+		return ev, errors.New("buffer too small to parse event packet")
+	}
+	ev.EthHeader = eth.DecodeEthernetHeader(buf[:14])
+	if ev.EthHeader.AssertType() != 0x886c {
+		return ev, errors.New("invalid ethertype")
+	}
+	ev.EventHeader = DecodeEventHeader(order, buf[14:24])
+	const (
+		BCMILCP_SUBTYPE_VENDOR_LONG = 32769
+		BCMILCP_BCM_SUBTYPE_EVENT   = 1
+	)
+	switch {
+	case ev.EventHeader.OUI != [3]byte{0x00, 0x10, 0x18}:
+		return ev, errors.New("invalid oui; expected broadcom OUI")
+	case ev.EventHeader.Subtype != BCMILCP_SUBTYPE_VENDOR_LONG:
+		return ev, errors.New("invalid subtype; expected BCMILCP_SUBTYPE_VENDOR_LONG=32769")
+	case ev.EventHeader.UserSubtype != BCMILCP_BCM_SUBTYPE_EVENT:
+		return ev, errors.New("invalid user subtype; expected BCMILCP_BCM_SUBTYPE_EVENT=1")
+	}
+	ev.Message = DecodeEventMessage(order, buf[24:totalLen])
+	return ev, nil
+}
+
+func DecodeEventHeader(order binary.ByteOrder, buf []byte) (ev EventHeader) {
+	_ = buf[9]
+	ev.Subtype = order.Uint16(buf)
+	ev.Length = order.Uint16(buf[2:])
+	ev.Version = buf[4]
+	copy(ev.OUI[:], buf[5:8])
+	ev.UserSubtype = order.Uint16(buf[8:])
+	return ev
+}
+
+func DecodeEventMessage(order binary.ByteOrder, buf []byte) (ev EventMessage) {
+	_ = buf[47]
+	ev.Version = order.Uint16(buf)
+	ev.Flags = order.Uint16(buf[2:])
+	ev.EventType = AsyncEventType(order.Uint32(buf[4:]))
+	ev.Status = order.Uint32(buf[8:])
+	ev.Reason = order.Uint32(buf[12:])
+	ev.AuthType = order.Uint32(buf[16:])
+	ev.DataLen = order.Uint32(buf[20:])
+	copy(ev.Addr[:], buf[24:30])
+	copy(ev.IFName[:], buf[30:46])
+	ev.IFIdx = buf[46]
+	ev.BSSCfgIdx = buf[47]
+	return ev
 }
 
 // dtoh32 device to host 32 bit.

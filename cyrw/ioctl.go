@@ -1,6 +1,7 @@
 package cyrw
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"strconv"
@@ -249,6 +250,7 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 	return err
 }
 
+// pollForIoctl polls until a control/ioctl/cdc packet is received.
 func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) {
 	for retries := 0; retries < 10; retries++ {
 		status := d.status()
@@ -272,6 +274,7 @@ func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) 
 
 // check_status handles F2 events while status register is set.
 func (d *Device) check_status(buf []uint32) error {
+	d.log_read()
 	for {
 		status := d.status()
 		if status.F2PacketAvailable() {
@@ -294,6 +297,11 @@ func (d *Device) check_status(buf []uint32) error {
 
 func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, err error) {
 	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
+	if len(packet) < whd.SDPCM_HEADER_LEN+whd.BDC_HEADER_LEN+1 {
+		d.logerr("PACKET TOO SHORT", slog.Int("len", len(packet)))
+		return 0, 0, noPacket, errors.New("packet too short")
+	}
+
 	d.lastSDPCMHeader = whd.DecodeSDPCMHeader(_busOrder, packet)
 	hdrType := d.lastSDPCMHeader.Type()
 	d.debug("rx", slog.Int("len", len(packet)), slog.String("hdr", hdrType.String()))
@@ -311,7 +319,10 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 		err = d.rxControl(payload)
 
 	case whd.ASYNCEVENT_HEADER:
-		err = d.rxEvent(payload)
+		var suboffset uint16
+		suboffset, err = d.rxEvent(payload)
+		offset += suboffset
+		plen = d.lastSDPCMHeader.Size - offset
 
 	case whd.DATA_HEADER:
 		err = d.rxData(payload)
@@ -344,13 +355,35 @@ func (d *Device) rxControl(packet []byte) (err error) {
 	return nil
 }
 
-func (d *Device) rxEvent(packet []byte) (err error) {
-	ae, err := whd.ParseAsyncEvent(_busOrder, packet)
-	d.debug("rxEvent", slog.Int("len", len(packet)), slog.Any("ae", &ae), slog.Any("err", err))
-	if err != nil {
-		return err
+func (d *Device) rxEvent(packet []byte) (dataoffset uint16, err error) {
+	bdc := whd.DecodeBDCHeader(packet)
+	dataoffset = whd.BDC_HEADER_LEN + 4*uint16(bdc.DataOffset)
+
+	d.debug("rxEvent:bdc",
+		slog.Any("bdc", &bdc),
+		slog.Int("plen", len(packet)),
+		slog.Int("dataoffset", int(dataoffset)),
+		slog.String("data[:offset]", hex.EncodeToString(packet[:dataoffset])),
+		slog.String("data[offset:]", hex.EncodeToString(packet[dataoffset:])),
+	)
+	if int(dataoffset) > len(packet) {
+		return 0, errors.New("malformed event packet")
 	}
-	return nil
+
+	// After this point we are in big endian (network order).
+	packet = packet[dataoffset:]
+
+	aePacket, err := whd.DecodeEventPacket(binary.BigEndian, packet)
+	d.debug("parsedEvent", slog.Any("aePacket", &aePacket), slog.Any("err", err))
+	if err != nil {
+		return 0, err
+	}
+	ev := aePacket.Message.EventType
+	if !d.eventmask.IsEnabled(ev) {
+		d.debug("ignoring packet", slog.String("event", ev.String()))
+		return 0, nil
+	}
+	return dataoffset, nil
 }
 
 func (d *Device) rxData(packet []byte) (err error) {

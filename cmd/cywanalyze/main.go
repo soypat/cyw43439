@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/soypat/saleae"
 	"github.com/soypat/saleae/analyzers"
 	"golang.org/x/exp/constraints"
+	"golang.org/x/exp/slices"
 )
 
 // Optional flags.
@@ -33,6 +36,7 @@ type BusCtl struct {
 	OmitWrite       bool
 	OmitIneffectual bool
 	PadDataToWord   bool
+	OmitAddrs       []uint32
 }
 
 func main() {
@@ -58,10 +62,20 @@ func main() {
 	omitReadAll := flag.Bool("omit-read", false, "Choose to omit read commands in output.")
 	omitWriteAll := flag.Bool("omit-write", false, "Choose to omit write commands in output.")
 	omitIneffectual := flag.Bool("omit-inef", false, "Omit data after the command size.")
+	omitAddrs := flag.String("omit-addrs", "", "Omit commands with these addresses. Comma separated list of hex addresses.")
 	padDataToWord := flag.Bool("pad-data", false, "Pad data to word size (4 bytes).")
 	flag.Parse()
 	if *flagInterpretWords == "" {
 		*flagInterpretWords = *flagBCTLLE
+	}
+	var addrs []uint32
+	for i, addr := range strings.Split(*omitAddrs, ",") {
+		addr = strings.TrimPrefix(addr, "0x")
+		v, err := strconv.ParseUint(addr, 16, 32)
+		if err != nil {
+			log.Fatalf("parsing address %d: %s", i+1, err)
+		}
+		addrs = append(addrs, uint32(v))
 	}
 	getOrder := func(s string) binary.ByteOrder {
 		switch s {
@@ -83,6 +97,7 @@ func main() {
 		OmitWrite:       *omitWriteAll,
 		PadDataToWord:   *padDataToWord,
 		OmitIneffectual: *omitIneffectual,
+		OmitAddrs:       addrs,
 	}
 	if BUS.OmitRead && BUS.OmitWrite {
 		log.Fatal("cannot omit both read and write commands")
@@ -238,6 +253,9 @@ func (bus *BusCtl) process(txs []analyzers.TxSPI) (cytxs []cywtx) {
 	for i := 0; i < len(txs); i++ {
 		tx := txs[i]
 		cmd, data := bus.CommandFromBytes(tx.SDO)
+		if slices.Contains(bus.OmitAddrs, cmd.Addr) {
+			continue
+		}
 		for j := i + 1; j < len(txs); j++ {
 			nextcmd, nextdata := bus.CommandFromBytes(txs[j].SDO)
 			if nextcmd != cmd || !bytes.Equal(data, nextdata) {
