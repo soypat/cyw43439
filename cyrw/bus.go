@@ -1,5 +1,8 @@
 package cyrw
 
+// File based on mainly on bus.rs from the reference
+// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/bus.rs
+
 import (
 	"encoding/binary"
 	"encoding/hex"
@@ -13,9 +16,8 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
-// File based on runner.rs + bus.rs
-
 func (d *Device) initBus() error {
+	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/bus.rs#L51
 	d.Reset()
 	retries := 128
 	for {

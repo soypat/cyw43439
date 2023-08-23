@@ -309,6 +309,7 @@ type EventMessage struct {
 
 // DecodeEventPacket decodes a async event packet. Requires 72 byte buffer.
 func DecodeEventPacket(order binary.ByteOrder, buf []byte) (ev EventPacket, err error) {
+	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/structs.rs#L234C18-L234C18
 	const totalLen = 14 + 10 + 48
 	if len(buf) < totalLen {
 		return ev, errors.New("buffer too small to parse event packet")

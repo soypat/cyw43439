@@ -225,6 +225,7 @@ const (
 	irqF3_INTR                 irqmask = 0x8000
 )
 
+// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/lib.rs#L153
 type powerManagementMode uint8
 
 const (

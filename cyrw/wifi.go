@@ -1,5 +1,8 @@
 package cyrw
 
+// This file borrows heavily from control.rs from the reference:
+// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/control.rs
+
 import (
 	"encoding/binary"
 	"errors"
@@ -23,6 +26,7 @@ func (d *Device) WifiJoin(ssid, password string) (err error) {
 }
 
 func (d *Device) initControl(clm string) error {
+	// reference: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/control.rs#L35
 	d.debug("initControl", slog.Int("clm_len", len(clm)))
 	const chunkSize = 1024
 	remaining := clm

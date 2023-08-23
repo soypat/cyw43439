@@ -1,5 +1,8 @@
 package cyrw
 
+// This file is based heavily on `runner.rs` from the Embassy project.
+// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/runner.rs
+
 import (
 	"encoding/binary"
 	"encoding/hex"
@@ -21,6 +24,9 @@ const (
 )
 
 type eventMask struct {
+	// This struct takes inspiration from two structs in the reference:
+	// The EventMask impl for *Enable methods: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/events.rs#L341
+	// The EventMask struct for Disable(unset) method:
 	iface  uint32
 	events [24]uint8
 }
