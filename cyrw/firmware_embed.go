@@ -1,4 +1,4 @@
-package cyw43439
+package cyrw
 
 import _ "embed"
 
@@ -6,15 +6,18 @@ import _ "embed"
 // when developing.
 
 var (
-
+	//go:embed firmware/43439A0_clm.bin
+	clmFW string
+	//go:embed firmware/43439A0.bin
+	wifiFW2 string
 	// Of raw size 225240.
-	//go:embed cyrw/firmware/wififw.bin
+	//go:embed firmware/wififw.bin
 	wifiFW string
 	// Of raw size 232408 bytes
-	//go:embed cyrw/firmware/wifibtfw.bin
+	//go:embed firmware/wifibtfw.bin
 	wifibtFW string
 	// Of raw size 6164 bytes.
-	//go:embed cyrw/firmware/btfw.bin
+	//go:embed firmware/btfw.bin
 	btFW string
 )
 
@@ -22,6 +25,7 @@ const (
 	wifiFWLen   = 224190
 	wifibtFWLen = 231077
 	clmLen      = 984
+	_nvramlen   = len(nvram43439)
 )
 
 const nvram43439 = "NVRAMRev=$Rev$" + "\x00" +
@@ -70,7 +74,7 @@ const nvram43439 = "NVRAMRev=$Rev$" + "\x00" +
 	"spurconfig=0x3" + "\x00" +
 	"glitch_based_crsmin=1" + "\x00" +
 	"btc_mode=1" + "\x00" +
-	"\x00\x00\x00" // C includes null terminator in strings.
+	"\x00\x00" // C includes null terminator in strings.
 
 	/*
 	   var (

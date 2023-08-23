@@ -4,6 +4,7 @@
 package whd
 
 // CountryCode returns the country code representation given an uppercase two character string.
+// Use rev=0 if unsure.
 // Known countries:
 //   - WORLDWIDE      "XX" (use this if in doubt)
 //   - AUSTRALIA      "AU"
@@ -70,6 +71,8 @@ const (
 	SDPCM_HEADER_LEN = 12
 	IOCTL_HEADER_LEN = 16
 	BDC_HEADER_LEN   = 4
+	CDC_HEADER_LEN   = 16
+	DL_HEADER_LEN    = 12 // DownloadHeader size.
 )
 
 const (
@@ -137,23 +140,24 @@ const (
 
 type IoctlInterface uint8
 
+// IoctlInterfaces.
 const (
-	WWD_STA_INTERFACE IoctlInterface = 0
-	WWD_AP_INTERFACE  IoctlInterface = 1
-	WWD_P2P_INTERFACE IoctlInterface = 2
+	IF_STA IoctlInterface = 0
+	IF_AP  IoctlInterface = 1
+	IF_P2P IoctlInterface = 2
 )
 
 func (i IoctlInterface) IsValid() bool {
-	return i <= WWD_P2P_INTERFACE
+	return i <= IF_P2P
 }
 
 func (i IoctlInterface) String() (s string) {
 	switch i {
-	case WWD_STA_INTERFACE:
+	case IF_STA:
 		s = "sta"
-	case WWD_AP_INTERFACE:
+	case IF_AP:
 		s = "ap"
-	case WWD_P2P_INTERFACE:
+	case IF_P2P:
 		s = "p2p"
 	default:
 		s = "unknown"
@@ -397,31 +401,26 @@ const (
 	SPI_FRAME_CONTROL = 0x1000D
 )
 
-//go:generate stringer -type=AsyncEventType -output=asyncevent_type_string.go -trimprefix=CYW43_EV_
-
-// AsyncEventType is the type of an async event
-type AsyncEventType uint32
-
 // Async events, event_type field
 const (
-	CYW43_EV_SET_SSID                 AsyncEventType = 0
-	CYW43_EV_JOIN                     AsyncEventType = 1
-	CYW43_EV_AUTH                     AsyncEventType = 3
-	CYW43_EV_DEAUTH                   AsyncEventType = 5
-	CYW43_EV_DEAUTH_IND               AsyncEventType = 6
-	CYW43_EV_ASSOC                    AsyncEventType = 7
-	CYW43_EV_DISASSOC                 AsyncEventType = 11
-	CYW43_EV_DISASSOC_IND             AsyncEventType = 12
-	CYW43_EV_LINK                     AsyncEventType = 16
-	CYW43_EV_PRUNE                    AsyncEventType = 23
-	CYW43_EV_PSK_SUP                  AsyncEventType = 46
-	CYW43_EV_IF                       AsyncEventType = 54 // I/F change (for wlan host notification)
-	CYW43_EV_P2P_DISC_LISTEN_COMPLETE AsyncEventType = 55 // P2P Discovery listen state expires
-	CYW43_EV_RSSI                     AsyncEventType = 56 // indicate RSSI change based on configured levels
-	CYW43_EV_ESCAN_RESULT             AsyncEventType = 69
-	CYW43_EV_CSA_COMPLETE_IND         AsyncEventType = 80
-	CYW43_EV_ASSOC_REQ_IE             AsyncEventType = 87
-	CYW43_EV_ASSOC_RESP_IE            AsyncEventType = 88
+	CYW43_EV_SET_SSID                 = 0
+	CYW43_EV_JOIN                     = 1
+	CYW43_EV_AUTH                     = 3
+	CYW43_EV_DEAUTH                   = 5
+	CYW43_EV_DEAUTH_IND               = 6
+	CYW43_EV_ASSOC                    = 7
+	CYW43_EV_DISASSOC                 = 11
+	CYW43_EV_DISASSOC_IND             = 12
+	CYW43_EV_LINK                     = 16
+	CYW43_EV_PRUNE                    = 23
+	CYW43_EV_PSK_SUP                  = 46
+	CYW43_EV_IF                       = 54 // I/F change (for wlan host notification)
+	CYW43_EV_P2P_DISC_LISTEN_COMPLETE = 55 // P2P Discovery listen state expires
+	CYW43_EV_RSSI                     = 56 // indicate RSSI change based on configured levels
+	CYW43_EV_ESCAN_RESULT             = 69
+	CYW43_EV_CSA_COMPLETE_IND         = 80
+	CYW43_EV_ASSOC_REQ_IE             = 87
+	CYW43_EV_ASSOC_RESP_IE            = 88
 )
 
 // IOCTL commands

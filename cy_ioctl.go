@@ -51,9 +51,9 @@ func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	}
 	val := uint32(1 << wlGPIO)
 	if value {
-		err = d.WriteIOVar2("gpioout", whd.WWD_STA_INTERFACE, val, val)
+		err = d.WriteIOVar2("gpioout", whd.IF_STA, val, val)
 	} else {
-		err = d.WriteIOVar2("gpioout", whd.WWD_STA_INTERFACE, val, 0)
+		err = d.WriteIOVar2("gpioout", whd.IF_STA, val, 0)
 	}
 	return err
 }
@@ -217,15 +217,16 @@ func (d *Device) sendIoctl(kind uint32, iface whd.IoctlInterface, cmd whd.SDPCMC
 	}
 	d.sdpcmRequestedIoctlID++
 	id := uint32(d.sdpcmRequestedIoctlID)
-	flags := (id<<16)&0xffff_0000 | uint32(kind) | uint32(iface)<<12 // look for CDCF_IOC* identifiers in pico-sdk
-	header := whd.IoctlHeader{
-		Cmd:   cmd,
-		Len:   length & 0xffff,
-		Flags: flags,
+	// flags := (id<<16)&0xffff_0000 | uint32(kind) | uint32(iface)<<12 // look for CDCF_IOC* identifiers in pico-sdk
+	header := whd.CDCHeader{
+		Cmd:    cmd,
+		Length: length & 0xffff,
+		ID:     uint16(id),
+		Flags:  uint16(kind) | uint16(iface)<<12,
 	}
-	header.Put(d.buf[whd.SDPCM_HEADER_LEN:])
+	header.Put(binary.LittleEndian, d.buf[whd.SDPCM_HEADER_LEN:])
 	copy(d.buf[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], w)
-	d.debug("sendIoctl", slog.String("hdr.Cmd", header.Cmd.String()), slog.Uint64("hdr.Len", uint64(header.Len)), slog.Uint64("hdr.Flags", uint64(header.Flags)), slog.Uint64("hdr.Status", uint64(header.Status)))
+	d.debug("sendIoctl", slog.String("hdr.Cmd", header.Cmd.String()), slog.Uint64("hdr.Len", uint64(header.Length)), slog.Uint64("hdr.Flags", uint64(header.Flags)), slog.Uint64("hdr.Status", uint64(header.Status)))
 	return d.sendSDPCMCommon(whd.CONTROL_HEADER, d.buf[:whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN+length])
 }
 
@@ -385,7 +386,7 @@ func (d *Device) sendSDPCMCommon(kind whd.SDPCMHeaderType, bufWithFreeFirst12Byt
 		ChanAndFlags: uint8(kind),
 		HeaderLength: headerLength,
 	}
-	header.Put(w)
+	header.Put(binary.LittleEndian, w)
 	d.sdpcmTxSequence++
 	return d.WriteBytes(FuncWLAN, 0, w)
 }
@@ -689,7 +690,7 @@ func (d *Device) clmLoad(clm []byte) error {
 		// Send data aligned to 8 bytes. We do end up sending scratch data
 		// at end of buffer that has not been set here.
 		d.debug("clm data send", slog.Int("off+ln", int(off+ln)), slog.Int("clmlen", int(clmLen)))
-		err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:align32(20+uint32(ln), 8)])
+		err := d.doIoctl(whd.SDPCM_SET, whd.IF_STA, whd.WLC_SET_VAR, buf[:align32(20+uint32(ln), 8)])
 		if err != nil {
 			return err
 		}
@@ -700,7 +701,7 @@ func (d *Device) clmLoad(clm []byte) error {
 	const clmStatLen = len(clmStatString)
 	buf = d.auxbuf[:]
 	copy(buf[:clmStatLen], clmStatString)
-	err := d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:clmStatLen])
+	err := d.doIoctl(whd.SDPCM_GET, whd.IF_STA, whd.WLC_GET_VAR, buf[:clmStatLen])
 	if err != nil {
 		return err
 	}
@@ -722,7 +723,7 @@ func (d *Device) putMAC(dst []byte) error {
 	buf := d.auxbuf[sdpcmHeaderLen+16:]
 	const varMAC = "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00"
 	copy(buf[:len(varMAC)], varMAC)
-	err := d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:len(varMAC)])
+	err := d.doIoctl(whd.SDPCM_GET, whd.IF_STA, whd.WLC_GET_VAR, buf[:len(varMAC)])
 	if err == nil {
 		copy(dst[:6], buf)
 	}
@@ -749,7 +750,7 @@ var (
 func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, header whd.SDPCMHeaderType, err error) {
 	d.debug("sdpcmProcessRxPacket", slog.Int("len", len(buf)))
 	const badHeader = whd.UNKNOWN_HEADER
-	hdr := whd.DecodeSDPCMHeader(buf)
+	hdr := whd.DecodeSDPCMHeader(binary.LittleEndian, buf)
 	switch {
 	case hdr.Size != ^hdr.SizeCom&0xffff:
 		return 0, 0, badHeader, err2InvalidPacket
@@ -785,8 +786,9 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 			// TODO(soypat): This error case is not specified in the reference.
 			return 0, 0, badHeader, errors.New("undefined control packet error, size too large")
 		}
-		ioctlHeader := whd.DecodeIoctlHeader(buf[payloadOffset:])
-		id := ioctlHeader.ID()
+		ioctlHeader := whd.DecodeCDCHeader(binary.LittleEndian, buf[payloadOffset:])
+		// ioctlHeader := whd.DecodeIoctlHeader(binary.LittleEndian, buf[payloadOffset:])
+		id := ioctlHeader.ID
 		if id != d.sdpcmRequestedIoctlID {
 			return 0, 0, badHeader, err6IgnoreWrongIDPacket
 		}
@@ -830,6 +832,7 @@ func (d *Device) sdpcmProcessRxPacket(buf []byte) (payloadOffset, plen uint32, h
 		if !(payload[19] == 0x00 && payload[20] == 0x10 && payload[21] == 0x18) {
 			return 0, 0, badHeader, err10IncorrectOUI
 		}
+		// Apparently we skip over ethernet header (14 bytes) and the event header (10 bytes):
 		plen = plen - 24
 		payloadOffset = payloadOffset + 24
 	default:

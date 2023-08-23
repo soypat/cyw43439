@@ -431,11 +431,11 @@ f2ready:
 		return err
 	}
 	d.debug("final IOVar writes")
-	err = d.WriteIOVar("bus:txglom", whd.WWD_STA_INTERFACE, 0)
+	err = d.WriteIOVar("bus:txglom", whd.IF_STA, 0)
 	if err != nil {
 		return err
 	}
-	err = d.WriteIOVar("apsta", whd.WWD_STA_INTERFACE, 1)
+	err = d.WriteIOVar("apsta", whd.IF_STA, 1)
 	if err != nil {
 		return err
 	}
@@ -522,7 +522,7 @@ func (d *Device) getMAC() (mac []byte, err error) {
 	mac = make([]byte, 6)
 	buf := d.offbuf()
 	copy(buf, "cur_etheraddr\x00\x00\x00\x00\x00\x00\x00")
-	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:6+14])
+	err = d.doIoctl(whd.SDPCM_GET, whd.IF_STA, whd.WLC_GET_VAR, buf[:6+14])
 	if err == nil {
 		copy(mac, buf[:6])
 	}

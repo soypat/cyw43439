@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !tinygo && go1.19 && !go1.20
+//go:build tinygo && go1.19 && !go1.20
 
 package slog
 
@@ -25,9 +25,8 @@ func StringValue(value string) Value {
 func (v Value) str() string {
 	var s string
 	hdr := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	ptr := v.any.(stringptr)
-	hdr.Data = uintptr(unsafe.Pointer(ptr))
-	hdr.Len = int(v.num)
+	hdr.Data = uintptr(v.any.(stringptr))
+	hdr.Len = uintptr(v.num)
 	return s
 }
 
@@ -40,7 +39,7 @@ func (v Value) String() string {
 		var s string
 		hdr := (*reflect.StringHeader)(unsafe.Pointer(&s))
 		hdr.Data = uintptr(sp)
-		hdr.Len = int(v.num)
+		hdr.Len = uintptr(v.num)
 		return s
 	}
 	return string(v.append(nil))

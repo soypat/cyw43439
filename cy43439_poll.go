@@ -1,41 +1,13 @@
 package cyw43439
 
 import (
+	"encoding/binary"
 	"errors"
-	"machine"
 	"time"
 
 	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 )
-
-func (d *Device) initIRQ() {
-	d.reenableIRQ()
-	d.irq.Configure(machine.PinConfig{Mode: machine.PinInput})
-	// d.irq.SetInterrupt(1<<2, d.irqHandler)
-}
-
-func (d *Device) reenableIRQ() {
-	const GPIO_IRQ_LEVEL_HIGH = 0x2
-	ackIRQ(d.irq, GPIO_IRQ_LEVEL_HIGH)
-	setIRQ(d.irq, GPIO_IRQ_LEVEL_HIGH, true)
-	// println("IRQ re-enabled")
-}
-
-func (d *Device) irqHandler(pin machine.Pin) {
-	// Pico-sdk definition.
-	const GPIO_IRQ_LEVEL_HIGH = 0x2
-	events := getIRQEventMask(d.irq)
-	println("IRQ handler", events)
-	if events&GPIO_IRQ_LEVEL_HIGH != 0 {
-		// As we use a high level interrupt, it will go off forever until it's serviced
-		// So disable the interrupt until this is done. It's re-enabled again by CYW43_POST_POLL_HOOK
-		// which is called at the end of cyw43_poll_func
-		setIRQ(d.irq, GPIO_IRQ_LEVEL_HIGH, false)
-		// set work pending...
-		println("disable IRQ")
-	}
-}
 
 // ref: void cyw43_schedule_internal_poll_dispatch(__unused void (*func)(void))
 // func (d *Device) pollStart() {
@@ -99,14 +71,6 @@ func (d *Device) processPackets() (gotPackets bool) {
 	}
 }
 
-// ref: bool cyw43_ll_has_work(cyw43_ll_t *self_in)
-func (d *Device) hasWork() bool {
-	if sharedDATA {
-		d.irq.Configure(machine.PinConfig{Mode: machine.PinInputPulldown})
-	}
-	return d.irq.Get()
-}
-
 // PollUntilNextOrDeadline blocks until the next packet is received or the
 // deadline is reached, whichever comes first
 //
@@ -166,7 +130,7 @@ func (d *Device) sendEthernet(itf uint8, buf []byte) error {
 
 func (d *Device) handleAsyncEvent(payload []byte) error {
 	d.debug("handleAsyncEvent", slog.Int("plen", len(payload)))
-	as, err := whd.ParseAsyncEvent(payload)
+	as, err := whd.ParseAsyncEvent(binary.BigEndian, payload)
 	if err != nil {
 		return err
 	}

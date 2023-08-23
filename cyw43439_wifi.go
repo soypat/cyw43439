@@ -140,7 +140,7 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	}
 
 	var buf [128]byte
-	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
+	err = d.WriteIOVar("ampdu_ba_wsize", whd.IF_STA, 8)
 	if err != nil {
 		return err
 	}
@@ -155,27 +155,27 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 	} else {
 		return errors.New("unsupported auth type")
 	}
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC, uint32(authType)&0xff)
+	err = d.SetIoctl32(whd.IF_STA, whd.WLC_SET_WSEC, uint32(authType)&0xff)
 	if err != nil {
 		return err
 	}
 
 	// Supplicant variable.
 	wpaSup := b2u32(wpa_auth != 0)
-	err = d.WriteIOVar2("bsscfg:sup_wpa", whd.WWD_STA_INTERFACE, 0, wpaSup)
+	err = d.WriteIOVar2("bsscfg:sup_wpa", whd.IF_STA, 0, wpaSup)
 	if err != nil {
 		return err
 	}
 
 	// set the EAPOL version to whatever the AP is using (-1).
-	err = d.WriteIOVar2("bsscfg:sup_wpa2_eapver", whd.WWD_STA_INTERFACE, 0, negative1)
+	err = d.WriteIOVar2("bsscfg:sup_wpa2_eapver", whd.IF_STA, 0, negative1)
 	if err != nil {
 		return err
 	}
 
 	// wwd_wifi_set_supplicant_eapol_key_timeout
 	const CYW_EAPOL_KEY_TIMEOUT = 5000
-	err = d.WriteIOVar2("bsscfg:sup_wpa_tmo", whd.WWD_STA_INTERFACE, 0, CYW_EAPOL_KEY_TIMEOUT)
+	err = d.WriteIOVar2("bsscfg:sup_wpa_tmo", whd.IF_STA, 0, CYW_EAPOL_KEY_TIMEOUT)
 	if err != nil {
 		return
 	}
@@ -187,23 +187,23 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 		copy(buf[4:], key)
 		time.Sleep(2 * time.Millisecond) // Delay required to allow radio firmware to be ready to receive PMK and avoid intermittent failure
 
-		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_WSEC_PMK, buf[:68])
+		err = d.doIoctl(whd.SDPCM_SET, whd.IF_STA, whd.WLC_SET_WSEC_PMK, buf[:68])
 		if err != nil {
 			return err
 		}
 	}
 
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_INFRA, 1) // Set infrastructure mode.
+	err = d.SetIoctl32(whd.IF_STA, whd.WLC_SET_INFRA, 1) // Set infrastructure mode.
 	if err != nil {
 		return err
 	}
 
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_AUTH, 0) // Set auth type (open system).
+	err = d.SetIoctl32(whd.IF_STA, whd.WLC_SET_AUTH, 0) // Set auth type (open system).
 	if err != nil {
 		return err
 	}
 
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WPA_AUTH, wpa_auth) // Set WPA auth mode.
+	err = d.SetIoctl32(whd.IF_STA, whd.WLC_SET_WPA_AUTH, wpa_auth) // Set WPA auth mode.
 	if err != nil {
 		return err
 	}
@@ -261,12 +261,12 @@ func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel ui
 
 	// Join the AP.
 	d.debug("wifiJoin:joinSTA")
-	return d.WriteIOVarN("join", whd.WWD_STA_INTERFACE, buf[:4+32+20+14])
+	return d.WriteIOVarN("join", whd.IF_STA, buf[:4+32+20+14])
 }
 
 // reference: cyw43_ll_wifi_rejoin
 func (d *Device) wifiRejoin() error {
-	return d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_SSID, d.lastSSIDJoined[:36])
+	return d.doIoctl(whd.SDPCM_SET, whd.IF_STA, whd.WLC_SET_SSID, d.lastSSIDJoined[:36])
 }
 
 // reference: cyw43_ll_wifi_on
@@ -282,7 +282,7 @@ func (d *Device) wifiOn(country uint32) error {
 	}
 	binary.LittleEndian.PutUint32(buf[16:20], country&0xff_ff)
 
-	err := d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_VAR, buf[:20])
+	err := d.doIoctl(whd.SDPCM_SET, whd.IF_STA, whd.WLC_SET_VAR, buf[:20])
 	if err != nil {
 		return err
 	}
@@ -290,29 +290,29 @@ func (d *Device) wifiOn(country uint32) error {
 	time.Sleep(20 * time.Millisecond)
 
 	// Set antenna to chip antenna
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_ANTDIV, 0)
+	err = d.SetIoctl32(whd.IF_STA, whd.WLC_SET_ANTDIV, 0)
 	if err != nil {
 		return err
 	}
 
 	// Set some WiFi config
-	err = d.WriteIOVar("bus:txglom", whd.WWD_STA_INTERFACE, 0) // Tx glomming off.
+	err = d.WriteIOVar("bus:txglom", whd.IF_STA, 0) // Tx glomming off.
 	if err != nil {
 		return err
 	}
-	err = d.WriteIOVar("apsta", whd.WWD_STA_INTERFACE, 1) // apsta on.
+	err = d.WriteIOVar("apsta", whd.IF_STA, 1) // apsta on.
 	if err != nil {
 		return err
 	}
-	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_STA_INTERFACE, 8)
+	err = d.WriteIOVar("ampdu_ba_wsize", whd.IF_STA, 8)
 	if err != nil {
 		return err
 	}
-	err = d.WriteIOVar("ampdu_mpdu", whd.WWD_STA_INTERFACE, 4)
+	err = d.WriteIOVar("ampdu_mpdu", whd.IF_STA, 4)
 	if err != nil {
 		return err
 	}
-	err = d.WriteIOVar("ampdu_rx_factor", whd.WWD_STA_INTERFACE, 0)
+	err = d.WriteIOVar("ampdu_rx_factor", whd.IF_STA, 0)
 	if err != nil {
 		return err
 	}
@@ -370,7 +370,7 @@ func (d *Device) wifiOn(country uint32) error {
 	time.Sleep(50 * time.Millisecond)
 
 	// Set interface as "up".
-	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_UP, nil)
+	err = d.doIoctl(whd.SDPCM_SET, whd.IF_STA, whd.WLC_UP, nil)
 	if err != nil {
 		return err
 	}
@@ -425,7 +425,7 @@ func (d *Device) wifiSetup(itf uint8, up bool, country uint32) (err error) {
 
 // reference: cyw43_ll_wifi_set_wpa_auth
 func (d *Device) setWPAAuth() error {
-	return d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_WPA_AUTH, whd.CYW43_WPA_AUTH_PSK)
+	return d.SetIoctl32(whd.IF_STA, whd.WLC_SET_WPA_AUTH, whd.CYW43_WPA_AUTH_PSK)
 }
 
 func (d *Device) wifiAPInit() error {
@@ -441,8 +441,8 @@ func (d *Device) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err
 	// TODO: this can fail with sdpcm status = 0xffffffe2 (NOTASSOCIATED)
 	// in such a case the AP is not up and we should not check the result
 	copy(buf[:], "bss\x00")
-	binary.LittleEndian.PutUint32(buf[4:], uint32(whd.WWD_AP_INTERFACE))
-	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:8])
+	binary.LittleEndian.PutUint32(buf[4:], uint32(whd.IF_AP))
+	err = d.doIoctl(whd.SDPCM_GET, whd.IF_STA, whd.WLC_GET_VAR, buf[:8])
 	if err != nil {
 		return err
 	}
@@ -453,29 +453,29 @@ func (d *Device) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err
 	}
 
 	// Set the AMPDU parameter for AP (window size = 2).
-	err = d.WriteIOVar("ampdu_ba_wsize", whd.WWD_AP_INTERFACE, 2)
+	err = d.WriteIOVar("ampdu_ba_wsize", whd.IF_AP, 2)
 	if err != nil {
 		return err
 	}
 
 	// Set SSID.
-	binary.LittleEndian.PutUint32(buf, uint32(whd.WWD_AP_INTERFACE))
+	binary.LittleEndian.PutUint32(buf, uint32(whd.IF_AP))
 	binary.LittleEndian.PutUint32(buf[4:], uint32(len(ssid)))
 	for i := 0; i < 32; i++ {
 		buf[8+i] = 0
 	}
 	copy(buf[8:], ssid)
-	err = d.WriteIOVarN("bsscfg:ssid", whd.WWD_AP_INTERFACE, buf[:8+32])
+	err = d.WriteIOVarN("bsscfg:ssid", whd.IF_AP, buf[:8+32])
 	if err != nil {
 		return err
 	}
 	// Set channel.
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_CHANNEL, channel)
+	err = d.SetIoctl32(whd.IF_STA, whd.WLC_SET_CHANNEL, channel)
 	if err != nil {
 		return err
 	}
 	// Set Security type.
-	err = d.WriteIOVar2("bsscfg:wsec", whd.WWD_STA_INTERFACE, uint32(whd.WWD_AP_INTERFACE), auth) // More confusing interface arguments.
+	err = d.WriteIOVar2("bsscfg:wsec", whd.IF_STA, uint32(whd.IF_AP), auth) // More confusing interface arguments.
 	if err != nil {
 		return err
 	}
@@ -485,7 +485,7 @@ func (d *Device) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err
 		if auth != whd.CYW43_AUTH_WPA_TKIP_PSK {
 			val |= whd.CYW43_WPA2_AUTH_PSK
 		}
-		err = d.WriteIOVar2("bsscfg:wpa_auth", whd.WWD_STA_INTERFACE, uint32(whd.WWD_AP_INTERFACE), uint32(val))
+		err = d.WriteIOVar2("bsscfg:wpa_auth", whd.IF_STA, uint32(whd.IF_AP), uint32(val))
 		if err != nil {
 			return err
 		}
@@ -497,26 +497,26 @@ func (d *Device) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err
 		}
 		copy(buf[4:], key)
 		time.Sleep(2 * time.Millisecond) // WICED has this.
-		err = d.doIoctl(whd.SDPCM_SET, whd.WWD_AP_INTERFACE, whd.WLC_SET_WSEC_PMK, buf[:4+64])
+		err = d.doIoctl(whd.SDPCM_SET, whd.IF_AP, whd.WLC_SET_WSEC_PMK, buf[:4+64])
 		if err != nil {
 			return err
 		}
 	}
 
 	// Set GMode to auto (value of 1).
-	err = d.SetIoctl32(whd.WWD_AP_INTERFACE, whd.WLC_SET_GMODE, 1)
+	err = d.SetIoctl32(whd.IF_AP, whd.WLC_SET_GMODE, 1)
 	if err != nil {
 		return err
 	}
 	// Set multicast tx rate to 11Mbps.
 	const rate = 11000000 / 500000
-	err = d.WriteIOVar("2g_mrate", whd.WWD_AP_INTERFACE, rate)
+	err = d.WriteIOVar("2g_mrate", whd.IF_AP, rate)
 	if err != nil {
 		return err
 	}
 
 	// Set DTIM period to 1.
-	err = d.SetIoctl32(whd.WWD_AP_INTERFACE, whd.WLC_SET_DTIMPRD, 1)
+	err = d.SetIoctl32(whd.IF_AP, whd.WLC_SET_DTIMPRD, 1)
 	return err
 }
 
@@ -524,15 +524,15 @@ func (d *Device) wifiAPInitInternal(ssid, key string, auth, channel uint32) (err
 func (d *Device) wifiAPSetUp(up bool) error {
 	// This line is somewhat confusing. Both the AP and STA interfaces are passed in as arguments,
 	// but the STA interface is the one used to set the AP interface up or down.
-	return d.WriteIOVar2("bss", whd.WWD_STA_INTERFACE, uint32(whd.WWD_AP_INTERFACE), b2u32(up))
+	return d.WriteIOVar2("bss", whd.IF_STA, uint32(whd.IF_AP), b2u32(up))
 }
 
 // reference: cyw43_ll_wifi_ap_get_stas
 func (d *Device) wifiAPGetSTAs(macs []byte) (stas uint32, err error) {
 	buf := d.offbuf()
 	copy(buf[:], "maxassoc\x00")
-	binary.LittleEndian.PutUint32(buf[9:], uint32(whd.WWD_AP_INTERFACE))
-	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_STA_INTERFACE, whd.WLC_GET_VAR, buf[:9+4])
+	binary.LittleEndian.PutUint32(buf[9:], uint32(whd.IF_AP))
+	err = d.doIoctl(whd.SDPCM_GET, whd.IF_STA, whd.WLC_GET_VAR, buf[:9+4])
 	if err != nil {
 		return 0, err
 	}
@@ -546,7 +546,7 @@ func (d *Device) wifiAPGetSTAs(macs []byte) (stas uint32, err error) {
 	if lim > uint32(len(buf)) {
 		lim = uint32(len(buf))
 	}
-	err = d.doIoctl(whd.SDPCM_GET, whd.WWD_AP_INTERFACE, whd.WLC_GET_ASSOCLIST, buf[:lim])
+	err = d.doIoctl(whd.SDPCM_GET, whd.IF_AP, whd.WLC_GET_ASSOCLIST, buf[:lim])
 	if err != nil {
 		return 0, err
 	}
@@ -574,7 +574,7 @@ func (d *Device) wifiScan(opts *whd.ScanOptions) error {
 		return errors.New("opts not aligned to 4 bytes")
 	}
 	buf := (*[unsafe.Sizeof(*opts)]byte)(unsafePtr)
-	err := d.WriteIOVarN("escan", whd.WWD_STA_INTERFACE, buf[:])
+	err := d.WriteIOVarN("escan", whd.IF_STA, buf[:])
 	return err
 }
 
@@ -606,7 +606,7 @@ func (d *Device) wifiPMinternal(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint
 	} else if pm_sleep_ret > 200 {
 		pm_sleep_ret = 200
 	}
-	err := d.WriteIOVar("pm2_sleep_ret", whd.WWD_STA_INTERFACE, pm_sleep_ret*10)
+	err := d.WriteIOVar("pm2_sleep_ret", whd.IF_STA, pm_sleep_ret*10)
 	if err != nil {
 		return err
 	}
@@ -615,19 +615,19 @@ func (d *Device) wifiPMinternal(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint
 	// while associated to an AP but not doing tx/rx
 	// bcn_li_xxx is what the CYW43x will do; assoc_listen is what is sent to the AP
 	// bcn_li_dtim==0 means use bcn_li_bcn
-	err = d.WriteIOVar("bcn_li_bcn", whd.WWD_STA_INTERFACE, li_bcn)
+	err = d.WriteIOVar("bcn_li_bcn", whd.IF_STA, li_bcn)
 	if err != nil {
 		return err
 	}
-	err = d.WriteIOVar("bcn_li_dtim", whd.WWD_STA_INTERFACE, li_dtim)
+	err = d.WriteIOVar("bcn_li_dtim", whd.IF_STA, li_dtim)
 	if err != nil {
 		return err
 	}
-	err = d.WriteIOVar("assoc_listen", whd.WWD_STA_INTERFACE, li_assoc)
+	err = d.WriteIOVar("assoc_listen", whd.IF_STA, li_assoc)
 	if err != nil {
 		return err
 	}
-	err = d.SetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_SET_PM, pm)
+	err = d.SetIoctl32(whd.IF_STA, whd.WLC_SET_PM, pm)
 	if err != nil {
 		return err
 	}
@@ -635,35 +635,35 @@ func (d *Device) wifiPMinternal(pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint
 	// Set GMODE_AUTO
 	buf := d.offbuf()
 	binary.LittleEndian.PutUint32(buf[:4], 1)
-	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_GMODE, buf[:4])
+	err = d.doIoctl(whd.SDPCM_SET, whd.IF_STA, whd.WLC_SET_GMODE, buf[:4])
 	if err != nil {
 		return err
 	}
 	binary.LittleEndian.PutUint32(buf[:4], 0) // any
-	err = d.doIoctl(whd.SDPCM_SET, whd.WWD_STA_INTERFACE, whd.WLC_SET_BAND, buf[:4])
+	err = d.doIoctl(whd.SDPCM_SET, whd.IF_STA, whd.WLC_SET_BAND, buf[:4])
 	return err
 }
 
 // reference: cyw43_ll_wifi_get_pm
 func (d *Device) wifiGetPM() (pm, pm_sleep_ret, li_bcn, li_dtim, li_assoc uint32, err error) {
 	// TODO: implement
-	pm_sleep_ret, err = d.ReadIOVar("pm2_sleep_ret", whd.WWD_STA_INTERFACE)
+	pm_sleep_ret, err = d.ReadIOVar("pm2_sleep_ret", whd.IF_STA)
 	if err != nil {
 		goto reterr
 	}
-	li_bcn, err = d.ReadIOVar("bcn_li_bcn", whd.WWD_STA_INTERFACE)
+	li_bcn, err = d.ReadIOVar("bcn_li_bcn", whd.IF_STA)
 	if err != nil {
 		goto reterr
 	}
-	li_dtim, err = d.ReadIOVar("bcn_li_dtim", whd.WWD_STA_INTERFACE)
+	li_dtim, err = d.ReadIOVar("bcn_li_dtim", whd.IF_STA)
 	if err != nil {
 		goto reterr
 	}
-	li_assoc, err = d.ReadIOVar("assoc_listen", whd.WWD_STA_INTERFACE)
+	li_assoc, err = d.ReadIOVar("assoc_listen", whd.IF_STA)
 	if err != nil {
 		goto reterr
 	}
-	pm, err = d.GetIoctl32(whd.WWD_STA_INTERFACE, whd.WLC_GET_PM)
+	pm, err = d.GetIoctl32(whd.IF_STA, whd.WLC_GET_PM)
 	if err != nil {
 		goto reterr
 	}

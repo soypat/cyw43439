@@ -268,10 +268,6 @@ func make_cmd(write, autoInc bool, fn Function, addr uint32, sz uint32) uint32 {
 	return b2u32(write)<<31 | b2u32(autoInc)<<30 | uint32(fn)<<28 | (addr&0x1ffff)<<11 | sz
 }
 
-func funcFromCmd(cmd uint32) Function {
-	return Function(cmd>>28) & 0b11
-}
-
 //go:inline
 func b2u32(b bool) uint32 {
 	if b {
