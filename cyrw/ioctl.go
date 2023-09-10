@@ -175,24 +175,55 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 	return d.doIoctlSet(whd.WLC_SET_VAR, iface, buf8[:length])
 }
 
-func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (_ int, err error) {
+func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (n int, err error) {
+
+	d.Lock()
+	defer d.Unlock()
+
+	d.log_read()
+
+	err = d.waitForCredit(d._sendIoctlBuf[:])
+	if err != nil {
+		return 0, err
+	}
 	err = d.sendIoctl(ioctlGET, cmd, iface, data)
 	if err != nil {
 		return 0, err
 	}
-	packet, err := d.pollForIoctl(d.ioctlID, d._sendIoctlBuf[:])
+	packet, err := d.pollForIoctl(d._sendIoctlBuf[:])
 	if err != nil {
-		d.logerr("sendIoctl:resp", slog.String("err", err.Error()))
+		d.logerr("doIoctlGet:pollForIoctl", slog.String("err", err.Error()))
 		return 0, err
 	}
-	n := copy(data[:], packet)
-	d.debug("sendIoctl:resp", slog.Int("lenResponse", len(packet)), slog.Int("lenAvailable", len(data)), slog.String("resp", string(packet)))
+
+	n = copy(data[:], packet)
+	d.debug("doIoctlGet:resp", slog.Int("lenResponse", len(packet)), slog.Int("lenAvailable", len(data)), slog.String("resp", string(packet)))
+
 	return n, nil
 }
 
 func (d *Device) doIoctlSet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
-	defer d.check_status(d._sendIoctlBuf[:])
-	return d.sendIoctl(ioctlSET, cmd, iface, data)
+
+	d.Lock()
+	defer d.Unlock()
+
+	d.log_read()
+
+	err = d.waitForCredit(d._sendIoctlBuf[:])
+	if err != nil {
+		return err
+	}
+	err = d.sendIoctl(ioctlSET, cmd, iface, data)
+	if err != nil {
+		return err
+	}
+	_, err = d.pollForIoctl(d._sendIoctlBuf[:])
+	if err != nil {
+		d.logerr("pollForIoctl", slog.String("err", err.Error()))
+		return err
+	}
+
+	return nil
 }
 
 // sendIoctl sends a SDPCM+CDC ioctl command to the device with data.
@@ -297,15 +328,14 @@ func (d *Device) f2PacketAvail() (bool, uint16) {
 }
 
 // pollForIoctl polls until a control/ioctl/cdc packet is received.
-func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) {
+func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 	d.trace("pollForIoctl")
 	for retries := 0; retries < 10; retries++ {
-		status := d.status()
-		if !status.F2PacketAvailable() {
+		avail, length := d.f2PacketAvail()
+		if !avail {
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
-		length := status.F2PacketLength()
 		err := d.wlan_read(buf[:], int(length))
 		if err != nil {
 			return nil, err
@@ -316,7 +346,7 @@ func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) 
 			return buf8[offset : offset+plen], err
 		}
 	}
-	return nil, errors.New("timeout")
+	return nil, errors.New("pollForIoctl timeout")
 }
 
 // waitForCredit waits for a credit to use for the next transaction
