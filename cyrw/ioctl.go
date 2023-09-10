@@ -377,9 +377,8 @@ func (d *Device) waitForCredit(buf []uint32) error {
 // check_status handles F2 events while status register is set.
 func (d *Device) check_status(buf []uint32) error {
 	d.trace("check_status")
-	d.log_read()
 	for {
-		status := d.status()
+		status := d.spi.Status()
 		if status.F2PacketAvailable() {
 			length := status.F2PacketLength()
 			err := d.wlan_read(buf[:], int(length))
