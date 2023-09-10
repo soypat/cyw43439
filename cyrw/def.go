@@ -131,8 +131,8 @@ func (Int Interrupts) IsF2Available() bool {
 	return Int&(whd.F2_PACKET_AVAILABLE) != 0
 }
 
-func (Int Interrupts) IsDataAvailable() bool {
-	return Int&(whd.DATA_UNAVAILABLE) == 0
+func (Int Interrupts) IsDataUnavailable() bool {
+	return Int&(whd.DATA_UNAVAILABLE) != 0
 }
 
 func (Int Interrupts) String() (s string) {

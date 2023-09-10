@@ -249,7 +249,7 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 	if irq.IsF2Available() {
 		err = d.check_status(buf)
 	}
-	if err == nil && irq.IsDataAvailable() {
+	if err == nil && irq.IsDataUnavailable() {
 		d.warn("irq data unavail, clearing")
 		err = d.write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, 1)
 	}
