@@ -23,7 +23,7 @@ func DefaultConfig() Config {
 
 // type OutputPin func(bool)
 type Device struct {
-	mu              sync.Mutex
+	sync.Mutex
 	pwr             OutputPin
 	lastStatusGet   time.Time
 	spi             spibus
@@ -204,12 +204,4 @@ func (d *Device) getInterrupts() Interrupts {
 		return 0
 	}
 	return Interrupts(irq)
-}
-
-func (d *Device) lock() {
-	d.mu.Lock()
-}
-
-func (d *Device) unlock() {
-	d.mu.Unlock()
 }
