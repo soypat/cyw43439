@@ -81,6 +81,16 @@ func (d *Device) tx(packet []byte) (err error) {
 	const PADDING_SIZE = 2
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + PADDING_SIZE + whd.BDC_HEADER_LEN + len(packet))
 
+	d.Lock()
+	defer d.Unlock()
+
+	d.log_read()
+
+	err = d.waitForCredit(buf)
+	if err != nil {
+		return err
+	}
+
 	seq := d.sdpcmSeq
 	d.sdpcmSeq++ // Go wraps around on overflow by default.
 
@@ -262,6 +272,30 @@ func (d *Device) poll() {
 	}
 }
 
+// f2PacketAvail checks if a packet is available, and if so, returns
+// the packet length.
+func (d *Device) f2PacketAvail() (bool, uint16) {
+	// First, check cached status from previous cmd_read|cmd_write
+	status := d.spi.Status()
+	if status.F2PacketAvailable() {
+		return true, status.F2PacketLength()
+	}
+	// If that didn't work, get the interurpt status, which updates cached
+	// status
+	irq := d.getInterrupts()
+	if irq.IsF2Available() {
+		status = d.spi.Status()
+		if status.F2PacketAvailable() {
+			return true, status.F2PacketLength()
+		}
+	}
+	if irq.IsDataUnavailable() {
+		d.warn("irq data unavail, clearing")
+		d.write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, 1)
+	}
+	return false, 0
+}
+
 // pollForIoctl polls until a control/ioctl/cdc packet is received.
 func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) {
 	d.trace("pollForIoctl")
@@ -283,6 +317,31 @@ func (d *Device) pollForIoctl(wantIoctlID uint16, buf []uint32) ([]byte, error) 
 		}
 	}
 	return nil, errors.New("timeout")
+}
+
+// waitForCredit waits for a credit to use for the next transaction
+func (d *Device) waitForCredit(buf []uint32) error {
+	if d.has_credit() {
+		return nil
+	}
+	for retries := 0; retries < 10; retries++ {
+		avail, length := d.f2PacketAvail()
+		if !avail {
+			time.Sleep(10 * time.Millisecond)
+			continue
+		}
+		err := d.wlan_read(buf[:], int(length))
+		if err != nil {
+			return err
+		}
+		buf8 := u32AsU8(buf[:])
+		_, _, _, err = d.rx(buf8[:length])
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	return errors.New("waitForCredit timeout")
 }
 
 // check_status handles F2 events while status register is set.
