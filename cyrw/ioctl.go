@@ -52,18 +52,6 @@ func (e *eventMask) Size() int {
 	return 4 + len(e.events)
 }
 
-// reference: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/runner.rs#L225
-func (d *Device) singleRun() error {
-	// We do not loop in here, let user call Poll for now until we understand async mechanics at play better.
-	d.log_read()
-	if !d.has_credit() {
-		d.warn("TX:stalled")
-		return d.handle_irq(d._rxBuf[:])
-	}
-	// For now just do this?
-	return d.handle_irq(d._rxBuf[:])
-}
-
 func (d *Device) update_credit(hdr *whd.SDPCMHeader) {
 	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L467
 	switch hdr.Type() {
@@ -254,6 +242,24 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 		err = d.write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, 1)
 	}
 	return err
+}
+
+// poll services any F2 packets.
+//
+// This is the moral equivalent of an ISR to service hw interrupts.  In this
+// case,  we'll run poll() as a go function to simulate real hw interrupts.
+//
+// TODO get real hw interrupts working and ditch polling
+func (d *Device) poll() {
+	for {
+		d.Lock()
+		d.log_read()
+		d.handle_irq(d._rxBuf[:])
+		d.Unlock()
+		// Avoid busy waiting on idle.  Trade off here is time sleeping
+		// is time added to receive latency.
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // pollForIoctl polls until a control/ioctl/cdc packet is received.

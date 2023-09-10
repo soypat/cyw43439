@@ -166,6 +166,10 @@ func (d *Device) Init(cfg Config) (err error) {
 	if cfg.CLM == "" {
 		return nil
 	}
+
+	// Starting polling to simulate hw interrupts
+	go d.poll()
+
 	return d.initControl(cfg.CLM)
 }
 
