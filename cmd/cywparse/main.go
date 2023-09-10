@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/csv"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Transaction struct {
@@ -15,8 +17,22 @@ type Transaction struct {
 }
 
 func main() {
-	fileName := flag.String("file", "default.txt", "Path to the input file")
+	fileName := flag.String("file", "digital.csv", "Path to the input file")
+	omitAddrs := flag.String("omit-addrs", "", "Omit commands with these addresses. Comma separated list of hex addresses.")
+	hexDump := flag.Bool("hex-dump", false, "Do full hex.Dump() of out data")
 	flag.Parse()
+
+	var addrs = make(map[uint32]bool)
+	if *omitAddrs != "" {
+		for i, addr := range strings.Split(*omitAddrs, ",") {
+			addr = strings.TrimPrefix(addr, "0x")
+			v, err := strconv.ParseUint(addr, 16, 32)
+			if err != nil {
+				log.Fatalf("parsing address %d: %s", i+1, err)
+			}
+			addrs[uint32(v)] = true
+		}
+	}
 
 	file, err := os.Open(*fileName)
 	if err != nil {
@@ -34,7 +50,10 @@ func main() {
 
 	transactions := parseRecords(records[1:])
 	for _, t := range transactions {
-		fmt.Printf("%s\n", parseTransaction(t.Data))
+		parsed := parseTransaction(t.Data, addrs, *hexDump)
+		if parsed != "" {
+			fmt.Printf("%s\n", parsed)
+		}
 	}
 }
 
@@ -49,7 +68,7 @@ var fns = map[uint32]string{
 	3: "dma2",
 }
 
-func parseTransaction(data []byte) string {
+func parseTransaction(data []byte, omitAddrs map[uint32]bool, hexDump bool) string {
 	endian := "BE"
 	cmd := binary.BigEndian.Uint32(data[:4])
 	size := cmd & 0x7ff
@@ -65,15 +84,26 @@ func parseTransaction(data []byte) string {
 	addr := (cmd & (0x1ffff << 11)) >> 11
 	size = cmd & 0x7ff
 
+	if omitAddrs[addr] {
+		return ""
+	}
+
 	out := ""
 	if write == 1 {
-		for i := 4; i < len(data) - 4; i+=4 {
-			out += " " + hex.EncodeToString(data[i:i+4])
+		for i := 4; i < len(data) - 4; i++ {
+			out += hex.EncodeToString(data[i:i+1])
+			if ((i+1) % 4) == 0 {
+				out += " "
+			}
+		}
+		if hexDump {
+			out += "\n" + hex.Dump(data[4:len(data)-4])
 		}
 	}
 
 	return fmt.Sprintf("%s cmd=0x%08x addr=0x%05x fn=%-9s sz=0x%03x w=%d inc=%d   %s", endian, cmd, addr, fns[fn], size, write, autoinc, out)
 }
+
 func parseRecords(records [][]string) []Transaction {
 	var transactions []Transaction
 	var currentTransaction []byte
@@ -120,4 +150,3 @@ func parseRecords(records [][]string) []Transaction {
 
 	return transactions
 }
-
