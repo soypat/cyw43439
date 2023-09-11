@@ -54,17 +54,19 @@ func (s *SDPCMHeader) Put(order binary.ByteOrder, dst []byte) {
 	copy(dst[10:], s.Reserved[:])
 }
 
-func (s *SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
+func (s *SDPCMHeader) Parse(packet []byte) ([]byte, error) {
 	if len(packet) < int(s.Size) {
-		err = errors.New("packet shorter than sdpcm hdr, expected=" + strconv.Itoa(int(s.Size)))
-		return
+		return nil, errors.New("packet shorter than sdpcm hdr, expected=" +
+			strconv.Itoa(int(s.Size)))
 	}
 	if s.Size != ^s.SizeCom {
-		err = errors.New("sdpcm hdr size complement mismatch")
-		return
+		return nil, errors.New("sdpcm hdr size complement mismatch")
 	}
-	payload = packet[SDPCM_HEADER_LEN:]
-	return
+	if int(s.Size) != len(packet) {
+		return nil, errors.New("len from header doesn't match len from spi")
+	}
+
+	return packet[s.HeaderLength:], nil
 }
 
 type CDCHeader struct {
