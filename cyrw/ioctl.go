@@ -129,7 +129,7 @@ func (d *Device) get_iovar_n(VAR string, iface whd.IoctlInterface, res []byte) (
 	for i := 0; i < len(res); i++ {
 		buf8[length+i] = 0 // Zero out where we'll read.
 	}
-	totalLen := max(len(VAR)+1, len(res))
+	totalLen := max(length, len(res))
 	d.debug("get_iovar_n:ini", slog.String("var", VAR), slog.Int("reslen", len(res)), slog.String("buf", hex.EncodeToString(buf8[:totalLen])))
 	plen, err = d.doIoctlGet(whd.WLC_GET_VAR, iface, buf8[:totalLen])
 	if plen > len(res) {
@@ -240,7 +240,7 @@ func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInte
 	buf := d._sendIoctlBuf[:]
 	buf8 := u32AsU8(buf)
 
-	totalLen := uint32(whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN + len(data))
+	totalLen := uint32(whd.SDPCM_HEADER_LEN + whd.CDC_HEADER_LEN + len(data))
 	if int(totalLen) > len(buf8) {
 		return errors.New("ioctl data too large " + strconv.Itoa(len(data)))
 	}
@@ -265,7 +265,7 @@ func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInte
 	}
 	d.auxCDCHeader.Put(_busOrder, buf8[whd.SDPCM_HEADER_LEN:])
 
-	copy(buf8[whd.SDPCM_HEADER_LEN+whd.IOCTL_HEADER_LEN:], data)
+	copy(buf8[whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN:], data)
 
 	return d.wlan_write(buf[:align(totalLen, 4)/4], totalLen)
 }
