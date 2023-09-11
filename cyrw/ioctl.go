@@ -445,8 +445,7 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 		}
 	}
 	offset = uint16(d.lastSDPCMHeader.HeaderLength + whd.CDC_HEADER_LEN)
-	// TODO losing some precision here (uint16(uint32)).  Does it matter?
-	// TODO Can you have a pkt len greater than 2^16-1?
+	// NB: losing some precision here (uint16(uint32)).
 	plen = uint16(d.auxCDCHeader.Length)
 	return offset, plen, nil
 }
@@ -484,7 +483,9 @@ func (d *Device) rxEvent(packet []byte) (dataoffset uint16, err error) {
 
 func (d *Device) rxData(packet []byte) (err error) {
 	bdcHdr := whd.DecodeBDCHeader(packet)
-	d.debug("rxData", slog.Int("len", len(packet)), slog.Any("bdc", &bdcHdr))
-	// TODO(sfeldma) send payload up as new rx eth packet
+	packetStart := whd.BDC_HEADER_LEN + 4 * int(bdcHdr.DataOffset)
+	payload := packet[packetStart:]
+	d.debug("rxData", slog.Int("payload len", len(payload)), slog.Any("bdc", &bdcHdr))
+	println(hex.Dump(payload))
 	return nil
 }
