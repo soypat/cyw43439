@@ -29,7 +29,7 @@ func main() {
 
 	for {
 		// Set ssid/pass in secrets.go
-		err = dev.JoinWpa2(ssid, pass)
+		err = dev.JoinWPA2(ssid, pass)
 		if err == nil {
 			break
 		}

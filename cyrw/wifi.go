@@ -141,7 +141,6 @@ func (d *Device) set_power_management(mode powerManagementMode) error {
 	return d.set_ioctl(whd.WLC_SET_PM, whd.IF_STA, uint32(mode_num))
 }
 
-/*
 func (d *Device) join_open(ssid string) error {
 	d.debug("join_open", slog.String("ssid", ssid))
 	if len(ssid) > 32 {
@@ -153,23 +152,14 @@ func (d *Device) join_open(ssid string) error {
 	d.set_ioctl(whd.WLC_SET_INFRA, whd.IF_STA, 1)
 	d.set_ioctl(whd.WLC_SET_AUTH, whd.IF_STA, 0)
 
-	i := ssidInfo{
-		Length: uint32(len(ssid)),
-	}
-	copy(i.SSID[:], ssid)
-
-	return d.wait_for_join(&i)
+	return d.wait_for_join(ssid)
 }
-*/
 
-func (d *Device) wait_for_join(ssid *ssidInfo) (err error) {
+func (d *Device) wait_for_join(ssid string) (err error) {
 	d.eventmask.Enable(whd.EvSET_SSID)
 	d.eventmask.Enable(whd.EvAUTH)
 
-	var buf [36]byte
-	ssid.Put(_busOrder, buf[:])
-
-	err = d.doIoctlSet(whd.WLC_GET_SSID, whd.IF_STA, buf[:36])
+	err = d.setSSID(ssid)
 	if err != nil {
 		return err
 	}
@@ -206,7 +196,7 @@ func (d *Device) setPassphrase(pass string) error {
 
 	var pfi = passphraseInfo{
 		length: uint16(len(pass)),
-		flags: 1,
+		flags:  1,
 	}
 	copy(pfi.passphrase[:], pass)
 
@@ -216,48 +206,25 @@ func (d *Device) setPassphrase(pass string) error {
 	return d.doIoctlSet(whd.WLC_SET_WSEC_PMK, whd.IF_STA, buf[:])
 }
 
-type ssidInfo struct {
-	length uint32
-	ssid   [32]byte
-}
-
-func (s *ssidInfo) Put(order binary.ByteOrder, b []byte) {
-	order.PutUint32(b[0:4], s.length)
-	copy(b[4:36], s.ssid[:])
-}
-
-func (d *Device) setSsid(ssid string) error {
+// setSSID sets the SSID through Ioctl interface. This command
+// also starts the wifi connect procedure.
+func (d *Device) setSSID(ssid string) error {
 	if len(ssid) > 32 {
 		return errors.New("ssid too long")
 	}
-
-	var info = ssidInfo{
-		length: uint32(len(ssid)),
-	}
-	copy(info.ssid[:], ssid)
-
 	var buf [36]byte
-	info.Put(_busOrder, buf[:])
+	_busOrder.PutUint32(buf[:4], uint32(len(ssid))) // This is the SSID Info struct.
+	copy(buf[4:], ssid)
 
 	return d.doIoctlSet(whd.WLC_SET_SSID, whd.IF_STA, buf[:])
 }
 
-
-func (d *Device) waitForJoin(ssid string) error {
-	// TODO enable SET_SSID and AUTH events
-
-	if err := d.setSsid(ssid); err != nil {
-		return err
+func (d *Device) JoinWPA2(ssid, pass string) error {
+	d.lock()
+	defer d.unlock()
+	if ssid != "" && pass == "" {
+		return d.join_open(ssid)
 	}
-
-	// TODO wait for SET_SSID event
-
-	// TODO disable all events?
-
-	return nil
-}
-
-func (d *Device) JoinWpa2(ssid, pass string) error {
 	d.info("joinWpa2", slog.String("ssid", ssid), slog.Int("len(pass)", len(pass)))
 
 	if err := d.set_iovar("ampdu_ba_wsize", whd.IF_STA, 8); err != nil {
@@ -297,5 +264,5 @@ func (d *Device) JoinWpa2(ssid, pass string) error {
 		return err
 	}
 
-	return d.waitForJoin(ssid)
+	return d.wait_for_join(ssid)
 }

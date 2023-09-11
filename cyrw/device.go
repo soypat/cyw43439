@@ -23,7 +23,7 @@ func DefaultConfig() Config {
 
 // type OutputPin func(bool)
 type Device struct {
-	sync.Mutex
+	mu              sync.Mutex
 	pwr             OutputPin
 	lastStatusGet   time.Time
 	spi             spibus
@@ -67,6 +67,8 @@ func hex32(u uint32) string {
 }
 
 func (d *Device) Init(cfg Config) (err error) {
+	d.lock()
+	defer d.unlock()
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	err = d.initBus()
 	if err != nil {
@@ -214,3 +216,6 @@ func (d *Device) getInterrupts() Interrupts {
 	}
 	return Interrupts(irq)
 }
+
+func (d *Device) lock()   { d.mu.Lock() }
+func (d *Device) unlock() { d.mu.Unlock() }

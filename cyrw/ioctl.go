@@ -81,9 +81,6 @@ func (d *Device) tx(packet []byte) (err error) {
 	const PADDING_SIZE = 2
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + PADDING_SIZE + whd.BDC_HEADER_LEN + len(packet))
 
-	d.Lock()
-	defer d.Unlock()
-
 	d.log_read()
 
 	err = d.waitForCredit(buf)
@@ -176,10 +173,6 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 }
 
 func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (n int, err error) {
-
-	d.Lock()
-	defer d.Unlock()
-
 	d.log_read()
 
 	err = d.waitForCredit(d._sendIoctlBuf[:])
@@ -203,10 +196,6 @@ func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data
 }
 
 func (d *Device) doIoctlSet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
-
-	d.Lock()
-	defer d.Unlock()
-
 	d.log_read()
 
 	err = d.waitForCredit(d._sendIoctlBuf[:])
@@ -293,10 +282,10 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 // TODO get real hw interrupts working and ditch polling
 func (d *Device) poll() {
 	for {
-		d.Lock()
+		d.lock()
 		d.log_read()
 		d.handle_irq(d._rxBuf[:])
-		d.Unlock()
+		d.unlock()
 		// Avoid busy waiting on idle.  Trade off here is time sleeping
 		// is time added to receive latency.
 		time.Sleep(10 * time.Millisecond)
@@ -447,7 +436,7 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 func (d *Device) rxEvent(packet []byte) error {
 	// Split packet into BDC header:payload.
 	bdcHdr := whd.DecodeBDCHeader(packet)
-	packetStart := whd.BDC_HEADER_LEN + 4 * int(bdcHdr.DataOffset)
+	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
 	bdcPacket := packet[packetStart:]
 
 	d.debug("rxEvent",
@@ -474,7 +463,7 @@ func (d *Device) rxEvent(packet []byte) error {
 
 func (d *Device) rxData(packet []byte) (err error) {
 	bdcHdr := whd.DecodeBDCHeader(packet)
-	packetStart := whd.BDC_HEADER_LEN + 4 * int(bdcHdr.DataOffset)
+	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
 	payload := packet[packetStart:]
 	d.debug("rxData", slog.Int("payload len", len(payload)), slog.Any("bdc", &bdcHdr))
 	println(hex.Dump(payload))
