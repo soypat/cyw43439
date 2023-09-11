@@ -170,7 +170,12 @@ func (d *Device) Init(cfg Config) (err error) {
 	// Starting polling to simulate hw interrupts
 	go d.poll()
 
-	return d.initControl(cfg.CLM)
+	err = d.initControl(cfg.CLM)
+	if err != nil {
+		return err
+	}
+
+	return d.set_power_management(PowerSave)
 }
 
 func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {

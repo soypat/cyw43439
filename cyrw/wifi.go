@@ -15,10 +15,6 @@ import (
 
 func (d *Device) WifiJoin(ssid, password string) (err error) {
 	d.info("WifiJoin", slog.String("ssid", ssid), slog.Int("passlen", len(password)))
-	err = d.set_power_management(PowerSave)
-	if err != nil {
-		return err
-	}
 	if password == "" {
 		return d.join_open(ssid)
 	}
