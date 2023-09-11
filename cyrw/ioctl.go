@@ -416,9 +416,7 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 	// Other Rx methods received the payload without SDPCM header.
 	switch hdrType {
 	case whd.CONTROL_HEADER:
-		plen = d.lastSDPCMHeader.Size - whd.SDPCM_HEADER_LEN - whd.IOCTL_HEADER_LEN
-		offset = whd.SDPCM_HEADER_LEN + whd.IOCTL_HEADER_LEN
-		err = d.rxControl(payload)
+		offset, plen, err = d.rxControl(payload)
 
 	case whd.ASYNCEVENT_HEADER:
 		var suboffset uint16
@@ -438,23 +436,19 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 	return offset, plen, hdrType, err
 }
 
-func (d *Device) rxControl(packet []byte) (err error) {
+func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 	d.auxCDCHeader = whd.DecodeCDCHeader(_busOrder, packet)
 	d.debug("rxControl", slog.Int("len", len(packet)), slog.Int("id", int(d.auxCDCHeader.ID)), slog.Any("cdc", &d.auxCDCHeader))
 	if d.auxCDCHeader.ID == d.ioctlID {
 		if d.auxCDCHeader.Status != 0 {
-			return errors.New("IOCTL error:" + strconv.Itoa(int(d.auxCDCHeader.Status)))
+			return 0, 0, errors.New("IOCTL error:" + strconv.Itoa(int(d.auxCDCHeader.Status)))
 		}
 	}
-	// d.debug("rxControl:cdc", slog.String("resp", string(response)))
-	// if cdcHdr.ID == d.ioctlID {
-	// 	if cdcHdr.Status != 0 {
-	// 		return errors.New("IOCTL error:" + strconv.Itoa(int(cdcHdr.Status)))
-	// 	}
-	// 	// TODO(sfeldma) rust -> Go
-	// 	// self.ioctl_state.ioctl_done(response);
-	// }
-	return nil
+	offset = uint16(d.lastSDPCMHeader.HeaderLength + whd.CDC_HEADER_LEN)
+	// TODO losing some precision here (uint16(uint32)).  Does it matter?
+	// TODO Can you have a pkt len greater than 2^16-1?
+	plen = uint16(d.auxCDCHeader.Length)
+	return offset, plen, nil
 }
 
 func (d *Device) rxEvent(packet []byte) (dataoffset uint16, err error) {
