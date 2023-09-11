@@ -83,7 +83,7 @@ func (d *Device) initControl(clm string) error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Set Antenna to chip antenna.
-	d.set_ioctl(whd.WLC_GET_ANTDIV, whd.IF_STA, 0)
+	d.set_ioctl(whd.WLC_SET_ANTDIV, whd.IF_STA, 0)
 
 	d.set_iovar("bus:txglom", whd.IF_STA, 0)
 	time.Sleep(100 * time.Millisecond)
