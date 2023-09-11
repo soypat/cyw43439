@@ -134,7 +134,7 @@ func (d *Device) set_power_management(mode powerManagementMode) error {
 		return errors.New("invalid power management mode")
 	}
 	mode_num := mode.mode()
-	if mode_num == 0 {
+	if mode_num == 2 {
 		d.set_iovar("pm2_sleep_ret", whd.IF_STA, uint32(mode.sleep_ret_ms()))
 		d.set_iovar("bcn_li_bcn", whd.IF_STA, uint32(mode.beacon_period()))
 		d.set_iovar("bcn_li_dtim", whd.IF_STA, uint32(mode.dtim_period()))
