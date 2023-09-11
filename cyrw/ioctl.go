@@ -45,7 +45,7 @@ func (e *eventMask) IsEnabled(event whd.AsyncEventType) bool {
 
 func (e *eventMask) Put(buf []byte) {
 	_busOrder.PutUint32(buf, e.iface)
-	copy(buf[1:], e.events[:])
+	copy(buf[4:], e.events[:])
 }
 
 func (e *eventMask) Size() int {
