@@ -61,6 +61,19 @@ func swapBytes(n uint32) uint32 {
 	return (n&0xFF00FF00)>>8 | (n&0x00FF00FF)<<8
 }
 
+func swapData(data []byte) []byte {
+	if len(data)%4 != 0 {
+		// handle this case as needed
+		panic("slice length is not a multiple of 4")
+	}
+
+	for i := 0; i < len(data); i += 4 {
+		data[i], data[i+1], data[i+2], data[i+3] = data[i+3], data[i+2], data[i+1], data[i]
+	}
+
+	return data
+}
+
 var fns = map[uint32]string{
 	0: "bus",
 	1: "backplane",
@@ -90,14 +103,15 @@ func parseTransaction(data []byte, omitAddrs map[uint32]bool, hexDump bool) stri
 
 	out := ""
 	if write == 1 {
-		for i := 4; i < len(data) - 4; i++ {
+		data = swapData(data[4:len(data)-4])
+		for i := 0; i < len(data); i++ {
 			out += hex.EncodeToString(data[i:i+1])
 			if ((i+1) % 4) == 0 {
 				out += " "
 			}
 		}
 		if hexDump {
-			out += "\n" + hex.Dump(data[4:len(data)-4])
+			out += "\n" + hex.Dump(data)
 		}
 	}
 
