@@ -7,6 +7,12 @@ import (
 	"github.com/soypat/cyw43439/internal/slog"
 )
 
+var (
+	// Set these in secrets.go
+	ssid string
+	pass string
+)
+
 func main() {
 	defer func() {
 		println("program finished")
@@ -29,7 +35,7 @@ func main() {
 
 	for {
 		dev.GPIOSet(0, true)
-		err = dev.WifiJoin("tinygo", "")
+		err = dev.WifiJoin(ssid, pass)
 		time.Sleep(time.Second)
 		dev.GPIOSet(0, false)
 		if err == nil {
