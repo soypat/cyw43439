@@ -417,16 +417,10 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 	switch hdrType {
 	case whd.CONTROL_HEADER:
 		offset, plen, err = d.rxControl(payload)
-
 	case whd.ASYNCEVENT_HEADER:
-		var suboffset uint16
-		suboffset, err = d.rxEvent(payload)
-		offset += suboffset
-		plen = d.lastSDPCMHeader.Size - offset
-
+		err = d.rxEvent(payload)
 	case whd.DATA_HEADER:
 		err = d.rxData(payload)
-
 	default:
 		err = errors.New("unknown sdpcm hdr type")
 	}
@@ -450,35 +444,32 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 	return offset, plen, nil
 }
 
-func (d *Device) rxEvent(packet []byte) (dataoffset uint16, err error) {
-	bdc := whd.DecodeBDCHeader(packet)
-	dataoffset = whd.BDC_HEADER_LEN + 4*uint16(bdc.DataOffset)
-	_dataoffset := min(int(dataoffset), len(packet))
+func (d *Device) rxEvent(packet []byte) error {
+	// Split packet into BDC header:payload.
+	bdcHdr := whd.DecodeBDCHeader(packet)
+	packetStart := whd.BDC_HEADER_LEN + 4 * int(bdcHdr.DataOffset)
+	bdcPacket := packet[packetStart:]
+
 	d.debug("rxEvent",
-		slog.Any("bdc", &bdc),
-		slog.Int("plen", len(packet)),
-		slog.Int("dataoffset", int(dataoffset)),
-		slog.String("data[:offset]", hex.EncodeToString(packet[:_dataoffset])),
-		slog.String("data[offset:]", hex.EncodeToString(packet[_dataoffset:])),
+		slog.Any("bdc", &bdcHdr),
+		slog.Int("packetStart", int(packetStart)),
+		slog.String("bdcPacket", hex.EncodeToString(bdcPacket)),
 	)
-	if int(dataoffset) > len(packet) {
-		return 0, errors.New("malformed event packet")
-	}
 
+	// Split BDC payload into Event header:payload.
 	// After this point we are in big endian (network order).
-	packet = packet[dataoffset:]
-
-	aePacket, err := whd.DecodeEventPacket(binary.BigEndian, packet)
+	aePacket, err := whd.DecodeEventPacket(binary.BigEndian, bdcPacket)
 	d.debug("parsedEvent", slog.Any("aePacket", &aePacket), slog.Any("err", err))
 	if err != nil {
-		return 0, err
+		return err
 	}
+
 	ev := aePacket.Message.EventType
 	if !d.eventmask.IsEnabled(ev) {
 		d.debug("ignoring packet", slog.String("event", ev.String()))
-		return 0, nil
+		return nil
 	}
-	return dataoffset, nil
+	return nil
 }
 
 func (d *Device) rxData(packet []byte) (err error) {
