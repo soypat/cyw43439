@@ -28,11 +28,8 @@ func main() {
 	}
 
 	for {
-		dev.GPIOSet(0, true)
 		// Set ssid/pass in secrets.go
-		err = dev.WifiJoin(ssid, pass)
-		time.Sleep(time.Second)
-		dev.GPIOSet(0, false)
+		err = dev.JoinWpa2(ssid, pass)
 		if err == nil {
 			break
 		}
