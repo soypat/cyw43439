@@ -76,8 +76,8 @@ func (d *Device) initControl(clm string) error {
 	d.get_iovar_n("cur_etheraddr", whd.IF_STA, d.mac[:6])
 	d.debug("MAC", slog.String("mac", d.MAC().String()))
 
-	country := whd.CountryCode("XX", 0)
-	d.set_iovar("country", whd.IF_STA, country)
+	countryInfo := whd.CountryInfo("XX", 0)
+	d.set_iovar_n("country", whd.IF_STA, countryInfo[:])
 
 	// set country takes some time, next ioctls fail if we don't wait.
 	time.Sleep(100 * time.Millisecond)

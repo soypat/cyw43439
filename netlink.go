@@ -63,6 +63,7 @@ func (d *Device) showIP() {
 
 func (d *Device) netConnect(reset bool) error {
 	if reset {
+		/*
 		country := d.params.Country
 		if country == "" {
 			country = "XX"
@@ -71,6 +72,7 @@ func (d *Device) netConnect(reset bool) error {
 		if err := d.EnableStaMode(code); err != nil {
 			return err
 		}
+		*/
 	}
 
 	for i := 0; d.params.Retries == 0 || i < d.params.Retries; i++ {
