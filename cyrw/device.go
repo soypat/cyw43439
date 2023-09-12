@@ -132,7 +132,6 @@ func (d *Device) Init(cfg Config) (err error) {
 		}
 		retries--
 	}
-
 	// "Set up the interrupt mask and enable interrupts"
 	d.write16(FuncBus, whd.SPI_INTERRUPT_ENABLE_REGISTER, whd.F2_PACKET_AVAILABLE)
 
@@ -166,7 +165,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	}
 
 	// Starting polling to simulate hw interrupts
-	go d.poll()
+	go d.irqPoll()
 
 	err = d.initControl(cfg.CLM)
 	if err != nil {
@@ -205,6 +204,7 @@ func (d *Device) SendEth(pkt []byte) error {
 
 // status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
 func (d *Device) status() Status {
+	// TODO(soypat): Are we sure we don't want to re-acquire status if it's been very long?
 	sinceStat := time.Since(d.lastStatusGet)
 	if sinceStat < 12*time.Microsecond {
 		runtime.Gosched() // Probably in hot loop.
