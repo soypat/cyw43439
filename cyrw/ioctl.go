@@ -316,6 +316,16 @@ func (d *Device) f2PacketAvail() (bool, uint16) {
 	return false, 0
 }
 
+// waitForCredit waits for a credit to use for the next transaction
+func (d *Device) waitForCredit(buf []uint32) error {
+	d.trace("waitForCredit")
+	if d.has_credit() {
+		return nil
+	}
+	_, err := d.pollForIoctl(buf) // credit is updated with poll.
+	return err
+}
+
 // pollForIoctl polls until a control/ioctl/cdc packet is received.
 func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 	d.trace("pollForIoctl")
@@ -338,36 +348,11 @@ func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 	return nil, errors.New("pollForIoctl timeout")
 }
 
-// waitForCredit waits for a credit to use for the next transaction
-func (d *Device) waitForCredit(buf []uint32) error {
-	if d.has_credit() {
-		return nil
-	}
-	for retries := 0; retries < 10; retries++ {
-		avail, length := d.f2PacketAvail()
-		if !avail {
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		err := d.wlan_read(buf[:], int(length))
-		if err != nil {
-			return err
-		}
-		buf8 := u32AsU8(buf[:])
-		_, _, _, err = d.rx(buf8[:length])
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-	return errors.New("waitForCredit timeout")
-}
-
 // check_status handles F2 events while status register is set.
 func (d *Device) check_status(buf []uint32) error {
 	d.trace("check_status")
 	for {
-		status := d.spi.Status()
+		status := d.status()
 		if status.F2PacketAvailable() {
 			length := status.F2PacketLength()
 			err := d.wlan_read(buf[:], int(length))
