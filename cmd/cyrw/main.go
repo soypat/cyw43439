@@ -10,6 +10,8 @@ import (
 	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
 
+var lastRx, lastTx time.Time
+
 func main() {
 	defer func() {
 		println("program finished")
@@ -29,6 +31,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	dev.RecvEthHandle(rcv)
 
 	for {
 		// Set ssid/pass in secrets.go
@@ -41,13 +44,17 @@ func main() {
 	}
 
 	println("finished init OK")
-	cycle := true
+	const refresh = 300 * time.Millisecond
+	lastLED := false
 	for {
-		if err != nil {
-			println(err.Error())
+		recentRx := time.Since(lastRx) < refresh*3/2
+		recentTx := time.Since(lastTx) < refresh*3/2
+		ledStatus := recentRx || recentTx
+		if ledStatus != lastLED {
+			dev.GPIOSet(0, ledStatus)
+			lastLED = ledStatus
 		}
-		time.Sleep(time.Second / 2)
-		cycle = !cycle
+		time.Sleep(refresh)
 	}
 }
 
@@ -57,7 +64,10 @@ var (
 	errPacketSmol = errors.New("packet too small")
 )
 
-func rx(pkt []byte) error {
+func rcv(pkt []byte) error {
+	// Note: rcv is called from a locked Device context.
+	// No calls to device I/O should be performed here.
+	lastRx = time.Now()
 	if len(pkt) < 14 {
 		return errPacketSmol
 	}

@@ -447,10 +447,11 @@ func (d *Device) rxEvent(packet []byte) error {
 }
 
 func (d *Device) rxData(packet []byte) (err error) {
-	bdcHdr := whd.DecodeBDCHeader(packet)
-	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
-	payload := packet[packetStart:]
-	d.debug("rxData", slog.Int("payload len", len(payload)), slog.Any("bdc", &bdcHdr))
-	println(hex.Dump(payload))
+	if d.rcvEth != nil {
+		bdcHdr := whd.DecodeBDCHeader(packet)
+		packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
+		payload := packet[packetStart:]
+		return d.rcvEth(payload)
+	}
 	return nil
 }

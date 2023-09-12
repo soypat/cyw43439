@@ -1,7 +1,6 @@
 package cyrw
 
 import (
-	"encoding/hex"
 	"errors"
 	"runtime"
 	"sync"
@@ -43,6 +42,7 @@ type Device struct {
 	lastSDPCMHeader whd.SDPCMHeader
 	auxCDCHeader    whd.CDCHeader
 	auxBDCHeader    whd.BDCHeader
+	rcvEth          func([]byte) error
 }
 
 func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
@@ -60,10 +60,6 @@ func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
 type Config struct {
 	Firmware string
 	CLM      string
-}
-
-func hex32(u uint32) string {
-	return hex.EncodeToString([]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
 }
 
 func (d *Device) Init(cfg Config) (err error) {
@@ -187,7 +183,24 @@ func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	}
 	val0 := uint32(1) << wlGPIO
 	val1 := b2u32(value) << wlGPIO
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return d.set_iovar2("gpioout", whd.IF_STA, val0, val1)
+}
+
+// RecvEthHandle sets handler for receiving Ethernet pkt
+// If set to nil then incoming packets are ignored.
+func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
+	d.lock()
+	defer d.unlock()
+	d.rcvEth = handler
+}
+
+// SendEth sends an Ethernet packet over the current interface.
+func (d *Device) SendEth(pkt []byte) error {
+	d.lock()
+	defer d.unlock()
+	return d.tx(pkt)
 }
 
 // status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
