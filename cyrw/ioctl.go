@@ -296,7 +296,7 @@ func (d *Device) poll() {
 // the packet length.
 func (d *Device) f2PacketAvail() (bool, uint16) {
 	// First, check cached status from previous cmd_read|cmd_write
-	status := d.spi.Status()
+	status := d.status()
 	if status.F2PacketAvailable() {
 		return true, status.F2PacketLength()
 	}
@@ -304,7 +304,7 @@ func (d *Device) f2PacketAvail() (bool, uint16) {
 	// status
 	irq := d.getInterrupts()
 	if irq.IsF2Available() {
-		status = d.spi.Status()
+		status = d.status()
 		if status.F2PacketAvailable() {
 			return true, status.F2PacketLength()
 		}
