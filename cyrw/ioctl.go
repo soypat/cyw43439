@@ -81,9 +81,6 @@ func (d *Device) tx(packet []byte) (err error) {
 	const PADDING_SIZE = 2
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + PADDING_SIZE + whd.BDC_HEADER_LEN + len(packet))
 
-	d.Lock()
-	defer d.Unlock()
-
 	d.log_read()
 
 	err = d.waitForCredit(buf)
@@ -176,10 +173,6 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 }
 
 func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (n int, err error) {
-
-	d.Lock()
-	defer d.Unlock()
-
 	d.log_read()
 
 	err = d.waitForCredit(d._sendIoctlBuf[:])
@@ -203,10 +196,6 @@ func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data
 }
 
 func (d *Device) doIoctlSet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
-
-	d.Lock()
-	defer d.Unlock()
-
 	d.log_read()
 
 	err = d.waitForCredit(d._sendIoctlBuf[:])
@@ -291,12 +280,12 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 // case,  we'll run poll() as a go function to simulate real hw interrupts.
 //
 // TODO get real hw interrupts working and ditch polling
-func (d *Device) poll() {
+func (d *Device) irqPoll() {
 	for {
-		d.Lock()
+		d.lock()
 		d.log_read()
 		d.handle_irq(d._rxBuf[:])
-		d.Unlock()
+		d.unlock()
 		// Avoid busy waiting on idle.  Trade off here is time sleeping
 		// is time added to receive latency.
 		time.Sleep(10 * time.Millisecond)
@@ -327,57 +316,69 @@ func (d *Device) f2PacketAvail() (bool, uint16) {
 	return false, 0
 }
 
-// pollForIoctl polls until a control/ioctl/cdc packet is received.
-func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
-	d.trace("pollForIoctl")
-	for retries := 0; retries < 10; retries++ {
-		avail, length := d.f2PacketAvail()
-		if !avail {
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		err := d.wlan_read(buf[:], int(length))
-		if err != nil {
-			return nil, err
-		}
-		buf8 := u32AsU8(buf[:])
-		offset, plen, hdrType, err := d.rx(buf8[:length])
-		if hdrType == whd.CONTROL_HEADER {
-			return buf8[offset : offset+plen], err
-		}
-	}
-	return nil, errors.New("pollForIoctl timeout")
-}
+// Ioctl polling errors.
+var (
+	errNoF2Avail            = errors.New("no packet available")
+	errWaitForCreditTimeout = errors.New("waitForCredit timeout")
+)
 
 // waitForCredit waits for a credit to use for the next transaction
 func (d *Device) waitForCredit(buf []uint32) error {
+	d.trace("waitForCredit")
 	if d.has_credit() {
 		return nil
 	}
 	for retries := 0; retries < 10; retries++ {
-		avail, length := d.f2PacketAvail()
-		if !avail {
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		err := d.wlan_read(buf[:], int(length))
-		if err != nil {
+		_, _, err := d.tryPoll(buf)
+		// TODO(soypat): ether type error?
+		if err != nil && err != errNoF2Avail && err != whd.ErrInvalidEtherType {
 			return err
+		} else if d.has_credit() {
+			return nil
 		}
-		buf8 := u32AsU8(buf[:])
-		_, _, _, err = d.rx(buf8[:length])
-		if err != nil {
-			return err
-		}
-		return nil
+		time.Sleep(10 * time.Millisecond)
 	}
-	return errors.New("waitForCredit timeout")
+	return errWaitForCreditTimeout
+}
+
+// pollForIoctl polls until a control/ioctl/cdc packet is received.
+func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
+	d.trace("pollForIoctl")
+	for retries := 0; retries < 10; retries++ {
+		buf8, hdr, err := d.tryPoll(buf)
+		if err != nil && err != errNoF2Avail && err != whd.ErrInvalidEtherType {
+			return nil, err
+		} else if hdr == whd.CONTROL_HEADER {
+			return buf8, nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return nil, errors.New("pollForIoctl timeout")
+}
+
+// tryPoll attempts a single read over the WLAN interface for a SDPCM packet.
+// If a packet is received then it is processed by rx and a nil error is returned.
+// If no packet is available then it returns errNoPacketAvail as the error.
+// If an error is returned it will return whd.UNKNOWN_HEADER as the header type.
+func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
+	avail, length := d.f2PacketAvail()
+	if !avail {
+		return nil, whd.UNKNOWN_HEADER, errNoF2Avail
+	}
+	err := d.wlan_read(buf[:], int(length))
+	if err != nil {
+		return nil, whd.UNKNOWN_HEADER, err
+	}
+	buf8 := u32AsU8(buf[:])
+	offset, plen, hdrType, err := d.rx(buf8[:length])
+	return buf8[offset : offset+plen], hdrType, err
 }
 
 // check_status handles F2 events while status register is set.
 func (d *Device) check_status(buf []uint32) error {
 	d.trace("check_status")
 	for {
+		// TODO(soypat): rewrite below with tryPoll?
 		status := d.spi.Status()
 		if status.F2PacketAvailable() {
 			length := status.F2PacketLength()
@@ -447,7 +448,7 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 func (d *Device) rxEvent(packet []byte) error {
 	// Split packet into BDC header:payload.
 	bdcHdr := whd.DecodeBDCHeader(packet)
-	packetStart := whd.BDC_HEADER_LEN + 4 * int(bdcHdr.DataOffset)
+	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
 	bdcPacket := packet[packetStart:]
 
 	d.debug("rxEvent",
@@ -473,10 +474,11 @@ func (d *Device) rxEvent(packet []byte) error {
 }
 
 func (d *Device) rxData(packet []byte) (err error) {
-	bdcHdr := whd.DecodeBDCHeader(packet)
-	packetStart := whd.BDC_HEADER_LEN + 4 * int(bdcHdr.DataOffset)
-	payload := packet[packetStart:]
-	d.debug("rxData", slog.Int("payload len", len(payload)), slog.Any("bdc", &bdcHdr))
-	println(hex.Dump(payload))
+	if d.rcvEth != nil {
+		bdcHdr := whd.DecodeBDCHeader(packet)
+		packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
+		payload := packet[packetStart:]
+		return d.rcvEth(payload)
+	}
 	return nil
 }

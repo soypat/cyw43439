@@ -1,7 +1,6 @@
 package cyrw
 
 import (
-	"encoding/hex"
 	"errors"
 	"runtime"
 	"sync"
@@ -23,7 +22,7 @@ func DefaultConfig() Config {
 
 // type OutputPin func(bool)
 type Device struct {
-	sync.Mutex
+	mu              sync.Mutex
 	pwr             OutputPin
 	lastStatusGet   time.Time
 	spi             spibus
@@ -43,6 +42,7 @@ type Device struct {
 	lastSDPCMHeader whd.SDPCMHeader
 	auxCDCHeader    whd.CDCHeader
 	auxBDCHeader    whd.BDCHeader
+	rcvEth          func([]byte) error
 }
 
 func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
@@ -62,11 +62,9 @@ type Config struct {
 	CLM      string
 }
 
-func hex32(u uint32) string {
-	return hex.EncodeToString([]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
-}
-
 func (d *Device) Init(cfg Config) (err error) {
+	d.lock()
+	defer d.unlock()
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	err = d.initBus()
 	if err != nil {
@@ -134,7 +132,6 @@ func (d *Device) Init(cfg Config) (err error) {
 		}
 		retries--
 	}
-
 	// "Set up the interrupt mask and enable interrupts"
 	d.write16(FuncBus, whd.SPI_INTERRUPT_ENABLE_REGISTER, whd.F2_PACKET_AVAILABLE)
 
@@ -168,7 +165,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	}
 
 	// Starting polling to simulate hw interrupts
-	go d.poll()
+	go d.irqPoll()
 
 	err = d.initControl(cfg.CLM)
 	if err != nil {
@@ -185,11 +182,29 @@ func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	}
 	val0 := uint32(1) << wlGPIO
 	val1 := b2u32(value) << wlGPIO
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return d.set_iovar2("gpioout", whd.IF_STA, val0, val1)
+}
+
+// RecvEthHandle sets handler for receiving Ethernet pkt
+// If set to nil then incoming packets are ignored.
+func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
+	d.lock()
+	defer d.unlock()
+	d.rcvEth = handler
+}
+
+// SendEth sends an Ethernet packet over the current interface.
+func (d *Device) SendEth(pkt []byte) error {
+	d.lock()
+	defer d.unlock()
+	return d.tx(pkt)
 }
 
 // status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
 func (d *Device) status() Status {
+	// TODO(soypat): Are we sure we don't want to re-acquire status if it's been very long?
 	sinceStat := time.Since(d.lastStatusGet)
 	if sinceStat < 12*time.Microsecond {
 		runtime.Gosched() // Probably in hot loop.
@@ -214,3 +229,6 @@ func (d *Device) getInterrupts() Interrupts {
 	}
 	return Interrupts(irq)
 }
+
+func (d *Device) lock()   { d.mu.Lock() }
+func (d *Device) unlock() { d.mu.Unlock() }
