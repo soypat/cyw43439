@@ -345,7 +345,7 @@ func DecodeIPv4Header(buf []byte) (iphdr IPv4Header) {
 // Put marshals the IPv4 frame onto buf. buf needs to be 20 bytes in length or Put panics.
 func (iphdr *IPv4Header) Put(buf []byte) {
 	_ = buf[19]
-	buf[0] = 4 & (iphdr.VersionAndIHL & 0xf0) // ignore set version.
+	buf[0] = (4 << 4) | (iphdr.VersionAndIHL & 0xf) // ignore set version.
 	buf[1] = iphdr.ToS
 	binary.BigEndian.PutUint16(buf[2:], iphdr.TotalLength)
 	binary.BigEndian.PutUint16(buf[4:], iphdr.ID)

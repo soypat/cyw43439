@@ -23,31 +23,44 @@ func TestUDPChecksum(t *testing.T) {
 		0x22, 0x3a, 0x20, 0x5b, 0x38, 0x31, 0x35, 0x32, 0x34, 0x36, 0x32, 0x30, 0x30, 0x30, 0x5d, 0x7d, // |": [8152462000]}|
 	}
 	// Process Ethernet header.
-	e := DecodeEthernetHeader(testUDPPacket[:14])
-	if !bytes.Equal(e.Destination[:], testUDPPacket[0:6]) {
+	ethData := testUDPPacket[:14]
+	e := DecodeEthernetHeader(ethData)
+	if !bytes.Equal(e.Destination[:], ethData[0:6]) {
 		t.Errorf("incorrect ethernet destination: %v", e.String())
 	}
-	if !bytes.Equal(e.Source[:], testUDPPacket[6:12]) {
+	if !bytes.Equal(e.Source[:], ethData[6:12]) {
 		t.Errorf("incorrect ethernet source: %v", e.String())
 	}
 	if e.AssertType() != EtherTypeIPv4 {
 		t.Errorf("incorrect ethertype: %v", e.String())
 	}
-
+	ethDataGot := make([]byte, len(ethData))
+	e.Put(ethDataGot)
+	if !bytes.Equal(ethData, ethDataGot) {
+		got := DecodeEthernetHeader(ethDataGot)
+		t.Error("ethernet marshal does not match original data", e.String(), got.String())
+	}
 	// Process IP header.
-	ip := DecodeIPv4Header(testUDPPacket[14:34])
+	ipData := testUDPPacket[14:34]
+	ip := DecodeIPv4Header(ipData)
 	if ip.Protocol != 17 {
-		t.Errorf("incorrect ip protocol: %v", ip.String())
+		t.Errorf("incorrect IP protocol: %v", ip.String())
 	}
 	if !bytes.Equal(ip.Source[:], testUDPPacket[26:30]) {
-		t.Errorf("incorrect ip source: %v", ip.String())
+		t.Errorf("incorrect IP source: %v", ip.String())
 	}
 	if !bytes.Equal(ip.Destination[:], testUDPPacket[30:34]) {
-		t.Errorf("incorrect ip destination: %v", ip.String())
+		t.Errorf("incorrect IP destination: %v", ip.String())
 	}
-
+	ipDataGot := make([]byte, len(ipData))
+	ip.Put(ipDataGot)
+	if !bytes.Equal(ipData, ipDataGot) {
+		got := DecodeIPv4Header(ipDataGot)
+		t.Error("IP marshal does not match original data", ip.String(), got.String())
+	}
 	// Process UDP header.
-	udp := DecodeUDPHeader(testUDPPacket[34 : 34+8])
+	udpData := testUDPPacket[34 : 34+8]
+	udp := DecodeUDPHeader(udpData)
 	if udp.SourcePort != 17500 {
 		t.Errorf("incorrect udp source port: %v", udp.String())
 	}
@@ -56,6 +69,12 @@ func TestUDPChecksum(t *testing.T) {
 	}
 	if udp.Length != 142 {
 		t.Errorf("incorrect udp length: %v", udp.String())
+	}
+	udpDataGot := make([]byte, len(udpData))
+	udp.Put(udpDataGot)
+	if !bytes.Equal(udpData, udpDataGot) {
+		got := DecodeUDPHeader(udpDataGot)
+		t.Error("UDP marshal does not match original data", udp.String(), got.String())
 	}
 }
 
