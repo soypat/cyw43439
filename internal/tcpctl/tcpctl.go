@@ -51,18 +51,18 @@ const (
 	StateLastAck
 )
 
-type Socket struct {
+type TCPSocket struct {
 	cs        connState
 	us        net.TCPAddr
 	them      net.TCPAddr
 	staticBuf [1504]byte
 }
 
-func (s *Socket) Listen() {
+func (s *TCPSocket) Listen() {
 	s.cs.SetState(StateListen)
 }
 
-func (s *Socket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, err error) {
+func (s *TCPSocket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, err error) {
 	buflen := uint16(len(buf))
 	switch {
 	case len(buf) > math.MaxUint16:
@@ -88,7 +88,7 @@ func (s *Socket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, err 
 	return payloadStart + eth.SizeEthernetHeaderNoVLAN, payloadEnd + eth.SizeEthernetHeaderNoVLAN, nil
 }
 
-func (s *Socket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error) {
+func (s *TCPSocket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error) {
 	buflen := uint16(len(buf))
 	ip := eth.DecodeIPv4Header(buf[:])
 	payloadEnd = ip.TotalLength
@@ -131,7 +131,7 @@ func (s *Socket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error
 	return payloadStart, payloadEnd, err
 }
 
-func (s *Socket) rx(hdr *eth.TCPHeader) (err error) {
+func (s *TCPSocket) rx(hdr *eth.TCPHeader) (err error) {
 	s.cs.mu.Lock()
 	defer s.cs.mu.Unlock()
 	switch s.cs.state {
@@ -172,7 +172,7 @@ func (s *Socket) rx(hdr *eth.TCPHeader) (err error) {
 }
 
 // writeTCPIPv4 writes a TCP+IPv4 packet to dst, returning the number of bytes written.
-func (s *Socket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
+func (s *TCPSocket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
 	if len(dst) > math.MaxUint16 {
 		return 0, errors.New("buffer too long for TCP/IP")
 	}

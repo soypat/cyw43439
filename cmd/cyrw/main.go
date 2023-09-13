@@ -7,6 +7,7 @@ import (
 
 	"github.com/soypat/cyw43439/cyrw"
 	"github.com/soypat/cyw43439/internal/slog"
+	"github.com/soypat/cyw43439/internal/tcpctl"
 
 	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
@@ -33,8 +34,6 @@ func main() {
 		panic(err)
 	}
 
-	dev.RecvEthHandle(rcv)
-
 	for {
 		// Set ssid/pass in secrets.go
 		err = dev.JoinWPA2(ssid, pass)
@@ -44,6 +43,21 @@ func main() {
 		println("wifi join failed:", err.Error())
 		time.Sleep(5 * time.Second)
 	}
+	mac := dev.MAC()
+	println("\n\n\nMAC:", mac.String())
+	stack = tcpctl.NewStack(tcpctl.StackConfig{
+		MAC:         nil,
+		MaxUDPConns: 2,
+	})
+	// Prepare DHCP handler
+	err = stack.OpenUDP(68, func(u *tcpctl.UDPPacket, b []byte) (int, error) {
+		println("UDP payload:", hex.Dump(u.Payload()))
+		return 0, nil // TODO
+	})
+	if err != nil {
+		panic(err.Error())
+	}
+	dev.RecvEthHandle(stack.RecvEth)
 
 	println("finished init OK")
 
@@ -62,6 +76,7 @@ func main() {
 }
 
 var (
+	stack         *tcpctl.Stack
 	errNotTCP     = errors.New("packet not TCP")
 	errNotIPv4    = errors.New("packet not IPv4")
 	errPacketSmol = errors.New("packet too small")

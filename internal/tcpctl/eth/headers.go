@@ -186,11 +186,20 @@ const (
 	ipProtocolTCP            = 6
 )
 
+func IsBroadcastHW(hwaddr net.HardwareAddr) bool {
+	// This comparison should be optimized by compiler to not allocate.
+	// See bytes.Equal.
+	return string(hwaddr) == broadcast
+}
+
+func BroadcastHW() net.HardwareAddr { return net.HardwareAddr(broadcast) }
+
+// Broadcast is a special hardware address which indicates a Frame should
+// be sent to every device on a given LAN segment.
+const broadcast = "\xff\xff\xff" + "\xff\xff\xff"
+
 var (
-	// Broadcast is a special hardware address which indicates a Frame should
-	// be sent to every device on a given LAN segment.
-	Broadcast = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	None      = net.HardwareAddr{0, 0, 0, 0, 0, 0}
+	none = net.HardwareAddr{0, 0, 0, 0, 0, 0}
 )
 
 type EtherType uint16
@@ -295,10 +304,12 @@ func (f *EthernetHeader) String() string {
 		"etype: ", ethertpStr, vlanstr)
 }
 
-func (iphdr *IPv4Header) IHL() uint8     { return iphdr.VersionAndIHL >> 4 }
-func (iphdr *IPv4Header) Version() uint8 { return iphdr.VersionAndIHL & 0xf }
-func (iphdr *IPv4Header) DSCP() uint8    { return iphdr.ToS & 0b11_1111 }
-func (iphdr *IPv4Header) ECN() uint8     { return iphdr.ToS >> 6 }
+// IHL returns the internet header length in 32bit words and is guaranteed to be within 0..15.
+// Valid values for IHL are 5..15. When multiplied by 4 this yields number of bytes of the header, 20..60.
+func (iphdr *IPv4Header) IHL() uint8     { return iphdr.VersionAndIHL & 0xf }
+func (iphdr *IPv4Header) Version() uint8 { return iphdr.VersionAndIHL >> 4 }
+func (iphdr *IPv4Header) DSCP() uint8    { return iphdr.ToS >> 2 }
+func (iphdr *IPv4Header) ECN() uint8     { return iphdr.ToS & 0b11 }
 
 func (iphdr *IPv4Header) FrameLength() int {
 	return int(iphdr.TotalLength)
