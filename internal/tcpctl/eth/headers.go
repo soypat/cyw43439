@@ -77,15 +77,31 @@ type ARPv4Header struct {
 
 // IPv4Header is the Internet Protocol header. 20 bytes in size. Does not include options.
 type IPv4Header struct {
-	Version uint8 // 0:1
+	// VersionAndIHL contains union of both IP Version and IHL data.
+	//
+	// Version must be 4 for IPv4.
+	//
 	// Internet Header Length (IHL) The IPv4 header is variable in size due to the
 	// optional 14th field (options). The IHL field contains the size of the IPv4 header;
 	// it has 4 bits that specify the number of 32-bit words in the header.
-	//
 	// The minimum value for this field is 5, which indicates a length of
 	// 5 × 32 bits = 160 bits = 20 bytes. As a 4-bit field, the maximum value is 15;
 	// this means that the maximum size of the IPv4 header is 15 × 32 bits = 480 bits = 60 bytes.
-	IHL uint8 // 1:2
+	VersionAndIHL uint8 // 0:1 (first 4 bits are version, last 4 bits are IHL)
+
+	// Type of Service contains Differential Services Code Point (DSCP) and
+	// Explicit Congestion Notification (ECN) union data.
+	//
+	// DSCP originally defined as the type of service (ToS), this field specifies
+	// differentiated services (DiffServ) per RFC 2474. Real-time data streaming
+	// makes use of the DSCP field. An example is Voice over IP (VoIP), which is
+	// used for interactive voice services.
+	//
+	// ECN is defined in RFC 3168 and allows end-to-end notification of
+	// network congestion without dropping packets. ECN is an optional feature available
+	// when both endpoints support it and effective when also supported by the underlying network.
+	ToS uint8 // 1:2 (first 6 bits are DSCP, last 2 bits are ECN)
+
 	// This 16-bit field defines the entire packet size in bytes, including header and data.
 	// The minimum size is 20 bytes (header without data) and the maximum is 65,535 bytes.
 	// All hosts are required to be able to reassemble datagrams of size up to 576 bytes,
@@ -95,19 +111,23 @@ type IPv4Header struct {
 	// must be fragmented. Fragmentation in IPv4 is performed in either the
 	// sending host or in routers. Reassembly is performed at the receiving host.
 	TotalLength uint16 // 2:4
+
 	// This field is an identification field and is primarily used for uniquely
 	// identifying the group of fragments of a single IP datagram.
 	ID uint16 // 4:6
+
 	// A three-bit field follows and is used to control or identify fragments.
 	//  - If the DF flag is set (bit 1), and fragmentation is required to route the packet, then the packet is dropped.
 	//  - For fragmented packets, all fragments except the last have the MF flag set (bit 2).
 	//  - Bit 0 is reserved and must be set to zero.
 	Flags IPFlags // 6:8
+
 	// An eight-bit time to live field limits a datagram's lifetime to prevent
 	// network failure in the event of a routing loop. When the datagram arrives
 	// at a router, the router decrements the TTL field by one. It is specified
 	// in seconds, but time intervals less than 1 second are rounded up to 1.
 	TTL uint8 // 8:9
+
 	// This field defines the protocol used in the data portion of the IP datagram. TCP is 6, UDP is 17.
 	Protocol    uint8   // 9:10
 	Checksum    uint16  // 10:12
@@ -275,6 +295,11 @@ func (f *EthernetHeader) String() string {
 		"etype: ", ethertpStr, vlanstr)
 }
 
+func (iphdr *IPv4Header) IHL() uint8     { return iphdr.VersionAndIHL >> 4 }
+func (iphdr *IPv4Header) Version() uint8 { return iphdr.VersionAndIHL & 0xf }
+func (iphdr *IPv4Header) DSCP() uint8    { return iphdr.ToS & 0b11_1111 }
+func (iphdr *IPv4Header) ECN() uint8     { return iphdr.ToS >> 6 }
+
 func (iphdr *IPv4Header) FrameLength() int {
 	return int(iphdr.TotalLength)
 }
@@ -293,8 +318,8 @@ func (ip *IPv4Header) String() string {
 // DecodeIPv4Header decodes a 20 byte IPv4 header from buf.
 func DecodeIPv4Header(buf []byte) (iphdr IPv4Header) {
 	_ = buf[19]
-	iphdr.Version = buf[0]
-	iphdr.IHL = buf[1]
+	iphdr.VersionAndIHL = buf[0]
+	iphdr.ToS = buf[1]
 	iphdr.TotalLength = binary.BigEndian.Uint16(buf[2:])
 	iphdr.ID = binary.BigEndian.Uint16(buf[4:])
 	iphdr.Flags = IPFlags(binary.BigEndian.Uint16(buf[6:]))
@@ -309,8 +334,8 @@ func DecodeIPv4Header(buf []byte) (iphdr IPv4Header) {
 // Put marshals the IPv4 frame onto buf. buf needs to be 20 bytes in length or Put panics.
 func (iphdr *IPv4Header) Put(buf []byte) {
 	_ = buf[19]
-	buf[0] = iphdr.Version
-	buf[1] = iphdr.IHL
+	buf[0] = 4 & (iphdr.VersionAndIHL & 0xf0) // ignore set version.
+	buf[1] = iphdr.ToS
 	binary.BigEndian.PutUint16(buf[2:], iphdr.TotalLength)
 	binary.BigEndian.PutUint16(buf[4:], iphdr.ID)
 	binary.BigEndian.PutUint16(buf[6:], uint16(iphdr.Flags))

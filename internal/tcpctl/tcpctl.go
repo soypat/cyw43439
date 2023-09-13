@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 
+	"github.com/soypat/cyw43439/internal/netlink"
 	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
 
@@ -98,8 +99,8 @@ func (s *Socket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error
 		// fmt.Printf("%+v\n%s\n", ip, ip.String())
 		return 0, 0, fmt.Errorf("expected TCP protocol (6) in IP.Proto field; got %d", ip.Protocol)
 	}
-	if ip.IHL != 0 {
-		return 0, 0, errors.New("expected IP.IHL to be zero")
+	if ip.ToS != 0 {
+		return 0, 0, errors.New("expected IP.ToS to be zero")
 	}
 	tcp := eth.DecodeTCPHeader(buf[eth.SizeIPv4Header:])
 	nb := tcp.OffsetInBytes()
@@ -193,13 +194,12 @@ func (s *Socket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
 	}
 	payloadOffset = eth.SizeIPv4Header + offset*4
 	ip := eth.IPv4Header{
-		Version:     4,
-		IHL:         eth.SizeIPv4Header / 4,
-		TotalLength: uint16(offsetBytes+len(payload)) + eth.SizeIPv4Header + eth.SizeTCPHeaderNoOptions,
-		ID:          0,
-		Flags:       0,
-		TTL:         255,
-		Protocol:    6, // 6 == TCP.
+		VersionAndIHL: 4 & ((eth.SizeIPv4Header / 4) << 4),
+		TotalLength:   uint16(offsetBytes+len(payload)) + eth.SizeIPv4Header + eth.SizeTCPHeaderNoOptions,
+		ID:            0,
+		Flags:         0,
+		TTL:           255,
+		Protocol:      6, // 6 == TCP.
 	}
 	copy(ip.Destination[:], s.them.IP)
 	copy(ip.Source[:], s.us.IP)
@@ -224,7 +224,31 @@ func (s *Socket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
 	// Calculate IP checksum and copy IP header into buffer.
 	crc := eth.CRC791{}
 	crc.Write(dst[eth.SizeIPv4Header:]) // We limited dst size above.
-	ip.Checksum = crc.Sum()
+	ip.Checksum = crc.Sum16()
 	ip.Put(dst)
 	return len(dst), nil
+}
+
+func ResolveDHCPv4(dev netlink.Netlinker) (net.IP, error) {
+	// TODO
+	var (
+		broadcast = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+		rawbuf    [1500]byte
+	)
+	{ // Ethernet header.
+		hdr := eth.EthernetHeader{SizeOrEtherType: uint16(eth.EtherTypeIPv4)}
+		copy(hdr.Destination[:], broadcast)
+		hwaddr, err := dev.GetHardwareAddr()
+		if err != nil {
+			return nil, err
+		}
+		if n := copy(hdr.Source[:], hwaddr); n != 6 {
+			return nil, errors.New("MAC shorter than 6")
+		}
+		hdr.Put(rawbuf[:])
+	}
+	{ // IP header.
+		// hdr := eth.IPv4Header{}
+	}
+	return nil, nil
 }
