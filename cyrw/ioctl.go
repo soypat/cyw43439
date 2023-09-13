@@ -452,6 +452,9 @@ func (d *Device) rxEvent(packet []byte) error {
 	// Split packet into BDC header:payload.
 	bdcHdr := whd.DecodeBDCHeader(packet)
 	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
+	if packetStart > len(packet) {
+		return errors.New("rxEvent: Invalid length in BDC header")
+	}
 	bdcPacket := packet[packetStart:]
 
 	d.debug("rxEvent",
@@ -480,6 +483,9 @@ func (d *Device) rxData(packet []byte) (err error) {
 	if d.rcvEth != nil {
 		bdcHdr := whd.DecodeBDCHeader(packet)
 		packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
+		if packetStart > len(packet) {
+			return errors.New("rxData: Invalid length in BDC header")
+		}
 		payload := packet[packetStart:]
 		return d.rcvEth(payload)
 	}
