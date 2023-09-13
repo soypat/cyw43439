@@ -69,15 +69,13 @@ func main() {
 		*flagInterpretWords = *flagBCTLLE
 	}
 	var addrs []uint32
-	if *omitAddrs != "" {
-		for i, addr := range strings.Split(*omitAddrs, ",") {
-			addr = strings.TrimPrefix(addr, "0x")
-			v, err := strconv.ParseUint(addr, 16, 32)
-			if err != nil {
-				log.Fatalf("parsing address %d: %s", i+1, err)
-			}
-			addrs = append(addrs, uint32(v))
+	for i, addr := range strings.Split(*omitAddrs, ",") {
+		addr = strings.TrimPrefix(addr, "0x")
+		v, err := strconv.ParseUint(addr, 16, 32)
+		if err != nil {
+			log.Fatalf("parsing address %d: %s", i+1, err)
 		}
+		addrs = append(addrs, uint32(v))
 	}
 	getOrder := func(s string) binary.ByteOrder {
 		switch s {

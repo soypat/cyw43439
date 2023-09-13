@@ -54,17 +54,19 @@ func (s *SDPCMHeader) Put(order binary.ByteOrder, dst []byte) {
 	copy(dst[10:], s.Reserved[:])
 }
 
-func (s *SDPCMHeader) Parse(packet []byte) (payload []byte, err error) {
+func (s *SDPCMHeader) Parse(packet []byte) ([]byte, error) {
 	if len(packet) < int(s.Size) {
-		err = errors.New("packet shorter than sdpcm hdr, expected=" + strconv.Itoa(int(s.Size)))
-		return
+		return nil, errors.New("packet shorter than sdpcm hdr, expected=" +
+			strconv.Itoa(int(s.Size)))
 	}
 	if s.Size != ^s.SizeCom {
-		err = errors.New("sdpcm hdr size complement mismatch")
-		return
+		return nil, errors.New("sdpcm hdr size complement mismatch")
 	}
-	payload = packet[SDPCM_HEADER_LEN:]
-	return
+	if int(s.Size) != len(packet) {
+		return nil, errors.New("len from header doesn't match len from spi")
+	}
+
+	return packet[s.HeaderLength:], nil
 }
 
 type CDCHeader struct {
@@ -307,7 +309,12 @@ type EventMessage struct {
 	BSSCfgIdx uint8          // 47:48
 }
 
-// DecodeEventPacket decodes a async event packet. Requires 72 byte buffer.
+// Common async event errors.
+var (
+	ErrInvalidEtherType = errors.New("whd: invalid EtherType")
+)
+
+// DecodeEventPacket decodes an async event packet. Requires 72 byte buffer.
 func DecodeEventPacket(order binary.ByteOrder, buf []byte) (ev EventPacket, err error) {
 	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/structs.rs#L234C18-L234C18
 	const totalLen = 14 + 10 + 48
@@ -316,7 +323,7 @@ func DecodeEventPacket(order binary.ByteOrder, buf []byte) (ev EventPacket, err 
 	}
 	ev.EthHeader = eth.DecodeEthernetHeader(buf[:14])
 	if ev.EthHeader.AssertType() != 0x886c {
-		return ev, errors.New("invalid ethertype")
+		return ev, ErrInvalidEtherType
 	}
 	ev.EventHeader = DecodeEventHeader(order, buf[14:24])
 	const (

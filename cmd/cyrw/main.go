@@ -1,11 +1,17 @@
 package main
 
 import (
+	"encoding/hex"
+	"errors"
 	"time"
 
 	"github.com/soypat/cyw43439/cyrw"
 	"github.com/soypat/cyw43439/internal/slog"
+
+	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
+
+var lastRx, lastTx time.Time
 
 func main() {
 	defer func() {
@@ -27,11 +33,11 @@ func main() {
 		panic(err)
 	}
 
+	dev.RecvEthHandle(rcv)
+
 	for {
-		dev.GPIOSet(0, true)
-		err = dev.WifiJoin("tinygo", "")
-		time.Sleep(time.Second)
-		dev.GPIOSet(0, false)
+		// Set ssid/pass in secrets.go
+		err = dev.JoinWPA2(ssid, pass)
 		if err == nil {
 			break
 		}
@@ -40,12 +46,60 @@ func main() {
 	}
 
 	println("finished init OK")
-	cycle := true
+
+	const refresh = 300 * time.Millisecond
+	lastLED := false
 	for {
-		if err != nil {
-			println(err.Error())
+		recentRx := time.Since(lastRx) < refresh*3/2
+		recentTx := time.Since(lastTx) < refresh*3/2
+		ledStatus := recentRx || recentTx
+		if ledStatus != lastLED {
+			dev.GPIOSet(0, ledStatus)
+			lastLED = ledStatus
 		}
-		time.Sleep(time.Second / 2)
-		cycle = !cycle
+		time.Sleep(refresh)
 	}
+}
+
+var (
+	errNotTCP     = errors.New("packet not TCP")
+	errNotIPv4    = errors.New("packet not IPv4")
+	errPacketSmol = errors.New("packet too small")
+)
+
+func rcv(pkt []byte) error {
+	// Note: rcv is called from a locked Device context.
+	// No calls to device I/O should be performed here.
+	lastRx = time.Now()
+	if len(pkt) < 14 {
+		return errPacketSmol
+	}
+	ethHdr := eth.DecodeEthernetHeader(pkt)
+	if ethHdr.AssertType() != eth.EtherTypeIPv4 {
+		return errNotIPv4
+	}
+	ipHdr := eth.DecodeIPv4Header(pkt[eth.SizeEthernetHeaderNoVLAN:])
+	println("ETH:", ethHdr.String())
+	println("IPv4:", ipHdr.String())
+	println("Rx:", len(pkt))
+	println(hex.Dump(pkt))
+	if ipHdr.Protocol == 17 {
+		// We got an UDP packet and we validate it.
+		udpHdr := eth.DecodeUDPHeader(pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header:])
+		gotChecksum := udpHdr.CalculateChecksumIPv4(&ipHdr, pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header+eth.SizeUDPHeader:])
+		println("UDP:", udpHdr.String())
+		if gotChecksum == 0 || gotChecksum == udpHdr.Checksum {
+			println("checksum match!")
+		} else {
+			println("checksum mismatch! Received ", udpHdr.Checksum, " but calculated ", gotChecksum)
+		}
+		return nil
+	}
+	if ipHdr.Protocol != 6 {
+		return errNotTCP
+	}
+	tcpHdr := eth.DecodeTCPHeader(pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header:])
+	println("TCP:", tcpHdr.String())
+
+	return nil
 }
