@@ -65,6 +65,7 @@ type Config struct {
 func (d *Device) Init(cfg Config) (err error) {
 	d.lock()
 	defer d.unlock()
+
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	err = d.initBus()
 	if err != nil {
@@ -132,6 +133,7 @@ func (d *Device) Init(cfg Config) (err error) {
 		}
 		retries--
 	}
+
 	// "Set up the interrupt mask and enable interrupts"
 	d.write16(FuncBus, whd.SPI_INTERRUPT_ENABLE_REGISTER, whd.F2_PACKET_AVAILABLE)
 

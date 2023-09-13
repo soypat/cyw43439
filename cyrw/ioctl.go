@@ -126,6 +126,7 @@ func (d *Device) get_iovar_n(VAR string, iface whd.IoctlInterface, res []byte) (
 	for i := 0; i < len(res); i++ {
 		buf8[length+i] = 0 // Zero out where we'll read.
 	}
+
 	totalLen := max(length, len(res))
 	d.debug("get_iovar_n:ini", slog.String("var", VAR), slog.Int("reslen", len(res)), slog.String("buf", hex.EncodeToString(buf8[:totalLen])))
 	plen, err = d.doIoctlGet(whd.WLC_GET_VAR, iface, buf8[:totalLen])
@@ -171,6 +172,7 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 
 	return d.doIoctlSet(whd.WLC_SET_VAR, iface, buf8[:length])
 }
+
 
 func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (n int, err error) {
 	d.log_read()
@@ -228,6 +230,7 @@ func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInte
 
 	buf := d._sendIoctlBuf[:]
 	buf8 := u32AsU8(buf)
+
 
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + whd.CDC_HEADER_LEN + len(data))
 	if int(totalLen) > len(buf8) {

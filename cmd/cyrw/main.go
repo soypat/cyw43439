@@ -7,6 +7,7 @@ import (
 
 	"github.com/soypat/cyw43439/cyrw"
 	"github.com/soypat/cyw43439/internal/slog"
+
 	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
 
@@ -31,6 +32,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
 	dev.RecvEthHandle(rcv)
 
 	for {
@@ -44,6 +46,7 @@ func main() {
 	}
 
 	println("finished init OK")
+
 	const refresh = 300 * time.Millisecond
 	lastLED := false
 	for {

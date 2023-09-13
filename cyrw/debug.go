@@ -175,6 +175,7 @@ func printLowLevelTx(cmd uint32, data []uint32) {
 	println()
 }
 
+
 func hex32(u uint32) string {
 	return hex.EncodeToString([]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
 }
