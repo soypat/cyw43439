@@ -22,3 +22,5 @@ cmd/cywanalyze/*.txt
 .vscode/*
 
 cyw43
+
+cmd/cyrw/secrets.go

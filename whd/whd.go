@@ -60,11 +60,23 @@ package whd
 //   - USA            "US"
 //
 //go:inline
-func CountryCode(s string, rev uint8) uint32 {
+func CountryInfo(s string, rev uint8) (info [12]byte) {
 	if len(s) != 2 || s[0] < 'A' || s[0] > 'Z' || s[1] < 'A' || s[1] > 'Z' {
-		return 0 // bad country code.
+		return // bad country code.
 	}
-	return uint32(s[0]) | uint32(s[0])<<8 | uint32(rev)<<16
+	info[0] = s[0]
+	info[1] = s[1]
+	if rev == 0 {
+		info[4] = 0xff
+		info[5] = 0xff
+		info[6] = 0xff
+		info[7] = 0xff
+	} else {
+		info[4] = rev
+	}
+	info[8] = s[0]
+	info[9] = s[1]
+	return
 }
 
 const (
