@@ -13,16 +13,6 @@ import (
 	"github.com/soypat/cyw43439/whd"
 )
 
-/*
-func (d *Device) WifiJoin(ssid, password string) (err error) {
-	d.info("WifiJoin", slog.String("ssid", ssid), slog.Int("passlen", len(password)))
-	if password == "" {
-		return d.join_open(ssid)
-	}
-	return errors.New("wpa_auth not implemented")
-}
-*/
-
 func (d *Device) initControl(clm string) error {
 	// reference: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/control.rs#L35
 	d.debug("initControl", slog.Int("clm_len", len(clm)))
