@@ -79,7 +79,7 @@ type ARPv4Header struct {
 type IPv4Header struct {
 	// VersionAndIHL contains union of both IP Version and IHL data.
 	//
-	// Version must be 4 for IPv4.
+	// Version must be 4 for IPv4. It is force-set to its valid value in a call to Put.
 	//
 	// Internet Header Length (IHL) The IPv4 header is variable in size due to the
 	// optional 14th field (options). The IHL field contains the size of the IPv4 header;
@@ -123,9 +123,10 @@ type IPv4Header struct {
 	Flags IPFlags // 6:8
 
 	// An eight-bit time to live field limits a datagram's lifetime to prevent
-	// network failure in the event of a routing loop. When the datagram arrives
-	// at a router, the router decrements the TTL field by one. It is specified
-	// in seconds, but time intervals less than 1 second are rounded up to 1.
+	// network failure in the event of a routing loop. In practice, the field
+	// is used as a hop count—when the datagram arrives at a router,
+	// the router decrements the TTL field by one. When the TTL field hits zero,
+	// the router discards the packet and typically sends an ICMP time exceeded message to the sender.
 	TTL uint8 // 8:9
 
 	// This field defines the protocol used in the data portion of the IP datagram. TCP is 6, UDP is 17.
@@ -151,8 +152,11 @@ type TCPHeader struct {
 type UDPHeader struct {
 	SourcePort      uint16 // 0:2
 	DestinationPort uint16 // 2:4
-	Length          uint16 // 4:6
-	Checksum        uint16 // 6:8
+	// Length specifies length in bytes of UDP header and UDP payload. The minimum length
+	// is 8 bytes (UDP header length). This field should match the result of the IP header
+	// TotalLength field minus the IP header size: udp.Length == ip.TotalLength - 4*ip.IHL
+	Length   uint16 // 4:6
+	Checksum uint16 // 6:8
 }
 
 // There are 9 flags, bits 100 thru 103 are reserved
@@ -174,16 +178,19 @@ const (
 	FlagTCP_NS
 )
 
+// These are minimum sizes that do not take into consideration the presence of
+// options or special tags (i.e: VLAN, IP/TCP Options).
 const (
-	SizeEthernetHeaderNoVLAN = 14
-	SizeIPv4Header           = 20
-	SizeUDPHeader            = 8
-	SizeARPv4Header          = 28
-	SizeTCPHeaderNoOptions   = 20
-	ipflagDontFrag           = 0x4000
-	ipFlagMoreFrag           = 0x8000
-	ipVersion4               = 0x45
-	ipProtocolTCP            = 6
+	SizeEthernetHeader     = 14
+	SizeIPv4Header         = 20
+	SizeUDPHeader          = 8
+	SizeARPv4Header        = 28
+	SizeTCPHeaderNoOptions = 20
+	ipflagDontFrag         = 0x4000
+	ipFlagMoreFrag         = 0x8000
+	ipVersion4             = 0x45
+	ipProtocolTCP          = 6
+	ipProtocolUDP          = 17
 )
 
 func IsBroadcastHW(hwaddr net.HardwareAddr) bool {

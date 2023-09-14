@@ -80,7 +80,7 @@ type UDPPacket struct {
 	Eth     eth.EthernetHeader
 	IP      eth.IPv4Header
 	UDP     eth.UDPHeader
-	payload [_MTU - eth.SizeEthernetHeaderNoVLAN - eth.SizeIPv4Header - eth.SizeUDPHeader]byte
+	payload [_MTU - eth.SizeEthernetHeader - eth.SizeIPv4Header - eth.SizeUDPHeader]byte
 }
 
 // Payload returns the UDP payload. If UDP or IPv4 header data is incorrect/bad it returns nil.
@@ -173,7 +173,7 @@ func (s *Stack) RecvEth(payload []byte) (err error) {
 			s.error("Stack.RecvEth", slog.String("err", err.Error()), slog.Any("IP", ihdr))
 		}
 	}()
-	if len(payload) < eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header {
+	if len(payload) < eth.SizeEthernetHeader+eth.SizeIPv4Header {
 		return errPacketSmol
 	}
 	s.info("Stack.RecvEth:start", slog.Int("plen", len(payload)))
@@ -189,7 +189,7 @@ func (s *Stack) RecvEth(payload []byte) (err error) {
 	}
 
 	// IP parsing block.
-	ihdr = eth.DecodeIPv4Header(payload[eth.SizeEthernetHeaderNoVLAN:])
+	ihdr = eth.DecodeIPv4Header(payload[eth.SizeEthernetHeader:])
 	if ihdr.ToS != 0 {
 		return errors.New("ToS not supported")
 	} else if ihdr.Version() != 4 {
@@ -201,8 +201,8 @@ func (s *Stack) RecvEth(payload []byte) (err error) {
 	}
 
 	// Handle UDP/TCP packets.
-	offset := eth.SizeEthernetHeaderNoVLAN + 4*ihdr.IHL() // Can be at most 14+60=74, so no overflow risk.
-	end := eth.SizeEthernetHeaderNoVLAN + ihdr.TotalLength
+	offset := eth.SizeEthernetHeader + 4*ihdr.IHL() // Can be at most 14+60=74, so no overflow risk.
+	end := eth.SizeEthernetHeader + ihdr.TotalLength
 	if len(payload) < int(end) || end < uint16(offset) {
 		return errors.New("short payload buffer or bad IP TotalLength")
 	} else if end > _MTU {

@@ -67,7 +67,7 @@ func (s *TCPSocket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, e
 	switch {
 	case len(buf) > math.MaxUint16:
 		err = errors.New("buffer too long")
-	case buflen < eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header+eth.SizeTCPHeaderNoOptions:
+	case buflen < eth.SizeEthernetHeader+eth.SizeIPv4Header+eth.SizeTCPHeaderNoOptions:
 		err = errors.New("buffer too short to contain TCP")
 
 	}
@@ -81,11 +81,11 @@ func (s *TCPSocket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, e
 	if ethhdr.SizeOrEtherType != uint16(eth.EtherTypeIPv4) {
 		return 0, 0, errors.New("support only IPv4")
 	}
-	payloadStart, payloadEnd, err = s.RecvTCP(buf[eth.SizeEthernetHeaderNoVLAN:])
+	payloadStart, payloadEnd, err = s.RecvTCP(buf[eth.SizeEthernetHeader:])
 	if err != nil {
 		return 0, 0, err
 	}
-	return payloadStart + eth.SizeEthernetHeaderNoVLAN, payloadEnd + eth.SizeEthernetHeaderNoVLAN, nil
+	return payloadStart + eth.SizeEthernetHeader, payloadEnd + eth.SizeEthernetHeader, nil
 }
 
 func (s *TCPSocket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error) {
