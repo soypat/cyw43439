@@ -196,22 +196,66 @@ func (d *Device) setPassphrase(pass string) error {
 	return d.doIoctlSet(whd.WLC_SET_WSEC_PMK, whd.IF_STA, buf[:])
 }
 
+type ssidInfo struct {
+	length uint32
+	ssid   [32]byte
+}
+
+func (s *ssidInfo) put(order binary.ByteOrder, b []byte) {
+	order.PutUint32(b[0:4], s.length)
+	copy(b[4:36], s.ssid[:])
+}
+
 // setSSID sets the SSID through Ioctl interface. This command
 // also starts the wifi connect procedure.
 func (d *Device) setSSID(ssid string) error {
 	if len(ssid) > 32 {
 		return errors.New("ssid too long")
 	}
+
+	var info = ssidInfo{
+		length: uint32(len(ssid)),
+	}
+	copy(info.ssid[:], ssid)
+
 	var buf [36]byte
-	_busOrder.PutUint32(buf[:4], uint32(len(ssid))) // This is the SSID Info struct.
-	copy(buf[4:], ssid)
+	info.put(_busOrder, buf[:])
 
 	return d.doIoctlSet(whd.WLC_SET_SSID, whd.IF_STA, buf[:])
+}
+
+type ssidInfoWithIndex struct {
+	index uint32
+	info  ssidInfo
+}
+
+func (s *ssidInfoWithIndex) Put(order binary.ByteOrder, b []byte) {
+	order.PutUint32(b[0:4], s.index)
+	s.info.put(order, b[4:40])
+}
+
+func (d *Device) setSSIDWithIndex(ssid string, index uint32) error {
+	if len(ssid) > 32 {
+		return errors.New("ssid too long")
+	}
+
+	var infoIndex = ssidInfoWithIndex{
+		info: ssidInfo{
+			length: uint32(len(ssid)),
+		},
+	}
+	copy(infoIndex.info.ssid[:], ssid)
+
+	var buf [40]byte
+	infoIndex.Put(_busOrder, buf[:])
+
+	return d.set_iovar_n("bsscfg:ssid", whd.IF_STA, buf[:])
 }
 
 func (d *Device) JoinWPA2(ssid, pass string) error {
 	d.lock()
 	defer d.unlock()
+
 	if ssid != "" && pass == "" {
 		return d.join_open(ssid)
 	}
