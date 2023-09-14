@@ -300,3 +300,76 @@ func (d *Device) JoinWPA2(ssid, pass string) error {
 
 	return d.wait_for_join(ssid)
 }
+
+func (d *Device) StartAP(ssid, pass string, channel uint8) error {
+	d.lock()
+	defer d.unlock()
+
+	security := whd.CYW43_AUTH_OPEN
+	if pass != "" {
+		if len(pass) < whd.CYW43_MIN_PSK_LEN || len(pass) > whd.CYW43_MAX_PSK_LEN {
+			return errors.New("Passphrase is too short or too long")
+		}
+		security = whd.CYW43_AUTH_WPA2_AES_PSK
+	}
+
+        // Temporarily set wifi down
+	if err := d.doIoctlSet(whd.WLC_DOWN, whd.IF_STA, nil); err != nil {
+		return err
+	}
+
+        // Turn off APSTA mode
+	if err := d.set_iovar("apsta", whd.IF_STA, 0); err != nil {
+		return err
+	}
+
+        // Set wifi up again
+	if err := d.doIoctlSet(whd.WLC_UP, whd.IF_STA, nil); err != nil {
+		return err
+	}
+
+        // Turn on AP mode
+	if err := d.set_ioctl(whd.WLC_SET_AP, whd.IF_STA, 1); err != nil {
+		return err
+	}
+
+	// Set SSID
+	if err := d.setSSIDWithIndex(ssid, 0); err != nil {
+		return err
+	}
+
+        // Set channel number
+	if err := d.set_ioctl(whd.WLC_SET_CHANNEL, whd.IF_STA, uint32(channel)); err != nil {
+		return err
+	}
+
+        // Set security
+	if err := d.set_iovar2("bsscfg:wsec", whd.IF_STA, 0, uint32(security) & 0xff); err != nil {
+		return err
+	}
+
+	if security != whd.CYW43_AUTH_OPEN {
+		// wpa_auth = WPA2_AUTH_PSK | WPA_AUTH_PSK
+		if err := d.set_iovar2("bsscfg:wpa_auth", whd.IF_STA, 0,
+			whd.CYW43_WPA_AUTH_PSK | whd.CYW43_WPA2_AUTH_PSK); err != nil {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+		// Set passphrase
+		if err := d.setPassphrase(pass); err != nil {
+			return err
+		}
+	}
+
+        // Change mutlicast rate from 1 Mbps to 11 Mbps
+	if err := d.set_iovar("2g_mrate", whd.IF_STA, 11000000 / 500000); err != nil {
+		return err
+	}
+
+        // Start AP (bss = BSS_UP)
+	if err := d.set_iovar2("bss", whd.IF_STA, 0, 1); err != nil {
+		return err
+	}
+
+	return nil
+}
