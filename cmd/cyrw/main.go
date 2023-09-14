@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"time"
-	"unsafe"
 
 	"github.com/soypat/cyw43439/cyrw"
 	"github.com/soypat/cyw43439/internal/slog"
@@ -95,7 +93,7 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	var ehdr eth.EthernetHeader
 	var ihdr eth.IPv4Header
 	var uhdr eth.UDPHeader
-	var dhdr DHCPHeader
+	var dhdr eth.DHCPHeader
 
 	copy(ehdr.Destination[:], eth.BroadcastHW())
 	copy(ehdr.Source[:], dev.MAC())
@@ -135,65 +133,4 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 		return errors.New("DoDHCP failed")
 	}
 	return nil
-}
-
-// DHCPHeader specifies the first 44 bytes of a DHCP packet payload. It does
-// not include BOOTP, magic cookie and options.
-// Reference: https://lists.gnu.org/archive/html/lwip-users/2012-12/msg00016.html
-type DHCPHeader struct {
-	OP    byte   // 0:1
-	HType byte   // 1:2
-	HLen  byte   // 2:3
-	HOps  byte   // 3:4
-	Xid   uint32 // 4:8
-	Secs  uint16 // 8:10
-	Flags uint16 // 10:12
-	// CIAddr is the client IP address. If the client has not obtained an IP
-	// address yet, this field is set to 0.
-	CIAddr [4]byte // 12:16
-	YIAddr [4]byte // 16:20
-	SIAddr [4]byte // 20:24
-	GIAddr [4]byte // 24:28
-	// CHAddr is the client hardware address. Can be up to 16 bytes in length but
-	// is usually 6 bytes for Ethernet.
-	CHAddr [16]byte // 28:44
-	// BOOTP, Magic Cookie, and DHCP Options not included.
-	// LegacyBOOTP [192]byte
-	// Magic       [4]byte // 0x63,0x82,0x53,0x63
-	// Options     [275...]byte // as of RFC2131 it is variable length
-}
-
-const a = unsafe.Sizeof(DHCPHeader{})
-
-func (d *DHCPHeader) Put(dst []byte) {
-	_ = dst[43]
-	dst[0] = d.OP
-	dst[1] = d.HType
-	dst[2] = d.HLen
-	dst[3] = d.HOps
-	binary.BigEndian.PutUint32(dst[4:8], d.Xid)
-	binary.BigEndian.PutUint16(dst[8:10], d.Secs)
-	binary.BigEndian.PutUint16(dst[10:12], d.Flags)
-	copy(dst[12:16], d.CIAddr[:])
-	copy(dst[16:20], d.YIAddr[:])
-	copy(dst[20:24], d.SIAddr[:])
-	copy(dst[24:28], d.GIAddr[:])
-	copy(dst[28:34], d.CHAddr[:])
-}
-
-func DecodeDHCPHeader(src []byte) (d DHCPHeader) {
-	_ = src[43]
-	d.OP = src[0]
-	d.HType = src[1]
-	d.HLen = src[2]
-	d.HOps = src[3]
-	d.Xid = binary.BigEndian.Uint32(src[4:8])
-	d.Secs = binary.BigEndian.Uint16(src[8:10])
-	d.Flags = binary.BigEndian.Uint16(src[10:12])
-	copy(d.CIAddr[:], src[12:16])
-	copy(d.YIAddr[:], src[16:20])
-	copy(d.SIAddr[:], src[20:24])
-	copy(d.GIAddr[:], src[24:28])
-	copy(d.CHAddr[:], src[28:34])
-	return d
 }
