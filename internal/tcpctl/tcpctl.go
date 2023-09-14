@@ -67,7 +67,7 @@ func (s *TCPSocket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, e
 	switch {
 	case len(buf) > math.MaxUint16:
 		err = errors.New("buffer too long")
-	case buflen < eth.SizeEthernetHeader+eth.SizeIPv4Header+eth.SizeTCPHeaderNoOptions:
+	case buflen < eth.SizeEthernetHeader+eth.SizeIPv4Header+eth.SizeTCPHeader:
 		err = errors.New("buffer too short to contain TCP")
 
 	}
@@ -118,7 +118,7 @@ func (s *TCPSocket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err er
 	if s.cs.pendingCtlFrame == 0 {
 		return payloadStart, payloadEnd, nil
 	}
-	tcpOptions := buf[eth.SizeIPv4Header+eth.SizeTCPHeaderNoOptions : payloadStart]
+	tcpOptions := buf[eth.SizeIPv4Header+eth.SizeTCPHeader : payloadStart]
 	gotSum := tcp.CalculateChecksumIPv4(&ip, tcpOptions, buf[payloadStart:payloadEnd])
 	if gotSum != tcp.Checksum {
 		fmt.Println("Checksum mismatch!")
@@ -177,14 +177,14 @@ func (s *TCPSocket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error
 		return 0, errors.New("buffer too long for TCP/IP")
 	}
 	// Exclude Ethernet header and CRC in frame size.
-	payloadOffset := len(tcpOpts) + eth.SizeIPv4Header + eth.SizeTCPHeaderNoOptions
+	payloadOffset := len(tcpOpts) + eth.SizeIPv4Header + eth.SizeTCPHeader
 	if len(dst) < payloadOffset+len(payload) {
 		return 0, io.ErrShortBuffer
 	}
 	// Limit dst to the size of the frame.
 	dst = dst[:payloadOffset+len(payload)]
 
-	offsetBytes := len(tcpOpts) + eth.SizeTCPHeaderNoOptions
+	offsetBytes := len(tcpOpts) + eth.SizeTCPHeader
 	offset := offsetBytes / 4
 	if offsetBytes%4 != 0 {
 		offset++
@@ -195,7 +195,7 @@ func (s *TCPSocket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error
 	payloadOffset = eth.SizeIPv4Header + offset*4
 	ip := eth.IPv4Header{
 		VersionAndIHL: 4 & ((eth.SizeIPv4Header / 4) << 4),
-		TotalLength:   uint16(offsetBytes+len(payload)) + eth.SizeIPv4Header + eth.SizeTCPHeaderNoOptions,
+		TotalLength:   uint16(offsetBytes+len(payload)) + eth.SizeIPv4Header + eth.SizeTCPHeader,
 		ID:            0,
 		Flags:         0,
 		TTL:           255,
@@ -216,7 +216,7 @@ func (s *TCPSocket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error
 	tcp.Checksum = tcp.CalculateChecksumIPv4(&ip, tcpOpts, payload)
 	// Copy TCP header+options and payload into buffer.
 	tcp.Put(dst[eth.SizeIPv4Header:])
-	nopt := copy(dst[eth.SizeIPv4Header+eth.SizeTCPHeaderNoOptions:payloadOffset], tcpOpts)
+	nopt := copy(dst[eth.SizeIPv4Header+eth.SizeTCPHeader:payloadOffset], tcpOpts)
 	if nopt != len(tcpOpts) {
 		panic("tcp options copy failed")
 	}

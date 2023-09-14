@@ -207,16 +207,17 @@ const (
 // These are minimum sizes that do not take into consideration the presence of
 // options or special tags (i.e: VLAN, IP/TCP Options).
 const (
-	SizeEthernetHeader     = 14
-	SizeIPv4Header         = 20
-	SizeUDPHeader          = 8
-	SizeARPv4Header        = 28
-	SizeTCPHeaderNoOptions = 20
-	ipflagDontFrag         = 0x4000
-	ipFlagMoreFrag         = 0x8000
-	ipVersion4             = 0x45
-	ipProtocolTCP          = 6
-	ipProtocolUDP          = 17
+	SizeEthernetHeader = 14
+	SizeIPv4Header     = 20
+	SizeUDPHeader      = 8
+	SizeARPv4Header    = 28
+	SizeTCPHeader      = 20
+	SizeDHCPHeader     = 44
+	ipflagDontFrag     = 0x4000
+	ipFlagMoreFrag     = 0x8000
+	ipVersion4         = 0x45
+	ipProtocolTCP      = 6
+	ipProtocolUDP      = 17
 )
 
 func IsBroadcastHW(hwaddr net.HardwareAddr) bool {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"time"
@@ -50,7 +51,15 @@ func main() {
 		MaxUDPConns: 2,
 	})
 	dev.RecvEthHandle(stack.RecvEth)
-	err = DoDHCP(stack, dev)
+	for {
+		println("Trying DoDHCP")
+		err = DoDHCP(stack, dev)
+		if err == nil {
+			break
+		}
+		println(err.Error())
+		time.Sleep(5 * time.Second)
+	}
 
 	println("finished init OK")
 
@@ -90,6 +99,7 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	if err != nil {
 		return err
 	}
+	defer s.CloseUDP(68)
 	var ehdr eth.EthernetHeader
 	var ihdr eth.IPv4Header
 	var uhdr eth.UDPHeader
@@ -101,7 +111,7 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 
 	copy(ihdr.Destination[:], eth.BroadcastHW())
 	ihdr.Protocol = 17
-	ihdr.TTL = 2
+	ihdr.TTL = 4
 	ihdr.TotalLength = eth.SizeUDPHeader + 11*4 + 192 + 21
 	ihdr.ID = 12345
 	ihdr.VersionAndIHL = 5 // Sets IHL: No IP options. Version set automatically.
@@ -120,16 +130,42 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	dhdr.Xid = 0x12345678
 	mac := dev.MAC()
 	copy(dhdr.CHAddr[:], mac[:])
-
-	// Send DHCP Discover.
 	dhdr.Put(dhcppayload[:])
-	totalSize := eth.SizeEthernetHeader + 4*ihdr.IHL() + eth.SizeUDPHeader + 34
-	dev.SendEth(txbuf[:totalSize])
+
+	// Encode DHCP options.
+	for i := eth.SizeDHCPHeader; i < len(dhcppayload); i++ {
+		dhcppayload[i] = 0 // Zero out BOOTP and options fields.
+	}
+	optionsLength := eth.SizeDHCPHeader + 192
+	binary.BigEndian.PutUint32(dhcppayload[optionsLength:], 0x63825363) // Magic cookie.
+	optionsLength += 4
+	// DHCP options.
+	dhcppayload[optionsLength] = 53  // DHCP Message Type
+	dhcppayload[optionsLength+1] = 1 // Length
+	dhcppayload[optionsLength+2] = 1 // DHCP Discover
+	optionsLength += 3
+	// Now we encode the Requested IP option.
+	dhcppayload[optionsLength] = 50  // Requested IP
+	dhcppayload[optionsLength+1] = 4 // Length
+	dhcppayload[optionsLength+2] = 192
+	dhcppayload[optionsLength+3] = 168
+	dhcppayload[optionsLength+4] = 1
+	dhcppayload[optionsLength+5] = 69 // Yeah babyyyyy
+	optionsLength += 6
+	// Now we encode the endmark.
+	dhcppayload[optionsLength] = 0xff
+	optionsLength++
+
+	totalSize := eth.SizeEthernetHeader + int(4*ihdr.IHL()) + eth.SizeUDPHeader + eth.SizeDHCPHeader + optionsLength
+	err = dev.SendEth(txbuf[:totalSize])
+	if err != nil {
+		return err
+	}
 	for retry := 0; retry < 20 && state == none; retry++ {
 		time.Sleep(50 * time.Millisecond)
 		// We should see received packets received on callback passed into OpenUDP.
 	}
-	if state == 0 {
+	if state < ack {
 		return errors.New("DoDHCP failed")
 	}
 	return nil
