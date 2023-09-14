@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"time"
+	"unsafe"
 
 	"github.com/soypat/cyw43439/cyrw"
 	"github.com/soypat/cyw43439/internal/slog"
@@ -94,6 +95,7 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	var ehdr eth.EthernetHeader
 	var ihdr eth.IPv4Header
 	var uhdr eth.UDPHeader
+	var dhdr DHCPHeader
 
 	copy(ehdr.Destination[:], eth.BroadcastHW())
 	copy(ehdr.Source[:], dev.MAC())
@@ -112,9 +114,19 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	ehdr.Put(txbuf[:])
 	ihdr.Put(txbuf[eth.SizeEthernetHeader:])
 	uhdr.Put(txbuf[eth.SizeEthernetHeader+4*ihdr.IHL():])
-	dhcppayload := txbuf[eth.SizeEthernetHeader+4*ihdr.IHL()+eth.SizeUDPHeader:]
 
-	dev.SendEth(txbuf[:])
+	dhcppayload := txbuf[eth.SizeEthernetHeader+4*ihdr.IHL()+eth.SizeUDPHeader:]
+	dhdr.OP = 1
+	dhdr.HType = 1
+	dhdr.HLen = 6
+	dhdr.Xid = 0x12345678
+	mac := dev.MAC()
+	copy(dhdr.CHAddr[:], mac[:])
+
+	// Send DHCP Discover.
+	dhdr.Put(dhcppayload[:])
+	totalSize := eth.SizeEthernetHeader + 4*ihdr.IHL() + eth.SizeUDPHeader + 34
+	dev.SendEth(txbuf[:totalSize])
 	for retry := 0; retry < 20 && state == none; retry++ {
 		time.Sleep(50 * time.Millisecond)
 		// We should see received packets received on callback passed into OpenUDP.
@@ -125,23 +137,33 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	return nil
 }
 
-// DHCPHeader specifies the first 44 bytes of a DHCP packet payload
-// not including BOOTP, magic cookie and options.
+// DHCPHeader specifies the first 44 bytes of a DHCP packet payload. It does
+// not include BOOTP, magic cookie and options.
+// Reference: https://lists.gnu.org/archive/html/lwip-users/2012-12/msg00016.html
 type DHCPHeader struct {
-	OP     byte        // 0:1
-	HType  byte        // 1:2
-	HLen   byte        // 2:3
-	HOps   byte        // 3:4
-	Xid    uint32      // 4:8
-	Secs   uint16      // 8:10
-	Flags  uint16      // 10:12
-	CIAddr [4]byte     // 12:16
-	YIAddr [4]byte     // 16:20
-	SIAddr [4]byte     // 20:24
-	GIAddr [4]byte     // 24:28
-	CHAddr [4 * 4]byte // 28:44
+	OP    byte   // 0:1
+	HType byte   // 1:2
+	HLen  byte   // 2:3
+	HOps  byte   // 3:4
+	Xid   uint32 // 4:8
+	Secs  uint16 // 8:10
+	Flags uint16 // 10:12
+	// CIAddr is the client IP address. If the client has not obtained an IP
+	// address yet, this field is set to 0.
+	CIAddr [4]byte // 12:16
+	YIAddr [4]byte // 16:20
+	SIAddr [4]byte // 20:24
+	GIAddr [4]byte // 24:28
+	// CHAddr is the client hardware address. Can be up to 16 bytes in length but
+	// is usually 6 bytes for Ethernet.
+	CHAddr [16]byte // 28:44
 	// BOOTP, Magic Cookie, and DHCP Options not included.
+	// LegacyBOOTP [192]byte
+	// Magic       [4]byte // 0x63,0x82,0x53,0x63
+	// Options     [275...]byte // as of RFC2131 it is variable length
 }
+
+const a = unsafe.Sizeof(DHCPHeader{})
 
 func (d *DHCPHeader) Put(dst []byte) {
 	_ = dst[43]
@@ -156,7 +178,7 @@ func (d *DHCPHeader) Put(dst []byte) {
 	copy(dst[16:20], d.YIAddr[:])
 	copy(dst[20:24], d.SIAddr[:])
 	copy(dst[24:28], d.GIAddr[:])
-	copy(dst[28:44], d.CHAddr[:])
+	copy(dst[28:34], d.CHAddr[:])
 }
 
 func DecodeDHCPHeader(src []byte) (d DHCPHeader) {
@@ -172,6 +194,6 @@ func DecodeDHCPHeader(src []byte) (d DHCPHeader) {
 	copy(d.YIAddr[:], src[16:20])
 	copy(d.SIAddr[:], src[20:24])
 	copy(d.GIAddr[:], src[24:28])
-	copy(d.CHAddr[:], src[28:44])
+	copy(d.CHAddr[:], src[28:34])
 	return d
 }
