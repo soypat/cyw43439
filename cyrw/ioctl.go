@@ -173,21 +173,9 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 	return d.doIoctlSet(whd.WLC_SET_VAR, iface, buf8[:length])
 }
 
-
 func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (n int, err error) {
-	d.log_read()
-
-	err = d.waitForCredit(d._sendIoctlBuf[:])
+	packet, err := d.sendIoctlWait(ioctlGET, cmd, iface, data)
 	if err != nil {
-		return 0, err
-	}
-	err = d.sendIoctl(ioctlGET, cmd, iface, data)
-	if err != nil {
-		return 0, err
-	}
-	packet, err := d.pollForIoctl(d._sendIoctlBuf[:])
-	if err != nil {
-		d.logerr("doIoctlGet:pollForIoctl", slog.String("err", err.Error()))
 		return 0, err
 	}
 
@@ -198,23 +186,29 @@ func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data
 }
 
 func (d *Device) doIoctlSet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
+	_, err = d.sendIoctlWait(ioctlSET, cmd, iface, data)
+	return err
+}
+
+// sendIoctlWait sends an ioctl and waits for its completion
+func (d *Device) sendIoctlWait(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) ([]byte, error) {
 	d.log_read()
 
-	err = d.waitForCredit(d._sendIoctlBuf[:])
+	err := d.waitForCredit(d._sendIoctlBuf[:])
 	if err != nil {
-		return err
+		return nil, err
 	}
-	err = d.sendIoctl(ioctlSET, cmd, iface, data)
+	err = d.sendIoctl(kind, cmd, iface, data)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = d.pollForIoctl(d._sendIoctlBuf[:])
+	packet, err := d.pollForIoctl(d._sendIoctlBuf[:])
 	if err != nil {
-		d.logerr("pollForIoctl", slog.String("err", err.Error()))
-		return err
+		d.logerr("doIoctlGet:pollForIoctl", slog.String("err", err.Error()))
+		return nil, err
 	}
 
-	return nil
+	return packet, err
 }
 
 // sendIoctl sends a SDPCM+CDC ioctl command to the device with data.
@@ -452,6 +446,9 @@ func (d *Device) rxEvent(packet []byte) error {
 	// Split packet into BDC header:payload.
 	bdcHdr := whd.DecodeBDCHeader(packet)
 	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
+	if packetStart > len(packet) {
+		return errors.New("rxEvent: Invalid length in BDC header")
+	}
 	bdcPacket := packet[packetStart:]
 
 	d.debug("rxEvent",
@@ -480,6 +477,9 @@ func (d *Device) rxData(packet []byte) (err error) {
 	if d.rcvEth != nil {
 		bdcHdr := whd.DecodeBDCHeader(packet)
 		packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
+		if packetStart > len(packet) {
+			return errors.New("rxData: Invalid length in BDC header")
+		}
 		payload := packet[packetStart:]
 		return d.rcvEth(payload)
 	}

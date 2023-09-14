@@ -13,16 +13,6 @@ import (
 	"github.com/soypat/cyw43439/whd"
 )
 
-/*
-func (d *Device) WifiJoin(ssid, password string) (err error) {
-	d.info("WifiJoin", slog.String("ssid", ssid), slog.Int("passlen", len(password)))
-	if password == "" {
-		return d.join_open(ssid)
-	}
-	return errors.New("wpa_auth not implemented")
-}
-*/
-
 func (d *Device) initControl(clm string) error {
 	// reference: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/control.rs#L35
 	d.debug("initControl", slog.Int("clm_len", len(clm)))
@@ -206,22 +196,66 @@ func (d *Device) setPassphrase(pass string) error {
 	return d.doIoctlSet(whd.WLC_SET_WSEC_PMK, whd.IF_STA, buf[:])
 }
 
+type ssidInfo struct {
+	length uint32
+	ssid   [32]byte
+}
+
+func (s *ssidInfo) put(order binary.ByteOrder, b []byte) {
+	order.PutUint32(b[0:4], s.length)
+	copy(b[4:36], s.ssid[:])
+}
+
 // setSSID sets the SSID through Ioctl interface. This command
 // also starts the wifi connect procedure.
 func (d *Device) setSSID(ssid string) error {
 	if len(ssid) > 32 {
 		return errors.New("ssid too long")
 	}
+
+	var info = ssidInfo{
+		length: uint32(len(ssid)),
+	}
+	copy(info.ssid[:], ssid)
+
 	var buf [36]byte
-	_busOrder.PutUint32(buf[:4], uint32(len(ssid))) // This is the SSID Info struct.
-	copy(buf[4:], ssid)
+	info.put(_busOrder, buf[:])
 
 	return d.doIoctlSet(whd.WLC_SET_SSID, whd.IF_STA, buf[:])
+}
+
+type ssidInfoWithIndex struct {
+	index uint32
+	info  ssidInfo
+}
+
+func (s *ssidInfoWithIndex) Put(order binary.ByteOrder, b []byte) {
+	order.PutUint32(b[0:4], s.index)
+	s.info.put(order, b[4:40])
+}
+
+func (d *Device) setSSIDWithIndex(ssid string, index uint32) error {
+	if len(ssid) > 32 {
+		return errors.New("ssid too long")
+	}
+
+	var infoIndex = ssidInfoWithIndex{
+		info: ssidInfo{
+			length: uint32(len(ssid)),
+		},
+	}
+	copy(infoIndex.info.ssid[:], ssid)
+
+	var buf [40]byte
+	infoIndex.Put(_busOrder, buf[:])
+
+	return d.set_iovar_n("bsscfg:ssid", whd.IF_STA, buf[:])
 }
 
 func (d *Device) JoinWPA2(ssid, pass string) error {
 	d.lock()
 	defer d.unlock()
+
 	if ssid != "" && pass == "" {
 		return d.join_open(ssid)
 	}
@@ -265,4 +299,77 @@ func (d *Device) JoinWPA2(ssid, pass string) error {
 	}
 
 	return d.wait_for_join(ssid)
+}
+
+func (d *Device) StartAP(ssid, pass string, channel uint8) error {
+	d.lock()
+	defer d.unlock()
+
+	security := whd.CYW43_AUTH_OPEN
+	if pass != "" {
+		if len(pass) < whd.CYW43_MIN_PSK_LEN || len(pass) > whd.CYW43_MAX_PSK_LEN {
+			return errors.New("Passphrase is too short or too long")
+		}
+		security = whd.CYW43_AUTH_WPA2_AES_PSK
+	}
+
+        // Temporarily set wifi down
+	if err := d.doIoctlSet(whd.WLC_DOWN, whd.IF_STA, nil); err != nil {
+		return err
+	}
+
+        // Turn off APSTA mode
+	if err := d.set_iovar("apsta", whd.IF_STA, 0); err != nil {
+		return err
+	}
+
+        // Set wifi up again
+	if err := d.doIoctlSet(whd.WLC_UP, whd.IF_STA, nil); err != nil {
+		return err
+	}
+
+        // Turn on AP mode
+	if err := d.set_ioctl(whd.WLC_SET_AP, whd.IF_STA, 1); err != nil {
+		return err
+	}
+
+	// Set SSID
+	if err := d.setSSIDWithIndex(ssid, 0); err != nil {
+		return err
+	}
+
+        // Set channel number
+	if err := d.set_ioctl(whd.WLC_SET_CHANNEL, whd.IF_STA, uint32(channel)); err != nil {
+		return err
+	}
+
+        // Set security
+	if err := d.set_iovar2("bsscfg:wsec", whd.IF_STA, 0, uint32(security) & 0xff); err != nil {
+		return err
+	}
+
+	if security != whd.CYW43_AUTH_OPEN {
+		// wpa_auth = WPA2_AUTH_PSK | WPA_AUTH_PSK
+		if err := d.set_iovar2("bsscfg:wpa_auth", whd.IF_STA, 0,
+			whd.CYW43_WPA_AUTH_PSK | whd.CYW43_WPA2_AUTH_PSK); err != nil {
+			return err
+		}
+		time.Sleep(100 * time.Millisecond)
+		// Set passphrase
+		if err := d.setPassphrase(pass); err != nil {
+			return err
+		}
+	}
+
+        // Change mutlicast rate from 1 Mbps to 11 Mbps
+	if err := d.set_iovar("2g_mrate", whd.IF_STA, 11000000 / 500000); err != nil {
+		return err
+	}
+
+        // Start AP (bss = BSS_UP)
+	if err := d.set_iovar2("bss", whd.IF_STA, 0, 1); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -38,6 +38,7 @@ func main() {
 	for {
 		// Set ssid/pass in secrets.go
 		err = dev.JoinWPA2(ssid, pass)
+		//err = dev.StartAP(ssid, pass, 6)
 		if err == nil {
 			break
 		}
