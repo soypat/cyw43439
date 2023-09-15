@@ -111,8 +111,14 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 
 	copy(ihdr.Destination[:], eth.BroadcastHW())
 	ihdr.Protocol = 17
-	ihdr.TTL = 4
-	ihdr.TotalLength = eth.SizeUDPHeader + 11*4 + 192 + 21
+	ihdr.TTL = 64
+	const (
+		sizeSName     = 64  // Server name, part of BOOTP too.
+		sizeFILE      = 128 // Boot file name, Legacy.
+		sizeOptions   = 312
+		sizeDHCPTotal = eth.SizeDHCPHeader + sizeSName + sizeFILE + sizeOptions
+	)
+	ihdr.TotalLength = eth.SizeUDPHeader + sizeDHCPTotal
 	ihdr.ID = 12345
 	ihdr.VersionAndIHL = 5 // Sets IHL: No IP options. Version set automatically.
 
@@ -122,12 +128,7 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	ehdr.Put(txbuf[:])
 	ihdr.Put(txbuf[eth.SizeEthernetHeader:])
 	uhdr.Put(txbuf[eth.SizeEthernetHeader+4*ihdr.IHL():])
-	const (
-		sizeSName     = 64  // Server name, part of BOOTP too.
-		sizeFILE      = 128 // Boot file name, Legacy.
-		sizeOptions   = 312
-		sizeDHCPTotal = eth.SizeDHCPHeader + sizeSName + sizeFILE + sizeOptions
-	)
+
 	dhcppayload := txbuf[eth.SizeEthernetHeader+4*ihdr.IHL()+eth.SizeUDPHeader:]
 
 	dhdr.OP = 1
