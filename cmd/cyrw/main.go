@@ -122,8 +122,14 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	ehdr.Put(txbuf[:])
 	ihdr.Put(txbuf[eth.SizeEthernetHeader:])
 	uhdr.Put(txbuf[eth.SizeEthernetHeader+4*ihdr.IHL():])
-
+	const (
+		sizeSName     = 64  // Server name, part of BOOTP too.
+		sizeFILE      = 128 // Boot file name, Legacy.
+		sizeOptions   = 312
+		sizeDHCPTotal = eth.SizeDHCPHeader + sizeSName + sizeFILE + sizeOptions
+	)
 	dhcppayload := txbuf[eth.SizeEthernetHeader+4*ihdr.IHL()+eth.SizeUDPHeader:]
+
 	dhdr.OP = 1
 	dhdr.HType = 1
 	dhdr.HLen = 6
@@ -136,27 +142,30 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	for i := eth.SizeDHCPHeader; i < len(dhcppayload); i++ {
 		dhcppayload[i] = 0 // Zero out BOOTP and options fields.
 	}
-	optionsLength := eth.SizeDHCPHeader + 192
-	binary.BigEndian.PutUint32(dhcppayload[optionsLength:], 0x63825363) // Magic cookie.
-	optionsLength += 4
+	// Skip BOOTP fields.
+	ptr := eth.SizeDHCPHeader + sizeSName + sizeFILE
+	binary.BigEndian.PutUint32(dhcppayload[ptr:], 0x63825363) // Magic cookie.
+	ptr += 4
 	// DHCP options.
-	dhcppayload[optionsLength] = 53  // DHCP Message Type
-	dhcppayload[optionsLength+1] = 1 // Length
-	dhcppayload[optionsLength+2] = 1 // DHCP Discover
-	optionsLength += 3
+	dhcppayload[ptr] = 53  // DHCP Message Type
+	dhcppayload[ptr+1] = 1 // Length
+	dhcppayload[ptr+2] = 1 // DHCP Discover
+	ptr += 3
 	// Now we encode the Requested IP option.
-	dhcppayload[optionsLength] = 50  // Requested IP
-	dhcppayload[optionsLength+1] = 4 // Length
-	dhcppayload[optionsLength+2] = 192
-	dhcppayload[optionsLength+3] = 168
-	dhcppayload[optionsLength+4] = 1
-	dhcppayload[optionsLength+5] = 69 // Yeah babyyyyy
-	optionsLength += 6
+	dhcppayload[ptr] = 50  // Requested IP
+	dhcppayload[ptr+1] = 4 // Length
+	dhcppayload[ptr+2] = 192
+	dhcppayload[ptr+3] = 168
+	dhcppayload[ptr+4] = 1
+	dhcppayload[ptr+5] = 69 // Yeah babyyyyy
+	ptr += 6
 	// Now we encode the endmark.
-	dhcppayload[optionsLength] = 0xff
-	optionsLength++
-
-	totalSize := eth.SizeEthernetHeader + int(4*ihdr.IHL()) + eth.SizeUDPHeader + eth.SizeDHCPHeader + optionsLength
+	dhcppayload[ptr] = 0xff
+	ptr++
+	const minOptionsSize = 312 // As per RFC1541
+	ptr = minOptionsSize
+	const typicalSize = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeUDPHeader + sizeDHCPTotal
+	totalSize := eth.SizeEthernetHeader + int(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
 	err = dev.SendEth(txbuf[:totalSize])
 	if err != nil {
 		return err
