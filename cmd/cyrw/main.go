@@ -162,9 +162,9 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	// Now we encode the endmark.
 	dhcppayload[ptr] = 0xff
 	ptr++
-	const minOptionsSize = 312 // As per RFC1541
-	ptr = minOptionsSize
+	// typicalSize=590
 	const typicalSize = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeUDPHeader + sizeDHCPTotal
+
 	totalSize := eth.SizeEthernetHeader + int(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
 	err = dev.SendEth(txbuf[:totalSize])
 	if err != nil {
