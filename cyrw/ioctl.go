@@ -173,7 +173,6 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 	return d.doIoctlSet(whd.WLC_SET_VAR, iface, buf8[:length])
 }
 
-
 func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (n int, err error) {
 	d.log_read()
 
@@ -230,7 +229,6 @@ func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInte
 
 	buf := d._sendIoctlBuf[:]
 	buf8 := u32AsU8(buf)
-
 
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + whd.CDC_HEADER_LEN + len(data))
 	if int(totalLen) > len(buf8) {
@@ -448,8 +446,14 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 	return offset, plen, nil
 }
 
+var errPacketSmol = errors.New("asyncEvent packet too small for parsing")
+
 func (d *Device) rxEvent(packet []byte) error {
 	// Split packet into BDC header:payload.
+	if len(packet) < whd.BDC_HEADER_LEN+72 {
+		d.logerr("rxEvent", slog.Int("plen", len(packet)), slog.String("err", errPacketSmol.Error()))
+		return errPacketSmol
+	}
 	bdcHdr := whd.DecodeBDCHeader(packet)
 	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
 	bdcPacket := packet[packetStart:]
