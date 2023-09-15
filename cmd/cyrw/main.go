@@ -118,16 +118,13 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 		sizeOptions   = 312
 		sizeDHCPTotal = eth.SizeDHCPHeader + sizeSName + sizeFILE + sizeOptions
 	)
-	ihdr.TotalLength = eth.SizeUDPHeader + sizeDHCPTotal
+	ihdr.TotalLength = uint16(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
 	ihdr.ID = 12345
 	ihdr.VersionAndIHL = 5 // Sets IHL: No IP options. Version set automatically.
 
 	uhdr.DestinationPort = 67
 	uhdr.SourcePort = 68
 	uhdr.Length = ihdr.TotalLength - eth.SizeIPv4Header
-	ehdr.Put(txbuf[:])
-	ihdr.Put(txbuf[eth.SizeEthernetHeader:])
-	uhdr.Put(txbuf[eth.SizeEthernetHeader+4*ihdr.IHL():])
 
 	dhcppayload := txbuf[eth.SizeEthernetHeader+4*ihdr.IHL()+eth.SizeUDPHeader:]
 
@@ -155,8 +152,15 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	ptr++
 
 	const typicalSize = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeUDPHeader + sizeDHCPTotal
-
 	totalSize := eth.SizeEthernetHeader + int(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
+	// Calculate Checksums:
+	uhdr.CalculateChecksumIPv4(&ihdr, dhcppayload[:ptr])
+	udpOffset := eth.SizeEthernetHeader + 4*ihdr.IHL()
+	uhdr.Put(txbuf[udpOffset:])
+	ihdr.Checksum = ihdr.CalculateChecksum()
+	ihdr.Put(txbuf[eth.SizeEthernetHeader:])
+	ehdr.Put(txbuf[:])
+
 	err = dev.SendEth(txbuf[:totalSize])
 	if err != nil {
 		return err

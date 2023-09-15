@@ -404,6 +404,15 @@ func (iphdr *IPv4Header) PutPseudo(buf []byte) {
 	copy(buf[8:12], iphdr.Destination[:])
 }
 
+func (iphdr *IPv4Header) CalculateChecksum() uint16 {
+	crc := CRC791{}
+	var buf [SizeIPv4Header]byte
+	iphdr.Put(buf[:])
+	binary.BigEndian.PutUint16(buf[10:], 0) // Zero out checksum field.
+	crc.Write(buf[:])
+	return crc.Sum16()
+}
+
 type IPFlags uint16
 
 func (f IPFlags) DontFragment() bool     { return f&ipflagDontFrag != 0 }
