@@ -148,22 +148,12 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	binary.BigEndian.PutUint32(dhcppayload[ptr:], 0x63825363) // Magic cookie.
 	ptr += 4
 	// DHCP options.
-	dhcppayload[ptr] = 53  // DHCP Message Type
-	dhcppayload[ptr+1] = 1 // Length
-	dhcppayload[ptr+2] = 1 // DHCP Discover
-	ptr += 3
-	// Now we encode the Requested IP option.
-	dhcppayload[ptr] = 50  // Requested IP
-	dhcppayload[ptr+1] = 4 // Length
-	dhcppayload[ptr+2] = 192
-	dhcppayload[ptr+3] = 168
-	dhcppayload[ptr+4] = 1
-	dhcppayload[ptr+5] = 69 // Yeah babyyyyy
-	ptr += 6
-	// Now we encode the endmark.
-	dhcppayload[ptr] = 0xff
+	ptr += encodeDHCPOption(dhcppayload[ptr:], 53, []byte{1})               // DHCP Message Type: Discover
+	ptr += encodeDHCPOption(dhcppayload[ptr:], 50, []byte{192, 168, 1, 69}) // Requested IP
+	ptr += encodeDHCPOption(dhcppayload[ptr:], 55, []byte{1, 3, 15, 6})     // Parameter request list
+	dhcppayload[ptr] = 0xff                                                 // endmark
 	ptr++
-	// typicalSize=590
+
 	const typicalSize = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeUDPHeader + sizeDHCPTotal
 
 	totalSize := eth.SizeEthernetHeader + int(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
@@ -179,4 +169,14 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 		return errors.New("DoDHCP failed")
 	}
 	return nil
+}
+
+func encodeDHCPOption(dst []byte, code byte, data []byte) int {
+	if len(data)+2 > len(dst) {
+		panic("small dst size for DHCP encoding")
+	}
+	dst[0] = code
+	dst[1] = byte(len(data))
+	copy(dst[2:], data)
+	return 2 + len(data)
 }
