@@ -45,11 +45,16 @@ func (u *udpSocket) IsPendingHandling() bool {
 
 // HandleEth writes the socket's response into dst to be sent over an ethernet interface.
 // HandleEth can return 0 bytes written and a nil error to indicate no action must be taken.
+// If
 func (u *udpSocket) HandleEth(dst []byte) (int, error) {
 	if u.handler == nil {
 		panic("nil udp handler on port " + strconv.Itoa(int(u.Port)))
 	}
-	return u.handler(&u.packets[0], dst)
+	packet := &u.packets[0]
+
+	n, err := u.handler(&u.packets[0], dst)
+	packet.Rx = time.Time{} // Invalidate packet.
+	return n, err
 }
 
 // Open sets the UDP handler and opens the port.
@@ -85,7 +90,7 @@ type UDPPacket struct {
 
 // Payload returns the UDP payload. If UDP or IPv4 header data is incorrect/bad it returns nil.
 func (p *UDPPacket) Payload() []byte {
-	ipLen := int(p.IP.TotalLength) - int(p.IP.IHL()*4) // Total length(including header) - header length = payload length
+	ipLen := int(p.IP.TotalLength) - int(p.IP.IHL()*4) - eth.SizeUDPHeader // Total length(including header) - header length = payload length
 	uLen := int(p.UDP.Length) - eth.SizeUDPHeader
 	if ipLen != uLen || uLen > len(p.payload) {
 		return nil // Mismatching IP and UDP data or bad length.
@@ -117,6 +122,7 @@ type Stack struct {
 	// Set IP to non-nil to ignore packets not meant for us.
 	IP               net.IP
 	UDPv4            []udpSocket
+	GlobalHandler    func([]byte)
 	pendingUDPv4     uint32
 	pendingTCPv4     uint32
 	droppedPackets   uint32
@@ -165,7 +171,7 @@ var (
 //
 // If [Stack.HandleEth] is not called often enough prevent packet queue from
 // filling up on a socket RecvEth will start to return [ErrDroppedPacket].
-func (s *Stack) RecvEth(payload []byte) (err error) {
+func (s *Stack) RecvEth(ethernetFrame []byte) (err error) {
 	var ehdr eth.EthernetHeader
 	var ihdr eth.IPv4Header
 	defer func() {
@@ -173,6 +179,7 @@ func (s *Stack) RecvEth(payload []byte) (err error) {
 			s.error("Stack.RecvEth", slog.String("err", err.Error()), slog.Any("IP", ihdr))
 		}
 	}()
+	payload := ethernetFrame
 	if len(payload) < eth.SizeEthernetHeader+eth.SizeIPv4Header {
 		return errPacketSmol
 	}
@@ -183,25 +190,23 @@ func (s *Stack) RecvEth(payload []byte) (err error) {
 	ehdr = eth.DecodeEthernetHeader(payload)
 	if s.MAC != nil && !eth.IsBroadcastHW(ehdr.Destination[:]) && !bytes.Equal(ehdr.Destination[:], s.MAC) {
 		return nil // Ignore packet, is not for us.
-	}
-	if ehdr.AssertType() != eth.EtherTypeIPv4 {
+	} else if ehdr.AssertType() != eth.EtherTypeIPv4 {
 		return errNotIPv4
 	}
 
 	// IP parsing block.
 	ihdr = eth.DecodeIPv4Header(payload[eth.SizeEthernetHeader:])
-	if ihdr.ToS != 0 {
-		return errors.New("ToS not supported")
-	} else if ihdr.Version() != 4 {
+	ihl := ihdr.IHL()
+	if ihdr.Version() != 4 {
 		return errors.New("IP version not supported")
-	} else if ihdr.IHL() < 5 {
+	} else if ihl < 5 {
 		return errors.New("bad IHL")
 	} else if s.IP != nil && string(ihdr.Destination[:]) != string(s.IP) {
 		return nil // Not for us.
 	}
 
 	// Handle UDP/TCP packets.
-	offset := eth.SizeEthernetHeader + 4*ihdr.IHL() // Can be at most 14+60=74, so no overflow risk.
+	offset := eth.SizeEthernetHeader + 4*ihl // Can be at most 14+60=74, so no overflow risk.
 	end := eth.SizeEthernetHeader + ihdr.TotalLength
 	if len(payload) < int(end) || end < uint16(offset) {
 		return errors.New("short payload buffer or bad IP TotalLength")
@@ -262,6 +267,9 @@ func (s *Stack) RecvEth(payload []byte) (err error) {
 		// TODO
 	}
 	s.debug("Stack.RecvEth:success")
+	if s.GlobalHandler != nil {
+		s.GlobalHandler(ethernetFrame)
+	}
 	return nil
 }
 
@@ -273,17 +281,28 @@ func (s *Stack) RecvEth(payload []byte) (err error) {
 // If a handler returns any other error the port is closed.
 func (s *Stack) HandleEth(dst []byte) (n int, err error) {
 	if len(dst) < _MTU {
-		return
+		return 0, io.ErrShortBuffer
 	}
-	s.info("HandleEth", slog.Int("dstlen", len(dst)))
 	if s.pendingUDPv4 == 0 && s.pendingTCPv4 == 0 {
 		return 0, nil // No packets to handle
 	}
+	s.info("HandleEth", slog.Int("dstlen", len(dst)))
 	if s.pendingUDPv4 > 0 {
 		for i := range s.UDPv4 {
 			socket := &s.UDPv4[i]
-			n, err = tryHandleEth(socket, dst)
+			if !socket.IsPendingHandling() {
+				return 0, nil
+			}
+			// Socket has an unhandled packet.
+			n, err = socket.HandleEth(dst)
+			if err == io.ErrNoProgress {
+				n = 0
+				err = nil
+				continue
+			}
+			s.pendingUDPv4--
 			if err != nil {
+				socket.Close()
 				return 0, err
 			}
 			if n == 0 {
@@ -312,21 +331,6 @@ func (s *Stack) error(msg string, attrs ...slog.Attr) {
 
 func (s *Stack) debug(msg string, attrs ...slog.Attr) {
 	logAttrsPrint(slog.LevelDebug, msg, attrs...)
-}
-
-func tryHandleEth(socket socketEth, dst []byte) (n int, err error) {
-	if !socket.IsPendingHandling() {
-		return 0, nil
-	}
-	// Socket has an unhandled packet.
-	n, err = socket.HandleEth(dst)
-	if err != nil {
-		if err == io.ErrNoProgress {
-			err = nil // Ignore NoProgress
-		}
-		return 0, err
-	}
-	return n, nil
 }
 
 func logAttrsPrint(level slog.Level, msg string, attrs ...slog.Attr) {

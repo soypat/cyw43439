@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/soypat/cyw43439/cyrw"
@@ -50,6 +51,9 @@ func main() {
 		MAC:         nil,
 		MaxUDPConns: 2,
 	})
+	// stack.GlobalHandler = func(b []byte) {
+	// 	println("NEW payload:\n", hex.Dump(b))
+	// }
 	dev.RecvEthHandle(stack.RecvEth)
 	for {
 		println("Trying DoDHCP")
@@ -93,7 +97,12 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	)
 	state := none
 	err := s.OpenUDP(68, func(u *tcpctl.UDPPacket, b []byte) (int, error) {
-		println("UDP payload:", hex.Dump(u.Payload()))
+		payload := u.Payload()
+		if payload == nil {
+			fmt.Printf("\n%+v\n%+v\n", u.IP, u.UDP)
+			return 0, errors.New("nil payload")
+		}
+		print("UDP payload:\n", hex.Dump(payload), "\n\n")
 		return 0, nil
 	})
 	if err != nil {
@@ -166,6 +175,10 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 		return err
 	}
 	for retry := 0; retry < 20 && state == none; retry++ {
+		_, err = stack.HandleEth(txbuf[:])
+		if err != nil {
+			return err
+		}
 		time.Sleep(50 * time.Millisecond)
 		// We should see received packets received on callback passed into OpenUDP.
 	}
