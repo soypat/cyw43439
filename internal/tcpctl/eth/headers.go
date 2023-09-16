@@ -672,3 +672,37 @@ func DecodeDHCPHeader(src []byte) (d DHCPHeader) {
 	copy(d.CHAddr[:], src[28:44])
 	return d
 }
+
+func (d *DHCPHeader) String() (s string) {
+	s = "DHCP op=" + strconv.Itoa(int(d.OP)) + " "
+	if d.CIAddr != [4]byte{} {
+		s += "ciaddr=" + net.IP(d.CIAddr[:]).String() + " "
+	}
+	if d.YIAddr != [4]byte{} {
+		s += "yiaddr=" + net.IP(d.YIAddr[:]).String() + " "
+	}
+	if d.SIAddr != [4]byte{} {
+		s += "siaddr=" + net.IP(d.SIAddr[:]).String() + " "
+	}
+	if d.GIAddr != [4]byte{} {
+		s += "giaddr=" + net.IP(d.GIAddr[:]).String() + " "
+	}
+	if d.CHAddr != [16]byte{} && d.HLen < 16 && d.HLen > 0 {
+		s += "chaddr=" + net.HardwareAddr(d.CHAddr[:d.HLen]).String() + " "
+	}
+	return s
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b byte) byte {
+	if a < b {
+		return a
+	}
+	return b
+}

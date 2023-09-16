@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -90,29 +90,76 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	// States
 	const (
 		none = iota
-		discover
 		offer
-		request
 		ack
+		myXid = 0x12345678
+
+		sizeSName     = 64  // Server name, part of BOOTP too.
+		sizeFILE      = 128 // Boot file name, Legacy.
+		sizeOptions   = 312
+		dhcpOffset    = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeUDPHeader
+		optionsStart  = dhcpOffset + eth.SizeDHCPHeader + sizeSName + sizeFILE
+		sizeDHCPTotal = eth.SizeDHCPHeader + sizeSName + sizeFILE + sizeOptions
 	)
 	state := none
-	err := s.OpenUDP(68, func(u *tcpctl.UDPPacket, b []byte) (int, error) {
+
+	var dhdr eth.DHCPHeader
+	var ehdr eth.EthernetHeader
+	var ihdr eth.IPv4Header
+	var uhdr eth.UDPHeader
+	mac := dev.MAC()
+	err := s.OpenUDP(68, func(u *tcpctl.UDPPacket, response []byte) (n int, _ error) {
 		payload := u.Payload()
-		if payload == nil {
+		if payload == nil || len(payload) < eth.SizeDHCPHeader {
 			fmt.Printf("\n%+v\n%+v\n", u.IP, u.UDP)
 			return 0, errors.New("nil payload")
 		}
-		print("UDP payload:\n", hex.Dump(payload), "\n\n")
-		return 0, nil
+
+		dhdr = eth.DecodeDHCPHeader(payload)
+
+		println(time.Since(lastTx).String(), dhdr.String())
+		switch {
+		case state == none && dhdr.OP == 2 && bytes.Equal(mac, dhdr.CHAddr[:6]) && dhdr.Xid == myXid:
+			state = offer
+			dhdr.OP = 1
+			dhdr.YIAddr, dhdr.CIAddr = [4]byte{}, [4]byte{}
+			dhdr.Put(response[dhcpOffset:])
+			ptr := optionsStart
+			binary.BigEndian.PutUint32(response[ptr:], 0x63825363) // Magic cookie.
+			ptr += 4
+			// DHCP options.
+			ptr += encodeDHCPOption(response[ptr:], 53, []byte{3}) // DHCP Message Type: Request
+			ptr += encodeDHCPOption(response[ptr:], 50, dhdr.YIAddr[:])
+			ptr += encodeDHCPOption(response[ptr:], 54, dhdr.SIAddr[:])
+			response[ptr] = 0xff // endmark
+			ptr++
+
+			// IPv4 header remains the same.
+			uhdr.Checksum = uhdr.CalculateChecksumIPv4(&ihdr, response[dhcpOffset:])
+			uhdr.Put(response[eth.SizeEthernetHeader+eth.SizeIPv4Header:])
+			ihdr.Checksum = ihdr.CalculateChecksum()
+			ihdr.Put(response[eth.SizeEthernetHeader:])
+			ehdr.Put(response[:])
+			for i := dhcpOffset + eth.SizeDHCPHeader; i < len(response); i++ {
+				response[i] = 0
+			}
+			binary.BigEndian.PutUint32(response[dhcpOffset+eth.SizeDHCPHeader+4:], 0x63825363) // Magic cookie.
+			n = sizeDHCPTotal
+
+		case state == offer && dhdr.OP == 2 && bytes.Equal(mac, dhdr.CHAddr[:6]) && dhdr.Xid == myXid:
+			state = ack
+			println("\nACK received")
+		default:
+			return 0, errors.New("unexpected DHCP packet")
+		}
+		println("\nSENDING ", n, "BYTES\n\n")
+		lastTx = time.Now()
+		return n, nil
 	})
 	if err != nil {
 		return err
 	}
 	defer s.CloseUDP(68)
-	var ehdr eth.EthernetHeader
-	var ihdr eth.IPv4Header
-	var uhdr eth.UDPHeader
-	var dhdr eth.DHCPHeader
 
 	copy(ehdr.Destination[:], eth.BroadcastHW())
 	copy(ehdr.Source[:], dev.MAC())
@@ -121,12 +168,7 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	copy(ihdr.Destination[:], eth.BroadcastHW())
 	ihdr.Protocol = 17
 	ihdr.TTL = 64
-	const (
-		sizeSName     = 64  // Server name, part of BOOTP too.
-		sizeFILE      = 128 // Boot file name, Legacy.
-		sizeOptions   = 312
-		sizeDHCPTotal = eth.SizeDHCPHeader + sizeSName + sizeFILE + sizeOptions
-	)
+
 	ihdr.TotalLength = uint16(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
 	ihdr.ID = 12345
 	ihdr.VersionAndIHL = 5 // Sets IHL: No IP options. Version set automatically.
@@ -140,8 +182,8 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	dhdr.OP = 1
 	dhdr.HType = 1
 	dhdr.HLen = 6
-	dhdr.Xid = 0x12345678
-	mac := dev.MAC()
+	dhdr.Xid = myXid
+
 	copy(dhdr.CHAddr[:], mac[:])
 	dhdr.Put(dhcppayload[:])
 
@@ -160,7 +202,6 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	dhcppayload[ptr] = 0xff                                                 // endmark
 	ptr++
 
-	const typicalSize = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeUDPHeader + sizeDHCPTotal
 	totalSize := eth.SizeEthernetHeader + int(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
 	// Calculate Checksums:
 	uhdr.CalculateChecksumIPv4(&ihdr, dhcppayload[:ptr])
@@ -169,18 +210,24 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 	ihdr.Checksum = ihdr.CalculateChecksum()
 	ihdr.Put(txbuf[eth.SizeEthernetHeader:])
 	ehdr.Put(txbuf[:])
-
+	lastTx = time.Now()
 	err = dev.SendEth(txbuf[:totalSize])
 	if err != nil {
 		return err
 	}
-	for retry := 0; retry < 20 && state == none; retry++ {
-		_, err = stack.HandleEth(txbuf[:])
+	for retry := 0; retry < 20 && state < ack; retry++ {
+		n, err := stack.HandleEth(txbuf[:])
 		if err != nil {
 			return err
 		}
-		time.Sleep(50 * time.Millisecond)
-		// We should see received packets received on callback passed into OpenUDP.
+		if n == 0 {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		err = dev.SendEth(txbuf[:n])
+		if err != nil {
+			return err
+		}
 	}
 	if state < ack {
 		return errors.New("DoDHCP failed")

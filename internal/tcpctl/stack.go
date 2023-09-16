@@ -129,7 +129,12 @@ type Stack struct {
 	processedPackets uint32
 }
 
+// OpenUDP opens a UDP port and sets the handler. If the port is already open
+// or if there is no socket available it returns an error.
 func (s *Stack) OpenUDP(port uint16, handler func(*UDPPacket, []byte) (int, error)) error {
+	if port == 0 {
+		panic("invalid port number")
+	}
 	availIdx := -1
 	for i := range s.UDPv4 {
 		socket := &s.UDPv4[i]
@@ -148,6 +153,9 @@ func (s *Stack) OpenUDP(port uint16, handler func(*UDPPacket, []byte) (int, erro
 }
 
 func (s *Stack) CloseUDP(port uint16) error {
+	if port == 0 {
+		panic("invalid port number")
+	}
 	for i := range s.UDPv4 {
 		socket := &s.UDPv4[i]
 		if socket.Port == port {
@@ -191,7 +199,7 @@ func (s *Stack) RecvEth(ethernetFrame []byte) (err error) {
 	if s.MAC != nil && !eth.IsBroadcastHW(ehdr.Destination[:]) && !bytes.Equal(ehdr.Destination[:], s.MAC) {
 		return nil // Ignore packet, is not for us.
 	} else if ehdr.AssertType() != eth.EtherTypeIPv4 {
-		return errNotIPv4
+		return nil // Ignore Non-IPv4 packets.
 	}
 
 	// IP parsing block.

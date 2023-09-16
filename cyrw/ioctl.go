@@ -456,6 +456,9 @@ func (d *Device) rxEvent(packet []byte) error {
 	}
 	bdcHdr := whd.DecodeBDCHeader(packet)
 	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
+	if packetStart > len(packet) {
+		return errors.New("rxEvent: invalid BDC header length")
+	}
 	bdcPacket := packet[packetStart:]
 
 	d.debug("rxEvent",
