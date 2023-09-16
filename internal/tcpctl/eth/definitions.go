@@ -109,8 +109,8 @@ const (
 	DHCPRequestedIPaddress          DHCPOption = 50
 	DHCPIPAddressLeaseTime          DHCPOption = 51
 	DHCPOptionOverload              DHCPOption = 52
-	DHCPDHCPMessageType             DHCPOption = 53
-	DHCPDHCPServerIdentification    DHCPOption = 54
+	DHCPMessageType                 DHCPOption = 53
+	DHCPServerIdentification        DHCPOption = 54
 	DHCPParameterRequestList        DHCPOption = 55
 	DHCPMessage                     DHCPOption = 56
 	DHCPMaximumMessageSize          DHCPOption = 57

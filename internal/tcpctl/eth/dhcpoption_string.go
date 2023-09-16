@@ -61,8 +61,8 @@ func _() {
 	_ = x[DHCPRequestedIPaddress-50]
 	_ = x[DHCPIPAddressLeaseTime-51]
 	_ = x[DHCPOptionOverload-52]
-	_ = x[DHCPDHCPMessageType-53]
-	_ = x[DHCPDHCPServerIdentification-54]
+	_ = x[DHCPMessageType-53]
+	_ = x[DHCPServerIdentification-54]
 	_ = x[DHCPParameterRequestList-55]
 	_ = x[DHCPMessage-56]
 	_ = x[DHCPMaximumMessageSize-57]
@@ -72,9 +72,9 @@ func _() {
 	_ = x[DHCPClientIdentifier1-61]
 }
 
-const _DHCPOption_name = "WordAlignedSubnetMaskTimeOffsetRouterTimeServersNameServersDNSServersLogServersCookieServersLPRServersImpressServersRLPServersHostNameBootFileSizeMeritDumpFileDomainNameSwapServerRootPathExtensionFileIPLayerForwardingSrcrouteenablerPolicyFilterMaximumDGReassemblySizeDefaultIPTTLPathMTUAgingTimeoutMTUPlateauInterfaceMTUSizeAllSubnetsAreLocalBroadcastAddressPerformMaskDiscoveryProvideMasktoOthersPerformRouterDiscoveryRouterSolicitationAddressStaticRoutingTableTrailerEncapsulationARPCacheTimeoutEthernetEncapsulationDefaultTCPTimetoLiveTCPKeepaliveIntervalTCPKeepaliveGarbageNISDomainNameNISServerAddressesNTPServersAddressesVendorSpecificInformationNetBIOSNameServerNetBIOSDatagramDistributionNetBIOSNodeTypeNetBIOSScopeXWindowFontServerXWindowDisplayManagerRequestedIPaddressIPAddressLeaseTimeOptionOverloadDHCPMessageTypeDHCPServerIdentificationParameterRequestListMessageMaximumMessageSizeRenewTimeValueRebindingTimeValueClientIdentifierClientIdentifier1"
+const _DHCPOption_name = "WordAlignedSubnetMaskTimeOffsetRouterTimeServersNameServersDNSServersLogServersCookieServersLPRServersImpressServersRLPServersHostNameBootFileSizeMeritDumpFileDomainNameSwapServerRootPathExtensionFileIPLayerForwardingSrcrouteenablerPolicyFilterMaximumDGReassemblySizeDefaultIPTTLPathMTUAgingTimeoutMTUPlateauInterfaceMTUSizeAllSubnetsAreLocalBroadcastAddressPerformMaskDiscoveryProvideMasktoOthersPerformRouterDiscoveryRouterSolicitationAddressStaticRoutingTableTrailerEncapsulationARPCacheTimeoutEthernetEncapsulationDefaultTCPTimetoLiveTCPKeepaliveIntervalTCPKeepaliveGarbageNISDomainNameNISServerAddressesNTPServersAddressesVendorSpecificInformationNetBIOSNameServerNetBIOSDatagramDistributionNetBIOSNodeTypeNetBIOSScopeXWindowFontServerXWindowDisplayManagerRequestedIPaddressIPAddressLeaseTimeOptionOverloadMessageTypeServerIdentificationParameterRequestListMessageMaximumMessageSizeRenewTimeValueRebindingTimeValueClientIdentifierClientIdentifier1"
 
-var _DHCPOption_index = [...]uint16{0, 11, 21, 31, 37, 48, 59, 69, 79, 92, 102, 116, 126, 134, 146, 159, 169, 179, 187, 200, 217, 232, 244, 267, 279, 298, 308, 324, 342, 358, 378, 397, 419, 444, 462, 482, 497, 518, 538, 558, 577, 590, 608, 627, 652, 669, 696, 711, 723, 740, 761, 779, 797, 811, 826, 850, 870, 877, 895, 909, 927, 943, 960}
+var _DHCPOption_index = [...]uint16{0, 11, 21, 31, 37, 48, 59, 69, 79, 92, 102, 116, 126, 134, 146, 159, 169, 179, 187, 200, 217, 232, 244, 267, 279, 298, 308, 324, 342, 358, 378, 397, 419, 444, 462, 482, 497, 518, 538, 558, 577, 590, 608, 627, 652, 669, 696, 711, 723, 740, 761, 779, 797, 811, 822, 842, 862, 869, 887, 901, 919, 935, 952}
 
 func (i DHCPOption) String() string {
 	if i >= DHCPOption(len(_DHCPOption_index)-1) {
