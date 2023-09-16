@@ -470,12 +470,19 @@ func (tcphdr *TCPHeader) Put(buf []byte) {
 	binary.BigEndian.PutUint16(buf[18:], tcphdr.UrgentPtr)
 }
 
+// Offset specifies the size of the TCP header in 32-bit words. The minimum size
+// header is 5 words and the maximum is 15 words thus giving the minimum size of
+// 20 bytes and maximum of 60 bytes, allowing for up to 40 bytes of options in
+// the header. This field gets its name from the fact that it is also the offset
+// from the start of the TCP segment to the actual data.
 func (tcphdr *TCPHeader) Offset() (tcpWords uint8) {
 	return uint8(tcphdr.OffsetAndFlags[0] >> (8 + 4))
 }
 
-func (tcphdr *TCPHeader) OffsetInBytes() (offsetInBytes uint16) {
-	return uint16(tcphdr.Offset()) * tcpWordlen
+// OffsetInBytes returns the size of the TCP header in bytes, including options.
+// See [TCPHeader.Offset] for more information.
+func (tcphdr *TCPHeader) OffsetInBytes() uint8 {
+	return tcphdr.Offset() * tcpWordlen
 }
 
 func (tcphdr *TCPHeader) Flags() TCPFlags {
@@ -493,17 +500,6 @@ func (tcphdr *TCPHeader) SetOffset(tcpWords uint8) {
 	}
 	onlyFlags := tcphdr.OffsetAndFlags[0] & tcpFlagmask
 	tcphdr.OffsetAndFlags[0] |= onlyFlags | (uint16(tcpWords) << 12)
-}
-
-// FrameLength returns the size of the TCP frame as described by tcphdr and
-// payloadLength, which is the size of the TCP payload not including the TCP options.
-func (tcphdr *TCPHeader) FrameLength(payloadLength uint16) uint16 {
-	return tcphdr.OffsetInBytes() + payloadLength
-}
-
-// OptionsLength returns the length of the options section
-func (tcphdr *TCPHeader) OptionsLength() uint16 {
-	return tcphdr.OffsetInBytes()*tcpWordlen - 20
 }
 
 // CalculateChecksumIPv4 calculates the checksum of the TCP header, options and payload.

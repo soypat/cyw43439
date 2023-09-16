@@ -48,9 +48,7 @@ func main() {
 		MAC:         nil,
 		MaxUDPConns: 2,
 	})
-	// stack.GlobalHandler = func(b []byte) {
-	// 	println("NEW payload:\n", hex.Dump(b))
-	// }
+
 	dev.RecvEthHandle(stack.RecvEth)
 	for {
 		println("Trying DoDHCP")

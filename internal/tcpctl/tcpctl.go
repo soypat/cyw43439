@@ -107,7 +107,7 @@ func (s *TCPSocket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err er
 	if nb < 20 {
 		return 0, 0, errors.New("garbage TCP.Offset")
 	}
-	payloadStart = nb + eth.SizeIPv4Header
+	payloadStart = uint16(nb + eth.SizeIPv4Header)
 	if payloadStart > buflen {
 		return 0, 0, fmt.Errorf("malformed packet, got payload offset %d/%d", payloadStart, buflen)
 	}
