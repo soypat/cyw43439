@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/soypat/cyw43439/cyrw"
@@ -63,7 +64,7 @@ func main() {
 			break
 		}
 		println(err.Error())
-		time.Sleep(5 * time.Second)
+		time.Sleep(8 * time.Second)
 	}
 
 	println("finished init OK")
@@ -85,6 +86,13 @@ func main() {
 var (
 	stack *tcpctl.Stack
 	txbuf [1500]byte
+)
+
+const (
+	StateNone = iota
+	StateWaitOffer
+	StateWaitAck
+	StateDone
 )
 
 func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
@@ -113,6 +121,9 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 			return err
 		}
 	}
+	if dc.State != StateDone {
+		return errors.New("DHCP did not complete, state=" + strconv.Itoa(int(dc.State)))
+	}
 	return nil
 }
 
@@ -129,9 +140,6 @@ type DHCPClient struct {
 func (d *DHCPClient) HandleUDP(resp []byte, packet *tcpctl.UDPPacket) (_ int, err error) {
 	println("HandleUDP called", packet.HasPacket())
 	const (
-		StateNone = iota
-		StateWaitOffer
-		StateWaitAck
 		xid = 0x12345678
 
 		sizeSName     = 64  // Server name, part of BOOTP too.
