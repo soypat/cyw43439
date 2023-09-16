@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/soypat/cyw43439/cyrw"
@@ -153,7 +155,17 @@ func (d *DHCPClient) HandleUDP(resp []byte, packet *tcpctl.UDPPacket) (_ int, er
 	var rcvHdr eth.DHCPHeader
 	if hasPacket {
 		rcvHdr = eth.DecodeDHCPHeader(incpayload)
-		println("DHCP packet received", rcvHdr.String(), "\n")
+		println("DHCP packet received", rcvHdr.String(), "\n", hex.Dump(incpayload))
+		ptr := eth.SizeDHCPHeader + sizeSName + sizeFILE + 4
+		for ptr+1 < len(incpayload) && int(incpayload[ptr+1]) < len(incpayload) {
+			if incpayload[ptr] == 0xff {
+				break
+			}
+			optlen := incpayload[ptr+1]
+			// optionData := incpayload[ptr+2 : ptr+2+int(optlen)]
+			println("DHCP Option received", incpayload[ptr], "len", optlen)
+			ptr += int(optlen) + 2
+		}
 	}
 
 	// Switch statement prepares DHCP response depending on whether we're waiting
@@ -166,8 +178,7 @@ func (d *DHCPClient) HandleUDP(resp []byte, packet *tcpctl.UDPPacket) (_ int, er
 	switch {
 	case !hasPacket && d.State == StateNone:
 		println("sending discover")
-		// No state change, we should expect to receive a packet next.
-		d.setOurHeader(xid)
+		d.initOurHeader(xid)
 		// DHCP options.
 		Options = []option{
 			{53, []byte{1}},               // DHCP Message Type: Discover
@@ -175,14 +186,18 @@ func (d *DHCPClient) HandleUDP(resp []byte, packet *tcpctl.UDPPacket) (_ int, er
 			{55, []byte{1, 3, 15, 6}},     // Parameter request list
 		}
 		d.State = StateWaitOffer
+
 	case hasPacket && d.State == StateWaitOffer:
-		println("Possible offer received")
-		copy(d.YourIP[:], rcvHdr.YIAddr[:])
+		offer := net.IP(rcvHdr.YIAddr[:])
+		println("Possible offer received for", offer.String())
 		Options = []option{
 			{53, []byte{3}},        // DHCP Message Type: Request
-			{50, rcvHdr.YIAddr[:]}, // Requested IP
+			{50, offer},            // Requested IP
 			{54, rcvHdr.SIAddr[:]}, // DHCP server IP
 		}
+		// Accept this server's offer.
+		copy(d.ourHeader.SIAddr[:], rcvHdr.SIAddr[:])
+		copy(d.YourIP[:], offer) // Store our new IP.
 		d.State = StateWaitAck
 	default:
 		err = fmt.Errorf("UNHANDLED CASE %v %+v", hasPacket, d)
@@ -210,8 +225,8 @@ func (d *DHCPClient) HandleUDP(resp []byte, packet *tcpctl.UDPPacket) (_ int, er
 	return dhcpOffset + sizeDHCPTotal, nil
 }
 
-// setOurHeader zero's out most of header and sets the xid and MAC address along with OP=1.
-func (d *DHCPClient) setOurHeader(xid uint32) {
+// initOurHeader zero's out most of header and sets the xid and MAC address along with OP=1.
+func (d *DHCPClient) initOurHeader(xid uint32) {
 	dhdr := &d.ourHeader
 	dhdr.OP = 1
 	dhdr.HType = 1
