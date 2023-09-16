@@ -52,13 +52,13 @@ func (u *udpSocket) HandleEth(dst []byte) (int, error) {
 	}
 	packet := &u.packets[0]
 
-	n, err := u.handler(&u.packets[0], dst)
+	n, err := u.handler(dst, &u.packets[0])
 	packet.Rx = time.Time{} // Invalidate packet.
 	return n, err
 }
 
 // Open sets the UDP handler and opens the port.
-func (u *udpSocket) Open(port uint16, h func(*UDPPacket, []byte) (int, error)) {
+func (u *udpSocket) Open(port uint16, h func([]byte, *UDPPacket) (int, error)) {
 	if port == 0 || h == nil {
 		panic("invalid port or nil handler" + strconv.Itoa(int(u.Port)))
 	}
@@ -73,9 +73,25 @@ func (u *udpSocket) Close() {
 	}
 }
 
+// UDP socket can be forced to respond even if no packet has been received
+// by flagging the packet's Rx time with non-zero value.
+var forcedTime = (time.Time{}).Add(1)
+
+func (u *udpSocket) forceResponse() (added bool) {
+	if !u.IsPendingHandling() {
+		added = true
+		u.packets[0].Rx = forcedTime
+	}
+	return added
+}
+
+func (u *UDPPacket) HasPacket() bool {
+	return u.Rx != forcedTime && !u.Rx.IsZero()
+}
+
 type udpSocket struct {
 	LastRx  time.Time
-	handler func(self *UDPPacket, response []byte) (int, error)
+	handler func(response []byte, self *UDPPacket) (int, error)
 	Port    uint16
 	packets [1]UDPPacket
 }
@@ -88,8 +104,21 @@ type UDPPacket struct {
 	payload [_MTU - eth.SizeEthernetHeader - eth.SizeIPv4Header - eth.SizeUDPHeader]byte
 }
 
+func (p *UDPPacket) PutHeaders(b []byte) {
+	if len(b) < eth.SizeEthernetHeader+eth.SizeIPv4Header+eth.SizeUDPHeader {
+		panic("short UDPPacket buffer")
+	}
+	p.Eth.Put(b)
+	p.IP.Put(b[eth.SizeEthernetHeader:])
+	p.UDP.Put(b[eth.SizeEthernetHeader+eth.SizeIPv4Header:])
+}
+
 // Payload returns the UDP payload. If UDP or IPv4 header data is incorrect/bad it returns nil.
+// If the response is "forced" then payload will be nil.
 func (p *UDPPacket) Payload() []byte {
+	if !p.HasPacket() {
+		return nil
+	}
 	ipLen := int(p.IP.TotalLength) - int(p.IP.IHL()*4) - eth.SizeUDPHeader // Total length(including header) - header length = payload length
 	uLen := int(p.UDP.Length) - eth.SizeUDPHeader
 	if ipLen != uLen || uLen > len(p.payload) {
@@ -131,7 +160,7 @@ type Stack struct {
 
 // OpenUDP opens a UDP port and sets the handler. If the port is already open
 // or if there is no socket available it returns an error.
-func (s *Stack) OpenUDP(port uint16, handler func(*UDPPacket, []byte) (int, error)) error {
+func (s *Stack) OpenUDP(port uint16, handler func([]byte, *UDPPacket) (int, error)) error {
 	if port == 0 {
 		panic("invalid port number")
 	}
@@ -152,18 +181,40 @@ func (s *Stack) OpenUDP(port uint16, handler func(*UDPPacket, []byte) (int, erro
 	return nil
 }
 
+func (s *Stack) FlagUDPPending(port uint16) error {
+	if port == 0 {
+		panic("invalid port number")
+	}
+	socket := s.getUDP(port)
+	if socket == nil {
+		return errNoSocketAvail
+	}
+	if socket.forceResponse() {
+		s.pendingUDPv4++
+	}
+	return nil
+}
+
 func (s *Stack) CloseUDP(port uint16) error {
 	if port == 0 {
 		panic("invalid port number")
 	}
+	socket := s.getUDP(port)
+	if socket == nil {
+		return errNoSocketAvail
+	}
+	socket.Close()
+	return nil
+}
+
+func (s *Stack) getUDP(port uint16) *udpSocket {
 	for i := range s.UDPv4 {
 		socket := &s.UDPv4[i]
 		if socket.Port == port {
-			socket.Close()
-			return nil
+			return socket
 		}
 	}
-	return errNoSocketAvail
+	return nil
 }
 
 // Common errors.

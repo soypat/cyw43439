@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -87,135 +86,18 @@ var (
 )
 
 func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
-	// States
-	const (
-		none = iota
-		offer
-		ack
-		myXid = 0x12345678
-
-		sizeSName     = 64  // Server name, part of BOOTP too.
-		sizeFILE      = 128 // Boot file name, Legacy.
-		sizeOptions   = 312
-		dhcpOffset    = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeUDPHeader
-		optionsStart  = dhcpOffset + eth.SizeDHCPHeader + sizeSName + sizeFILE
-		sizeDHCPTotal = eth.SizeDHCPHeader + sizeSName + sizeFILE + sizeOptions
-	)
-	state := none
-
-	var dhdr eth.DHCPHeader
-	var ehdr eth.EthernetHeader
-	var ihdr eth.IPv4Header
-	var uhdr eth.UDPHeader
-	mac := dev.MAC()
-	err := s.OpenUDP(68, func(u *tcpctl.UDPPacket, response []byte) (n int, _ error) {
-		payload := u.Payload()
-		if payload == nil || len(payload) < eth.SizeDHCPHeader {
-			fmt.Printf("\n%+v\n%+v\n", u.IP, u.UDP)
-			return 0, errors.New("nil payload")
-		}
-
-		dhdr = eth.DecodeDHCPHeader(payload)
-
-		println(time.Since(lastTx).String(), dhdr.String())
-		switch {
-		case state == none && dhdr.OP == 2 && bytes.Equal(mac, dhdr.CHAddr[:6]) && dhdr.Xid == myXid:
-			state = offer
-			dhdr.OP = 1
-			dhdr.YIAddr, dhdr.CIAddr = [4]byte{}, [4]byte{}
-			dhdr.Put(response[dhcpOffset:])
-			ptr := optionsStart
-			binary.BigEndian.PutUint32(response[ptr:], 0x63825363) // Magic cookie.
-			ptr += 4
-			// DHCP options.
-			ptr += encodeDHCPOption(response[ptr:], 53, []byte{3}) // DHCP Message Type: Request
-			ptr += encodeDHCPOption(response[ptr:], 50, dhdr.YIAddr[:])
-			ptr += encodeDHCPOption(response[ptr:], 54, dhdr.SIAddr[:])
-			response[ptr] = 0xff // endmark
-			ptr++
-
-			// IPv4 header remains the same.
-			uhdr.Checksum = uhdr.CalculateChecksumIPv4(&ihdr, response[dhcpOffset:])
-			uhdr.Put(response[eth.SizeEthernetHeader+eth.SizeIPv4Header:])
-			ihdr.Checksum = ihdr.CalculateChecksum()
-			ihdr.Put(response[eth.SizeEthernetHeader:])
-			ehdr.Put(response[:])
-			for i := dhcpOffset + eth.SizeDHCPHeader; i < len(response); i++ {
-				response[i] = 0
-			}
-			binary.BigEndian.PutUint32(response[dhcpOffset+eth.SizeDHCPHeader+4:], 0x63825363) // Magic cookie.
-			n = sizeDHCPTotal
-
-		case state == offer && dhdr.OP == 2 && bytes.Equal(mac, dhdr.CHAddr[:6]) && dhdr.Xid == myXid:
-			state = ack
-			println("\nACK received")
-		default:
-			return 0, errors.New("unexpected DHCP packet")
-		}
-		println("\nSENDING ", n, "BYTES\n\n")
-		lastTx = time.Now()
-		return n, nil
-	})
+	var dc DHCPClient
+	copy(dc.MAC[:], dev.MAC())
+	err := s.OpenUDP(68, dc.HandleUDP)
 	if err != nil {
 		return err
 	}
 	defer s.CloseUDP(68)
-
-	copy(ehdr.Destination[:], eth.BroadcastHW())
-	copy(ehdr.Source[:], dev.MAC())
-	ehdr.SizeOrEtherType = uint16(eth.EtherTypeIPv4)
-
-	copy(ihdr.Destination[:], eth.BroadcastHW())
-	ihdr.Protocol = 17
-	ihdr.TTL = 64
-
-	ihdr.TotalLength = uint16(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
-	ihdr.ID = 12345
-	ihdr.VersionAndIHL = 5 // Sets IHL: No IP options. Version set automatically.
-
-	uhdr.DestinationPort = 67
-	uhdr.SourcePort = 68
-	uhdr.Length = ihdr.TotalLength - eth.SizeIPv4Header
-
-	dhcppayload := txbuf[eth.SizeEthernetHeader+4*ihdr.IHL()+eth.SizeUDPHeader:]
-
-	dhdr.OP = 1
-	dhdr.HType = 1
-	dhdr.HLen = 6
-	dhdr.Xid = myXid
-
-	copy(dhdr.CHAddr[:], mac[:])
-	dhdr.Put(dhcppayload[:])
-
-	// Encode DHCP options.
-	for i := eth.SizeDHCPHeader; i < len(dhcppayload); i++ {
-		dhcppayload[i] = 0 // Zero out BOOTP and options fields.
-	}
-	// Skip BOOTP fields.
-	ptr := eth.SizeDHCPHeader + sizeSName + sizeFILE
-	binary.BigEndian.PutUint32(dhcppayload[ptr:], 0x63825363) // Magic cookie.
-	ptr += 4
-	// DHCP options.
-	ptr += encodeDHCPOption(dhcppayload[ptr:], 53, []byte{1})               // DHCP Message Type: Discover
-	ptr += encodeDHCPOption(dhcppayload[ptr:], 50, []byte{192, 168, 1, 69}) // Requested IP
-	ptr += encodeDHCPOption(dhcppayload[ptr:], 55, []byte{1, 3, 15, 6})     // Parameter request list
-	dhcppayload[ptr] = 0xff                                                 // endmark
-	ptr++
-
-	totalSize := eth.SizeEthernetHeader + int(4*ihdr.IHL()) + eth.SizeUDPHeader + sizeDHCPTotal
-	// Calculate Checksums:
-	uhdr.CalculateChecksumIPv4(&ihdr, dhcppayload[:ptr])
-	udpOffset := eth.SizeEthernetHeader + 4*ihdr.IHL()
-	uhdr.Put(txbuf[udpOffset:])
-	ihdr.Checksum = ihdr.CalculateChecksum()
-	ihdr.Put(txbuf[eth.SizeEthernetHeader:])
-	ehdr.Put(txbuf[:])
-	lastTx = time.Now()
-	err = dev.SendEth(txbuf[:totalSize])
+	err = s.FlagUDPPending(68) // Force a DHCP discovery.
 	if err != nil {
 		return err
 	}
-	for retry := 0; retry < 20 && state < ack; retry++ {
+	for retry := 0; retry < 20 && dc.State < 3; retry++ {
 		n, err := stack.HandleEth(txbuf[:])
 		if err != nil {
 			return err
@@ -229,10 +111,147 @@ func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
 			return err
 		}
 	}
-	if state < ack {
-		return errors.New("DoDHCP failed")
-	}
 	return nil
+}
+
+type DHCPClient struct {
+	ourHeader eth.DHCPHeader
+	State     uint8
+	MAC       [6]byte
+	// The result IP of the DHCP transaction (our new IP).
+	YourIP [4]byte
+	// DHCP server IP
+	ServerIP [4]byte
+}
+
+func (d *DHCPClient) HandleUDP(resp []byte, packet *tcpctl.UDPPacket) (_ int, err error) {
+	println("HandleUDP called", packet.HasPacket())
+	const (
+		StateNone = iota
+		StateWaitOffer
+		StateWaitAck
+		xid = 0x12345678
+
+		sizeSName     = 64  // Server name, part of BOOTP too.
+		sizeFILE      = 128 // Boot file name, Legacy.
+		sizeOptions   = 312
+		dhcpOffset    = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeUDPHeader
+		optionsStart  = dhcpOffset + eth.SizeDHCPHeader + sizeSName + sizeFILE
+		sizeDHCPTotal = eth.SizeDHCPHeader + sizeSName + sizeFILE + sizeOptions
+	)
+	// First action is used to send data without having received a packet
+	// so hasPacket will be false.
+	hasPacket := packet.HasPacket()
+	incpayload := packet.Payload()
+	switch {
+	case len(resp) < sizeDHCPTotal:
+		return 0, errors.New("short payload to marshall DHCP")
+	case hasPacket && len(incpayload) < eth.SizeDHCPHeader:
+		return 0, errors.New("short payload to parse DHCP")
+	}
+
+	var rcvHdr eth.DHCPHeader
+	if hasPacket {
+		rcvHdr = eth.DecodeDHCPHeader(incpayload)
+		println("DHCP packet received", rcvHdr.String(), "\n")
+	}
+
+	// Switch statement prepares DHCP response depending on whether we're waiting
+	// for offer, ack or if we still need to send a discover (StateNone).
+	type option struct {
+		code byte
+		data []byte
+	}
+	var Options []option
+	switch {
+	case !hasPacket && d.State == StateNone:
+		println("sending discover")
+		// No state change, we should expect to receive a packet next.
+		d.setOurHeader(xid)
+		// DHCP options.
+		Options = []option{
+			{53, []byte{1}},               // DHCP Message Type: Discover
+			{50, []byte{192, 168, 1, 69}}, // Requested IP
+			{55, []byte{1, 3, 15, 6}},     // Parameter request list
+		}
+		d.State = StateWaitOffer
+	case hasPacket && d.State == StateWaitOffer:
+		println("Possible offer received")
+		copy(d.YourIP[:], rcvHdr.YIAddr[:])
+		Options = []option{
+			{53, []byte{3}},        // DHCP Message Type: Request
+			{50, rcvHdr.YIAddr[:]}, // Requested IP
+			{54, rcvHdr.SIAddr[:]}, // DHCP server IP
+		}
+		d.State = StateWaitAck
+	default:
+		err = fmt.Errorf("UNHANDLED CASE %v %+v", hasPacket, d)
+	}
+	if err != nil {
+		return 0, nil
+	}
+	for i := dhcpOffset + 14; i < len(resp); i++ {
+		resp[i] = 0 // Zero out BOOTP and options fields.
+	}
+	// Encode DHCP header + options.
+	d.ourHeader.Put(resp[dhcpOffset:])
+
+	ptr := optionsStart
+	binary.BigEndian.PutUint32(resp[ptr:], 0x63825363) // Magic cookie.
+	ptr += 4
+	for _, opt := range Options {
+		ptr += encodeDHCPOption(resp[ptr:], opt.code, opt.data)
+	}
+	resp[ptr] = 0xff // endmark
+	// Set Ethernet+IP+UDP headers.
+	payload := resp[dhcpOffset : dhcpOffset+sizeDHCPTotal]
+	d.setResponseUDP(packet, payload)
+	packet.PutHeaders(resp)
+	return dhcpOffset + sizeDHCPTotal, nil
+}
+
+// setOurHeader zero's out most of header and sets the xid and MAC address along with OP=1.
+func (d *DHCPClient) setOurHeader(xid uint32) {
+	dhdr := &d.ourHeader
+	dhdr.OP = 1
+	dhdr.HType = 1
+	dhdr.HLen = 6
+	dhdr.HOps = 0
+	dhdr.Secs = 0
+	dhdr.Flags = 0
+	dhdr.Xid = xid
+	dhdr.CIAddr = [4]byte{}
+	dhdr.YIAddr = [4]byte{}
+	dhdr.SIAddr = [4]byte{}
+	dhdr.GIAddr = [4]byte{}
+	copy(dhdr.CHAddr[:], d.MAC[:])
+}
+
+func (d *DHCPClient) setResponseUDP(packet *tcpctl.UDPPacket, payload []byte) {
+	const ipWordLen = 5
+	// Ethernet frame.
+	copy(packet.Eth.Destination[:], eth.BroadcastHW())
+	copy(packet.Eth.Source[:], d.MAC[:])
+	packet.Eth.SizeOrEtherType = uint16(eth.EtherTypeIPv4)
+
+	// IPv4 frame.
+	copy(packet.IP.Destination[:], eth.BroadcastHW())
+	packet.IP.Source = [4]byte{} // Source IP is always zeroed when client sends.
+	packet.IP.Protocol = 17      // UDP
+	packet.IP.TTL = 64
+	// 16bit Xorshift for prandom IP packet ID. https://en.wikipedia.org/wiki/Xorshift
+	packet.IP.ID ^= packet.IP.ID << 7
+	packet.IP.ID ^= packet.IP.ID >> 9
+	packet.IP.ID ^= packet.IP.ID << 8
+	packet.IP.VersionAndIHL = ipWordLen // Sets IHL: No IP options. Version set automatically.
+	packet.IP.TotalLength = 4*ipWordLen + eth.SizeUDPHeader + uint16(len(payload))
+	packet.IP.Checksum = packet.IP.CalculateChecksum()
+
+	// UDP frame.
+	packet.UDP.DestinationPort = 67
+	packet.UDP.SourcePort = 68
+	packet.UDP.Length = packet.IP.TotalLength - 4*ipWordLen
+	packet.UDP.Checksum = packet.UDP.CalculateChecksumIPv4(&packet.IP, payload)
 }
 
 func encodeDHCPOption(dst []byte, code byte, data []byte) int {
