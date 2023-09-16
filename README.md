@@ -2,11 +2,7 @@
 Driver for the Wifi+bluetooth integrated circuit on the pico.
 
 ## Contributions
-PRs welcome! I've paused my own development for now. If you want to contribute 
-feel free to file a issue for what you wish to contribute so I and others
-can be aware of ongoing work. This can also serve as a preliminary step 
-for API design vision.
-
+PRs welcome! Please read most recent developments on [this issue](https://github.com/tinygo-org/tinygo/issues/2947) before contributing.
 ## Development
 
 Compile and flash the development program to the currently connected Pico W by running:
