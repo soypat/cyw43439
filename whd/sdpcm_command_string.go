@@ -9,6 +9,7 @@ func _() {
 	// Re-run the stringer command to generate them again.
 	var x [1]struct{}
 	_ = x[WLC_UP-2]
+	_ = x[WLC_DOWN-3]
 	_ = x[WLC_SET_INFRA-20]
 	_ = x[WLC_SET_AUTH-22]
 	_ = x[WLC_GET_BSSID-23]
@@ -22,6 +23,7 @@ func _() {
 	_ = x[WLC_GET_PM-85]
 	_ = x[WLC_SET_PM-86]
 	_ = x[WLC_SET_GMODE-110]
+	_ = x[WLC_SET_AP-118]
 	_ = x[WLC_SET_WSEC-134]
 	_ = x[WLC_SET_BAND-142]
 	_ = x[WLC_GET_ASSOCLIST-159]
@@ -31,30 +33,32 @@ func _() {
 	_ = x[WLC_SET_WSEC_PMK-268]
 }
 
-const _SDPCMCommand_name = "UPSET_INFRASET_AUTHGET_BSSIDGET_SSIDSET_SSIDSET_CHANNELDISASSOCGET_ANTDIVSET_ANTDIVSET_DTIMPRDGET_PMSET_PMSET_GMODESET_WSECSET_BANDGET_ASSOCLISTSET_WPA_AUTHGET_VARSET_VARSET_WSEC_PMK"
+const _SDPCMCommand_name = "UPDOWNSET_INFRASET_AUTHGET_BSSIDGET_SSIDSET_SSIDSET_CHANNELDISASSOCGET_ANTDIVSET_ANTDIVSET_DTIMPRDGET_PMSET_PMSET_GMODESET_APSET_WSECSET_BANDGET_ASSOCLISTSET_WPA_AUTHGET_VARSET_VARSET_WSEC_PMK"
 
 var _SDPCMCommand_map = map[SDPCMCommand]string{
 	2:   _SDPCMCommand_name[0:2],
-	20:  _SDPCMCommand_name[2:11],
-	22:  _SDPCMCommand_name[11:19],
-	23:  _SDPCMCommand_name[19:28],
-	25:  _SDPCMCommand_name[28:36],
-	26:  _SDPCMCommand_name[36:44],
-	30:  _SDPCMCommand_name[44:55],
-	52:  _SDPCMCommand_name[55:63],
-	63:  _SDPCMCommand_name[63:73],
-	64:  _SDPCMCommand_name[73:83],
-	78:  _SDPCMCommand_name[83:94],
-	85:  _SDPCMCommand_name[94:100],
-	86:  _SDPCMCommand_name[100:106],
-	110: _SDPCMCommand_name[106:115],
-	134: _SDPCMCommand_name[115:123],
-	142: _SDPCMCommand_name[123:131],
-	159: _SDPCMCommand_name[131:144],
-	165: _SDPCMCommand_name[144:156],
-	262: _SDPCMCommand_name[156:163],
-	263: _SDPCMCommand_name[163:170],
-	268: _SDPCMCommand_name[170:182],
+	3:   _SDPCMCommand_name[2:6],
+	20:  _SDPCMCommand_name[6:15],
+	22:  _SDPCMCommand_name[15:23],
+	23:  _SDPCMCommand_name[23:32],
+	25:  _SDPCMCommand_name[32:40],
+	26:  _SDPCMCommand_name[40:48],
+	30:  _SDPCMCommand_name[48:59],
+	52:  _SDPCMCommand_name[59:67],
+	63:  _SDPCMCommand_name[67:77],
+	64:  _SDPCMCommand_name[77:87],
+	78:  _SDPCMCommand_name[87:98],
+	85:  _SDPCMCommand_name[98:104],
+	86:  _SDPCMCommand_name[104:110],
+	110: _SDPCMCommand_name[110:119],
+	118: _SDPCMCommand_name[119:125],
+	134: _SDPCMCommand_name[125:133],
+	142: _SDPCMCommand_name[133:141],
+	159: _SDPCMCommand_name[141:154],
+	165: _SDPCMCommand_name[154:166],
+	262: _SDPCMCommand_name[166:173],
+	263: _SDPCMCommand_name[173:180],
+	268: _SDPCMCommand_name[180:192],
 }
 
 func (i SDPCMCommand) String() string {

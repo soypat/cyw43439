@@ -217,6 +217,7 @@ type SDPCMCommand uint32
 
 const (
 	WLC_UP            SDPCMCommand = 2
+	WLC_DOWN          SDPCMCommand = 3
 	WLC_SET_INFRA     SDPCMCommand = 20
 	WLC_SET_AUTH      SDPCMCommand = 22
 	WLC_GET_BSSID     SDPCMCommand = 23
@@ -230,6 +231,7 @@ const (
 	WLC_GET_PM        SDPCMCommand = 85
 	WLC_SET_PM        SDPCMCommand = 86
 	WLC_SET_GMODE     SDPCMCommand = 110
+	WLC_SET_AP        SDPCMCommand = 118
 	WLC_SET_WSEC      SDPCMCommand = 134
 	WLC_SET_BAND      SDPCMCommand = 142
 	WLC_GET_ASSOCLIST SDPCMCommand = 159
@@ -240,10 +242,10 @@ const (
 )
 
 func (cmd SDPCMCommand) IsValid() bool {
-	return cmd == WLC_UP || cmd == WLC_SET_INFRA || cmd == WLC_SET_AUTH || cmd == WLC_GET_BSSID ||
+	return cmd == WLC_UP || cmd == WLC_DOWN || cmd == WLC_SET_INFRA || cmd == WLC_SET_AUTH || cmd == WLC_GET_BSSID ||
 		cmd == WLC_GET_SSID || cmd == WLC_SET_SSID || cmd == WLC_SET_CHANNEL || cmd == WLC_DISASSOC ||
 		cmd == WLC_GET_ANTDIV || cmd == WLC_SET_ANTDIV || cmd == WLC_SET_DTIMPRD || cmd == WLC_GET_PM ||
-		cmd == WLC_SET_PM || cmd == WLC_SET_GMODE || cmd == WLC_SET_WSEC || cmd == WLC_SET_BAND ||
+		cmd == WLC_SET_PM || cmd == WLC_SET_GMODE || cmd == WLC_SET_AP || cmd == WLC_SET_WSEC || cmd == WLC_SET_BAND ||
 		cmd == WLC_GET_ASSOCLIST || cmd == WLC_SET_WPA_AUTH || cmd == WLC_SET_VAR || cmd == WLC_GET_VAR ||
 		cmd == WLC_SET_WSEC_PMK
 }
@@ -551,6 +553,12 @@ const (
 	CYW43_AUTH_WPA_TKIP_PSK   = 0x00200002 ///< WPA authorisation
 	CYW43_AUTH_WPA2_AES_PSK   = 0x00400004 ///< WPA2 authorisation (preferred)
 	CYW43_AUTH_WPA2_MIXED_PSK = 0x00400006 ///< WPA2/WPA mixed authorisation
+)
+
+// Passphrase min/max lengths
+const (
+	CYW43_MIN_PSK_LEN = 8
+	CYW43_MAX_PSK_LEN = 64
 )
 
 // Power save mode paramter passed to cyw43_ll_wifi_pm
