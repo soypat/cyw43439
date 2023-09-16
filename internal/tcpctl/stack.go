@@ -78,6 +78,7 @@ func (s *Stack) RecvEth(ethernetFrame []byte) (err error) {
 			s.error("Stack.RecvEth", slog.String("err", err.Error()), slog.Any("IP", ihdr))
 		} else {
 			s.lastRxSuccess = s.lastRx
+			s.GlobalHandler(ethernetFrame)
 		}
 	}()
 	payload := ethernetFrame
