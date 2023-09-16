@@ -77,15 +77,31 @@ type ARPv4Header struct {
 
 // IPv4Header is the Internet Protocol header. 20 bytes in size. Does not include options.
 type IPv4Header struct {
-	Version uint8 // 0:1
+	// VersionAndIHL contains union of both IP Version and IHL data.
+	//
+	// Version must be 4 for IPv4. It is force-set to its valid value in a call to Put.
+	//
 	// Internet Header Length (IHL) The IPv4 header is variable in size due to the
 	// optional 14th field (options). The IHL field contains the size of the IPv4 header;
 	// it has 4 bits that specify the number of 32-bit words in the header.
-	//
 	// The minimum value for this field is 5, which indicates a length of
 	// 5 × 32 bits = 160 bits = 20 bytes. As a 4-bit field, the maximum value is 15;
 	// this means that the maximum size of the IPv4 header is 15 × 32 bits = 480 bits = 60 bytes.
-	IHL uint8 // 1:2
+	VersionAndIHL uint8 // 0:1 (first 4 bits are version, last 4 bits are IHL)
+
+	// Type of Service contains Differential Services Code Point (DSCP) and
+	// Explicit Congestion Notification (ECN) union data.
+	//
+	// DSCP originally defined as the type of service (ToS), this field specifies
+	// differentiated services (DiffServ) per RFC 2474. Real-time data streaming
+	// makes use of the DSCP field. An example is Voice over IP (VoIP), which is
+	// used for interactive voice services.
+	//
+	// ECN is defined in RFC 3168 and allows end-to-end notification of
+	// network congestion without dropping packets. ECN is an optional feature available
+	// when both endpoints support it and effective when also supported by the underlying network.
+	ToS uint8 // 1:2 (first 6 bits are DSCP, last 2 bits are ECN)
+
 	// This 16-bit field defines the entire packet size in bytes, including header and data.
 	// The minimum size is 20 bytes (header without data) and the maximum is 65,535 bytes.
 	// All hosts are required to be able to reassemble datagrams of size up to 576 bytes,
@@ -95,19 +111,24 @@ type IPv4Header struct {
 	// must be fragmented. Fragmentation in IPv4 is performed in either the
 	// sending host or in routers. Reassembly is performed at the receiving host.
 	TotalLength uint16 // 2:4
+
 	// This field is an identification field and is primarily used for uniquely
 	// identifying the group of fragments of a single IP datagram.
 	ID uint16 // 4:6
+
 	// A three-bit field follows and is used to control or identify fragments.
 	//  - If the DF flag is set (bit 1), and fragmentation is required to route the packet, then the packet is dropped.
 	//  - For fragmented packets, all fragments except the last have the MF flag set (bit 2).
 	//  - Bit 0 is reserved and must be set to zero.
 	Flags IPFlags // 6:8
+
 	// An eight-bit time to live field limits a datagram's lifetime to prevent
-	// network failure in the event of a routing loop. When the datagram arrives
-	// at a router, the router decrements the TTL field by one. It is specified
-	// in seconds, but time intervals less than 1 second are rounded up to 1.
+	// network failure in the event of a routing loop. In practice, the field
+	// is used as a hop count—when the datagram arrives at a router,
+	// the router decrements the TTL field by one. When the TTL field hits zero,
+	// the router discards the packet and typically sends an ICMP time exceeded message to the sender.
 	TTL uint8 // 8:9
+
 	// This field defines the protocol used in the data portion of the IP datagram. TCP is 6, UDP is 17.
 	Protocol    uint8   // 9:10
 	Checksum    uint16  // 10:12
@@ -131,8 +152,37 @@ type TCPHeader struct {
 type UDPHeader struct {
 	SourcePort      uint16 // 0:2
 	DestinationPort uint16 // 2:4
-	Length          uint16 // 4:6
-	Checksum        uint16 // 6:8
+	// Length specifies length in bytes of UDP header and UDP payload. The minimum length
+	// is 8 bytes (UDP header length). This field should match the result of the IP header
+	// TotalLength field minus the IP header size: udp.Length == ip.TotalLength - 4*ip.IHL
+	Length   uint16 // 4:6
+	Checksum uint16 // 6:8
+}
+
+// DHCPHeader specifies the first 44 bytes of a DHCP packet payload. It does
+// not include BOOTP, magic cookie and options.
+// Reference: https://lists.gnu.org/archive/html/lwip-users/2012-12/msg00016.html
+type DHCPHeader struct {
+	OP    byte   // 0:1
+	HType byte   // 1:2
+	HLen  byte   // 2:3
+	HOps  byte   // 3:4
+	Xid   uint32 // 4:8
+	Secs  uint16 // 8:10
+	Flags uint16 // 10:12
+	// CIAddr is the client IP address. If the client has not obtained an IP
+	// address yet, this field is set to 0.
+	CIAddr [4]byte // 12:16
+	YIAddr [4]byte // 16:20
+	SIAddr [4]byte // 20:24
+	GIAddr [4]byte // 24:28
+	// CHAddr is the client hardware address. Can be up to 16 bytes in length but
+	// is usually 6 bytes for Ethernet.
+	CHAddr [16]byte // 28:44
+	// BOOTP, Magic Cookie, and DHCP Options not included.
+	// LegacyBOOTP [192]byte
+	// Magic       [4]byte // 0x63,0x82,0x53,0x63
+	// Options     [275...]byte // as of RFC2131 it is variable length
 }
 
 // There are 9 flags, bits 100 thru 103 are reserved
@@ -154,76 +204,39 @@ const (
 	FlagTCP_NS
 )
 
+// These are minimum sizes that do not take into consideration the presence of
+// options or special tags (i.e: VLAN, IP/TCP Options).
 const (
-	SizeEthernetHeaderNoVLAN = 14
-	SizeIPv4Header           = 20
-	SizeUDPHeader            = 8
-	SizeARPv4Header          = 28
-	SizeTCPHeaderNoOptions   = 20
-	ipflagDontFrag           = 0x4000
-	ipFlagMoreFrag           = 0x8000
-	ipVersion4               = 0x45
-	ipProtocolTCP            = 6
+	SizeEthernetHeader = 14
+	SizeIPv4Header     = 20
+	SizeUDPHeader      = 8
+	SizeARPv4Header    = 28
+	SizeTCPHeader      = 20
+	SizeDHCPHeader     = 44
+	ipflagDontFrag     = 0x4000
+	ipFlagMoreFrag     = 0x8000
+	ipVersion4         = 0x45
+	ipProtocolTCP      = 6
+	ipProtocolUDP      = 17
 )
 
+func IsBroadcastHW(hwaddr net.HardwareAddr) bool {
+	// This comparison should be optimized by compiler to not allocate.
+	// See bytes.Equal.
+	return string(hwaddr) == broadcast
+}
+
+func BroadcastHW() net.HardwareAddr { return net.HardwareAddr(broadcast) }
+
+// Broadcast is a special hardware address which indicates a Frame should
+// be sent to every device on a given LAN segment.
+const broadcast = "\xff\xff\xff" + "\xff\xff\xff"
+
 var (
-	// Broadcast is a special hardware address which indicates a Frame should
-	// be sent to every device on a given LAN segment.
-	Broadcast = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	None      = net.HardwareAddr{0, 0, 0, 0, 0, 0}
+	none = net.HardwareAddr{0, 0, 0, 0, 0, 0}
 )
 
 type EtherType uint16
-
-// Ethertype values. From: http://en.wikipedia.org/wiki/Ethertype
-//
-//go:generate stringer -type=EtherType -trimprefix=EtherType
-const (
-	EtherTypeIPv4                EtherType = 0x0800
-	EtherTypeARP                 EtherType = 0x0806
-	EtherTypeWakeOnLAN           EtherType = 0x0842
-	EtherTypeTRILL               EtherType = 0x22F3
-	EtherTypeDECnetPhase4        EtherType = 0x6003
-	EtherTypeRARP                EtherType = 0x8035
-	EtherTypeAppleTalk           EtherType = 0x809B
-	EtherTypeAARP                EtherType = 0x80F3
-	EtherTypeIPX1                EtherType = 0x8137
-	EtherTypeIPX2                EtherType = 0x8138
-	EtherTypeQNXQnet             EtherType = 0x8204
-	EtherTypeIPv6                EtherType = 0x86DD
-	EtherTypeEthernetFlowControl EtherType = 0x8808
-	EtherTypeIEEE802_3           EtherType = 0x8809
-	EtherTypeCobraNet            EtherType = 0x8819
-	EtherTypeMPLSUnicast         EtherType = 0x8847
-	EtherTypeMPLSMulticast       EtherType = 0x8848
-	EtherTypePPPoEDiscovery      EtherType = 0x8863
-	EtherTypePPPoESession        EtherType = 0x8864
-	EtherTypeJumboFrames         EtherType = 0x8870
-	EtherTypeHomePlug1_0MME      EtherType = 0x887B
-	EtherTypeIEEE802_1X          EtherType = 0x888E
-	EtherTypePROFINET            EtherType = 0x8892
-	EtherTypeHyperSCSI           EtherType = 0x889A
-	EtherTypeAoE                 EtherType = 0x88A2
-	EtherTypeEtherCAT            EtherType = 0x88A4
-	EtherTypeEthernetPowerlink   EtherType = 0x88AB
-	EtherTypeLLDP                EtherType = 0x88CC
-	EtherTypeSERCOS3             EtherType = 0x88CD
-	EtherTypeHomePlugAVMME       EtherType = 0x88E1
-	EtherTypeMRP                 EtherType = 0x88E3
-	EtherTypeIEEE802_1AE         EtherType = 0x88E5
-	EtherTypeIEEE1588            EtherType = 0x88F7
-	EtherTypeIEEE802_1ag         EtherType = 0x8902
-	EtherTypeFCoE                EtherType = 0x8906
-	EtherTypeFCoEInit            EtherType = 0x8914
-	EtherTypeRoCE                EtherType = 0x8915
-	EtherTypeCTP                 EtherType = 0x9000
-	EtherTypeVeritasLLT          EtherType = 0xCAFE
-	EtherTypeVLAN                EtherType = 0x8100
-	EtherTypeServiceVLAN         EtherType = 0x88a8
-	// minEthPayload is the minimum payload size for an Ethernet frame, assuming
-	// that no 802.1Q VLAN tags are present.
-	minEthPayload = 46
-)
 
 // AssertType returns the Size or EtherType field of the Ethernet frame as EtherType.
 func (e EthernetHeader) AssertType() EtherType { return EtherType(e.SizeOrEtherType) }
@@ -275,6 +288,13 @@ func (f *EthernetHeader) String() string {
 		"etype: ", ethertpStr, vlanstr)
 }
 
+// IHL returns the internet header length in 32bit words and is guaranteed to be within 0..15.
+// Valid values for IHL are 5..15. When multiplied by 4 this yields number of bytes of the header, 20..60.
+func (iphdr *IPv4Header) IHL() uint8     { return iphdr.VersionAndIHL & 0xf }
+func (iphdr *IPv4Header) Version() uint8 { return iphdr.VersionAndIHL >> 4 }
+func (iphdr *IPv4Header) DSCP() uint8    { return iphdr.ToS >> 2 }
+func (iphdr *IPv4Header) ECN() uint8     { return iphdr.ToS & 0b11 }
+
 func (iphdr *IPv4Header) FrameLength() int {
 	return int(iphdr.TotalLength)
 }
@@ -293,8 +313,8 @@ func (ip *IPv4Header) String() string {
 // DecodeIPv4Header decodes a 20 byte IPv4 header from buf.
 func DecodeIPv4Header(buf []byte) (iphdr IPv4Header) {
 	_ = buf[19]
-	iphdr.Version = buf[0]
-	iphdr.IHL = buf[1]
+	iphdr.VersionAndIHL = buf[0]
+	iphdr.ToS = buf[1]
 	iphdr.TotalLength = binary.BigEndian.Uint16(buf[2:])
 	iphdr.ID = binary.BigEndian.Uint16(buf[4:])
 	iphdr.Flags = IPFlags(binary.BigEndian.Uint16(buf[6:]))
@@ -309,8 +329,8 @@ func DecodeIPv4Header(buf []byte) (iphdr IPv4Header) {
 // Put marshals the IPv4 frame onto buf. buf needs to be 20 bytes in length or Put panics.
 func (iphdr *IPv4Header) Put(buf []byte) {
 	_ = buf[19]
-	buf[0] = iphdr.Version
-	buf[1] = iphdr.IHL
+	buf[0] = (4 << 4) | (iphdr.VersionAndIHL & 0xf) // ignore set version.
+	buf[1] = iphdr.ToS
 	binary.BigEndian.PutUint16(buf[2:], iphdr.TotalLength)
 	binary.BigEndian.PutUint16(buf[4:], iphdr.ID)
 	binary.BigEndian.PutUint16(buf[6:], uint16(iphdr.Flags))
@@ -332,6 +352,15 @@ func (iphdr *IPv4Header) PutPseudo(buf []byte) {
 	binary.BigEndian.PutUint16(buf[2:], iphdr.TotalLength)
 	copy(buf[4:8], iphdr.Source[:])
 	copy(buf[8:12], iphdr.Destination[:])
+}
+
+func (iphdr *IPv4Header) CalculateChecksum() uint16 {
+	crc := CRC791{}
+	var buf [SizeIPv4Header]byte
+	iphdr.Put(buf[:])
+	binary.BigEndian.PutUint16(buf[10:], 0) // Zero out checksum field.
+	crc.Write(buf[:])
+	return crc.Sum16()
 }
 
 type IPFlags uint16
@@ -441,12 +470,19 @@ func (tcphdr *TCPHeader) Put(buf []byte) {
 	binary.BigEndian.PutUint16(buf[18:], tcphdr.UrgentPtr)
 }
 
+// Offset specifies the size of the TCP header in 32-bit words. The minimum size
+// header is 5 words and the maximum is 15 words thus giving the minimum size of
+// 20 bytes and maximum of 60 bytes, allowing for up to 40 bytes of options in
+// the header. This field gets its name from the fact that it is also the offset
+// from the start of the TCP segment to the actual data.
 func (tcphdr *TCPHeader) Offset() (tcpWords uint8) {
 	return uint8(tcphdr.OffsetAndFlags[0] >> (8 + 4))
 }
 
-func (tcphdr *TCPHeader) OffsetInBytes() (offsetInBytes uint16) {
-	return uint16(tcphdr.Offset()) * tcpWordlen
+// OffsetInBytes returns the size of the TCP header in bytes, including options.
+// See [TCPHeader.Offset] for more information.
+func (tcphdr *TCPHeader) OffsetInBytes() uint8 {
+	return tcphdr.Offset() * tcpWordlen
 }
 
 func (tcphdr *TCPHeader) Flags() TCPFlags {
@@ -464,17 +500,6 @@ func (tcphdr *TCPHeader) SetOffset(tcpWords uint8) {
 	}
 	onlyFlags := tcphdr.OffsetAndFlags[0] & tcpFlagmask
 	tcphdr.OffsetAndFlags[0] |= onlyFlags | (uint16(tcpWords) << 12)
-}
-
-// FrameLength returns the size of the TCP frame as described by tcphdr and
-// payloadLength, which is the size of the TCP payload not including the TCP options.
-func (tcphdr *TCPHeader) FrameLength(payloadLength uint16) uint16 {
-	return tcphdr.OffsetInBytes() + payloadLength
-}
-
-// OptionsLength returns the length of the options section
-func (tcphdr *TCPHeader) OptionsLength() uint16 {
-	return tcphdr.OffsetInBytes()*tcpWordlen - 20
 }
 
 // CalculateChecksumIPv4 calculates the checksum of the TCP header, options and payload.
@@ -559,4 +584,71 @@ func strcat(strs ...string) (s string) {
 func hexascii(b byte) [2]byte {
 	const hexstr = "0123456789abcdef"
 	return [2]byte{hexstr[b>>4], hexstr[b&0b1111]}
+}
+
+func (d *DHCPHeader) Put(dst []byte) {
+	_ = dst[43]
+	dst[0] = d.OP
+	dst[1] = d.HType
+	dst[2] = d.HLen
+	dst[3] = d.HOps
+	binary.BigEndian.PutUint32(dst[4:8], d.Xid)
+	binary.BigEndian.PutUint16(dst[8:10], d.Secs)
+	binary.BigEndian.PutUint16(dst[10:12], d.Flags)
+	copy(dst[12:16], d.CIAddr[:])
+	copy(dst[16:20], d.YIAddr[:])
+	copy(dst[20:24], d.SIAddr[:])
+	copy(dst[24:28], d.GIAddr[:])
+	copy(dst[28:44], d.CHAddr[:])
+}
+
+func DecodeDHCPHeader(src []byte) (d DHCPHeader) {
+	_ = src[43]
+	d.OP = src[0]
+	d.HType = src[1]
+	d.HLen = src[2]
+	d.HOps = src[3]
+	d.Xid = binary.BigEndian.Uint32(src[4:8])
+	d.Secs = binary.BigEndian.Uint16(src[8:10])
+	d.Flags = binary.BigEndian.Uint16(src[10:12])
+	copy(d.CIAddr[:], src[12:16])
+	copy(d.YIAddr[:], src[16:20])
+	copy(d.SIAddr[:], src[20:24])
+	copy(d.GIAddr[:], src[24:28])
+	copy(d.CHAddr[:], src[28:44])
+	return d
+}
+
+func (d *DHCPHeader) String() (s string) {
+	s = "DHCP op=" + strconv.Itoa(int(d.OP)) + " "
+	if d.CIAddr != [4]byte{} {
+		s += "ciaddr=" + net.IP(d.CIAddr[:]).String() + " "
+	}
+	if d.YIAddr != [4]byte{} {
+		s += "yiaddr=" + net.IP(d.YIAddr[:]).String() + " "
+	}
+	if d.SIAddr != [4]byte{} {
+		s += "siaddr=" + net.IP(d.SIAddr[:]).String() + " "
+	}
+	if d.GIAddr != [4]byte{} {
+		s += "giaddr=" + net.IP(d.GIAddr[:]).String() + " "
+	}
+	if d.CHAddr != [16]byte{} && d.HLen < 16 && d.HLen > 0 {
+		s += "chaddr=" + net.HardwareAddr(d.CHAddr[:d.HLen]).String() + " "
+	}
+	return s
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func min(a, b byte) byte {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -16,7 +16,7 @@ var (
 )
 
 func TestSynReceive(t *testing.T) {
-	s := tcpctl.Socket{}
+	s := tcpctl.TCPSocket{}
 	s.Listen()
 	pStart, pEnd, err := s.RecvEthernet(packetSyn)
 	_, _ = pStart, pEnd

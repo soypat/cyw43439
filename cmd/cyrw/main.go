@@ -1,14 +1,13 @@
 package main
 
 import (
-	"encoding/hex"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/soypat/cyw43439/cyrw"
 	"github.com/soypat/cyw43439/internal/slog"
-
-	"github.com/soypat/cyw43439/internal/tcpctl/eth"
+	"github.com/soypat/cyw43439/internal/tcpctl"
 )
 
 var lastRx, lastTx time.Time
@@ -33,8 +32,6 @@ func main() {
 		panic(err)
 	}
 
-	dev.RecvEthHandle(rcv)
-
 	for {
 		// Set ssid/pass in secrets.go
 		err = dev.JoinWPA2(ssid, pass)
@@ -44,6 +41,24 @@ func main() {
 		}
 		println("wifi join failed:", err.Error())
 		time.Sleep(5 * time.Second)
+	}
+	mac := dev.MAC()
+	println("\n\n\nMAC:", mac.String())
+	stack = tcpctl.NewStack(tcpctl.StackConfig{
+		MAC:         nil,
+		MaxUDPConns: 2,
+	})
+
+	dev.RecvEthHandle(stack.RecvEth)
+	for {
+		println("Trying DoDHCP")
+		err = DoDHCP(stack, dev)
+		if err == nil {
+			println("========\nDHCP done, your IP: ", stack.IP.String(), "\n========")
+			break
+		}
+		println(err.Error())
+		time.Sleep(8 * time.Second)
 	}
 
 	println("finished init OK")
@@ -63,44 +78,42 @@ func main() {
 }
 
 var (
-	errNotTCP     = errors.New("packet not TCP")
-	errNotIPv4    = errors.New("packet not IPv4")
-	errPacketSmol = errors.New("packet too small")
+	stack *tcpctl.Stack
+	txbuf [1500]byte
 )
 
-func rcv(pkt []byte) error {
-	// Note: rcv is called from a locked Device context.
-	// No calls to device I/O should be performed here.
-	lastRx = time.Now()
-	if len(pkt) < 14 {
-		return errPacketSmol
+func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
+	var dc tcpctl.DHCPClient
+	copy(dc.MAC[:], dev.MAC())
+	err := s.OpenUDP(68, dc.HandleUDP)
+	if err != nil {
+		return err
 	}
-	ethHdr := eth.DecodeEthernetHeader(pkt)
-	if ethHdr.AssertType() != eth.EtherTypeIPv4 {
-		return errNotIPv4
+	defer s.CloseUDP(68)
+	err = s.FlagUDPPending(68) // Force a DHCP discovery.
+	if err != nil {
+		return err
 	}
-	ipHdr := eth.DecodeIPv4Header(pkt[eth.SizeEthernetHeaderNoVLAN:])
-	println("ETH:", ethHdr.String())
-	println("IPv4:", ipHdr.String())
-	println("Rx:", len(pkt))
-	println(hex.Dump(pkt))
-	if ipHdr.Protocol == 17 {
-		// We got an UDP packet and we validate it.
-		udpHdr := eth.DecodeUDPHeader(pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header:])
-		gotChecksum := udpHdr.CalculateChecksumIPv4(&ipHdr, pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header+eth.SizeUDPHeader:])
-		println("UDP:", udpHdr.String())
-		if gotChecksum == 0 || gotChecksum == udpHdr.Checksum {
-			println("checksum match!")
-		} else {
-			println("checksum mismatch! Received ", udpHdr.Checksum, " but calculated ", gotChecksum)
+	for retry := 0; retry < 20 && dc.State < 3; retry++ {
+		n, err := stack.HandleEth(txbuf[:])
+		if err != nil {
+			return err
 		}
-		return nil
+		if n == 0 {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		err = dev.SendEth(txbuf[:n])
+		if err != nil {
+			return err
+		}
 	}
-	if ipHdr.Protocol != 6 {
-		return errNotTCP
+	if dc.State != 3 { // TODO: find way to make this value more self descriptive.
+		return errors.New("DHCP did not complete, state=" + strconv.Itoa(int(dc.State)))
 	}
-	tcpHdr := eth.DecodeTCPHeader(pkt[eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header:])
-	println("TCP:", tcpHdr.String())
-
+	if len(s.IP) == 0 {
+		s.IP = make([]byte, 4)
+	}
+	copy(s.IP, dc.YourIP[:])
 	return nil
 }

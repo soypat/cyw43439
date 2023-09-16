@@ -7,6 +7,7 @@ import (
 	"math"
 	"net"
 
+	"github.com/soypat/cyw43439/internal/netlink"
 	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
 
@@ -50,23 +51,23 @@ const (
 	StateLastAck
 )
 
-type Socket struct {
+type TCPSocket struct {
 	cs        connState
 	us        net.TCPAddr
 	them      net.TCPAddr
 	staticBuf [1504]byte
 }
 
-func (s *Socket) Listen() {
+func (s *TCPSocket) Listen() {
 	s.cs.SetState(StateListen)
 }
 
-func (s *Socket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, err error) {
+func (s *TCPSocket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, err error) {
 	buflen := uint16(len(buf))
 	switch {
 	case len(buf) > math.MaxUint16:
 		err = errors.New("buffer too long")
-	case buflen < eth.SizeEthernetHeaderNoVLAN+eth.SizeIPv4Header+eth.SizeTCPHeaderNoOptions:
+	case buflen < eth.SizeEthernetHeader+eth.SizeIPv4Header+eth.SizeTCPHeader:
 		err = errors.New("buffer too short to contain TCP")
 
 	}
@@ -80,14 +81,14 @@ func (s *Socket) RecvEthernet(buf []byte) (payloadStart, payloadEnd uint16, err 
 	if ethhdr.SizeOrEtherType != uint16(eth.EtherTypeIPv4) {
 		return 0, 0, errors.New("support only IPv4")
 	}
-	payloadStart, payloadEnd, err = s.RecvTCP(buf[eth.SizeEthernetHeaderNoVLAN:])
+	payloadStart, payloadEnd, err = s.RecvTCP(buf[eth.SizeEthernetHeader:])
 	if err != nil {
 		return 0, 0, err
 	}
-	return payloadStart + eth.SizeEthernetHeaderNoVLAN, payloadEnd + eth.SizeEthernetHeaderNoVLAN, nil
+	return payloadStart + eth.SizeEthernetHeader, payloadEnd + eth.SizeEthernetHeader, nil
 }
 
-func (s *Socket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error) {
+func (s *TCPSocket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error) {
 	buflen := uint16(len(buf))
 	ip := eth.DecodeIPv4Header(buf[:])
 	payloadEnd = ip.TotalLength
@@ -98,15 +99,15 @@ func (s *Socket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error
 		// fmt.Printf("%+v\n%s\n", ip, ip.String())
 		return 0, 0, fmt.Errorf("expected TCP protocol (6) in IP.Proto field; got %d", ip.Protocol)
 	}
-	if ip.IHL != 0 {
-		return 0, 0, errors.New("expected IP.IHL to be zero")
+	if ip.ToS != 0 {
+		return 0, 0, errors.New("expected IP.ToS to be zero")
 	}
 	tcp := eth.DecodeTCPHeader(buf[eth.SizeIPv4Header:])
 	nb := tcp.OffsetInBytes()
 	if nb < 20 {
 		return 0, 0, errors.New("garbage TCP.Offset")
 	}
-	payloadStart = nb + eth.SizeIPv4Header
+	payloadStart = uint16(nb + eth.SizeIPv4Header)
 	if payloadStart > buflen {
 		return 0, 0, fmt.Errorf("malformed packet, got payload offset %d/%d", payloadStart, buflen)
 	}
@@ -117,7 +118,7 @@ func (s *Socket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error
 	if s.cs.pendingCtlFrame == 0 {
 		return payloadStart, payloadEnd, nil
 	}
-	tcpOptions := buf[eth.SizeIPv4Header+eth.SizeTCPHeaderNoOptions : payloadStart]
+	tcpOptions := buf[eth.SizeIPv4Header+eth.SizeTCPHeader : payloadStart]
 	gotSum := tcp.CalculateChecksumIPv4(&ip, tcpOptions, buf[payloadStart:payloadEnd])
 	if gotSum != tcp.Checksum {
 		fmt.Println("Checksum mismatch!")
@@ -130,7 +131,7 @@ func (s *Socket) RecvTCP(buf []byte) (payloadStart, payloadEnd uint16, err error
 	return payloadStart, payloadEnd, err
 }
 
-func (s *Socket) rx(hdr *eth.TCPHeader) (err error) {
+func (s *TCPSocket) rx(hdr *eth.TCPHeader) (err error) {
 	s.cs.mu.Lock()
 	defer s.cs.mu.Unlock()
 	switch s.cs.state {
@@ -171,19 +172,19 @@ func (s *Socket) rx(hdr *eth.TCPHeader) (err error) {
 }
 
 // writeTCPIPv4 writes a TCP+IPv4 packet to dst, returning the number of bytes written.
-func (s *Socket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
+func (s *TCPSocket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
 	if len(dst) > math.MaxUint16 {
 		return 0, errors.New("buffer too long for TCP/IP")
 	}
 	// Exclude Ethernet header and CRC in frame size.
-	payloadOffset := len(tcpOpts) + eth.SizeIPv4Header + eth.SizeTCPHeaderNoOptions
+	payloadOffset := len(tcpOpts) + eth.SizeIPv4Header + eth.SizeTCPHeader
 	if len(dst) < payloadOffset+len(payload) {
 		return 0, io.ErrShortBuffer
 	}
 	// Limit dst to the size of the frame.
 	dst = dst[:payloadOffset+len(payload)]
 
-	offsetBytes := len(tcpOpts) + eth.SizeTCPHeaderNoOptions
+	offsetBytes := len(tcpOpts) + eth.SizeTCPHeader
 	offset := offsetBytes / 4
 	if offsetBytes%4 != 0 {
 		offset++
@@ -193,13 +194,12 @@ func (s *Socket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
 	}
 	payloadOffset = eth.SizeIPv4Header + offset*4
 	ip := eth.IPv4Header{
-		Version:     4,
-		IHL:         eth.SizeIPv4Header / 4,
-		TotalLength: uint16(offsetBytes+len(payload)) + eth.SizeIPv4Header + eth.SizeTCPHeaderNoOptions,
-		ID:          0,
-		Flags:       0,
-		TTL:         255,
-		Protocol:    6, // 6 == TCP.
+		VersionAndIHL: 4 & ((eth.SizeIPv4Header / 4) << 4),
+		TotalLength:   uint16(offsetBytes+len(payload)) + eth.SizeIPv4Header + eth.SizeTCPHeader,
+		ID:            0,
+		Flags:         0,
+		TTL:           255,
+		Protocol:      6, // 6 == TCP.
 	}
 	copy(ip.Destination[:], s.them.IP)
 	copy(ip.Source[:], s.us.IP)
@@ -216,7 +216,7 @@ func (s *Socket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
 	tcp.Checksum = tcp.CalculateChecksumIPv4(&ip, tcpOpts, payload)
 	// Copy TCP header+options and payload into buffer.
 	tcp.Put(dst[eth.SizeIPv4Header:])
-	nopt := copy(dst[eth.SizeIPv4Header+eth.SizeTCPHeaderNoOptions:payloadOffset], tcpOpts)
+	nopt := copy(dst[eth.SizeIPv4Header+eth.SizeTCPHeader:payloadOffset], tcpOpts)
 	if nopt != len(tcpOpts) {
 		panic("tcp options copy failed")
 	}
@@ -224,7 +224,31 @@ func (s *Socket) writeTCPIPv4(dst, tcpOpts, payload []byte) (n int, err error) {
 	// Calculate IP checksum and copy IP header into buffer.
 	crc := eth.CRC791{}
 	crc.Write(dst[eth.SizeIPv4Header:]) // We limited dst size above.
-	ip.Checksum = crc.Sum()
+	ip.Checksum = crc.Sum16()
 	ip.Put(dst)
 	return len(dst), nil
+}
+
+func ResolveDHCPv4(dev netlink.Netlinker) (net.IP, error) {
+	// TODO
+	var (
+		broadcast = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+		rawbuf    [1500]byte
+	)
+	{ // Ethernet header.
+		hdr := eth.EthernetHeader{SizeOrEtherType: uint16(eth.EtherTypeIPv4)}
+		copy(hdr.Destination[:], broadcast)
+		hwaddr, err := dev.GetHardwareAddr()
+		if err != nil {
+			return nil, err
+		}
+		if n := copy(hdr.Source[:], hwaddr); n != 6 {
+			return nil, errors.New("MAC shorter than 6")
+		}
+		hdr.Put(rawbuf[:])
+	}
+	{ // IP header.
+		// hdr := eth.IPv4Header{}
+	}
+	return nil, nil
 }
