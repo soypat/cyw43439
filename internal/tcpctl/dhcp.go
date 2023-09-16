@@ -62,7 +62,7 @@ func (d *DHCPClient) HandleUDP(resp []byte, packet *UDPPacket) (_ int, err error
 
 			// print("DHCP Option received ", option.String())
 			optionData := incpayload[ptr+2 : ptr+2+int(optlen)]
-			if d.State == dhcpStateWaitAck && option == eth.DHCPMessageType && len(optionData) > 0 && optionData[0] == 5 {
+			if d.State == dhcpStateWaitAck && option == eth.DHCP_MessageType && len(optionData) > 0 && optionData[0] == 5 {
 				d.State = dhcpStateDone
 				return 0, nil
 			}
