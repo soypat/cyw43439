@@ -171,7 +171,13 @@ func (d *DHCPClient) HandleUDP(resp []byte, packet *tcpctl.UDPPacket) (_ int, er
 			}
 			optlen := incpayload[ptr+1]
 			// optionData := incpayload[ptr+2 : ptr+2+int(optlen)]
-			println("DHCP Option received", incpayload[ptr], "len", optlen)
+			print("DHCP Option received ", eth.DHCPOption(incpayload[ptr]).String())
+			optPtr := ptr + 2
+			for optPtr < ptr+2+int(optlen) {
+				print(" ", incpayload[optPtr])
+				optPtr++
+			}
+			println()
 			ptr += int(optlen) + 2
 		}
 	}
