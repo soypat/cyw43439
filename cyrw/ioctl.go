@@ -327,7 +327,7 @@ func (d *Device) waitForCredit(buf []uint32) error {
 	}
 	for retries := 0; retries < 10; retries++ {
 		_, _, err := d.tryPoll(buf)
-		if err != nil && err != errNoF2Avail && !isSpuriousPollErr(err) {
+		if err != nil && err != errNoF2Avail {
 			return err
 		} else if d.has_credit() {
 			return nil
@@ -342,7 +342,7 @@ func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 	d.trace("pollForIoctl:start")
 	for retries := 0; retries < 10; retries++ {
 		buf8, hdr, err := d.tryPoll(buf)
-		if err != nil && err != errNoF2Avail && !isSpuriousPollErr(err) {
+		if err != nil && err != errNoF2Avail {
 			return nil, err
 		} else if hdr == whd.CONTROL_HEADER {
 			return buf8, nil
@@ -352,11 +352,17 @@ func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 	return nil, errors.New("pollForIoctl timeout")
 }
 
-// isSpuriousPollErr contains spurious errors encountered during polling.
-// TODO(soypat): get to the bottom of this- why are we getting these errors exclusively during first IO operations?
-func isSpuriousPollErr(err error) bool {
-	// Both result from event packet parsing.
-	return err == whd.ErrInvalidEtherType || err == errBDCInvalidLength
+// check_status handles F2 events while status register is set.
+func (d *Device) check_status(buf []uint32) error {
+	d.trace("check_status:start")
+	for {
+		_, _, err := d.tryPoll(buf)
+		if err == errNoF2Avail {
+			return nil
+		} else if err != nil {
+			return err
+		}
+	}
 }
 
 // tryPoll attempts a single read over the WLAN interface for a SDPCM packet.
@@ -375,32 +381,14 @@ func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
 	}
 	buf8 := u32AsU8(buf[:])
 	offset, plen, hdrType, err := d.rx(buf8[:length])
-	return buf8[offset : offset+plen], hdrType, err
-}
 
-// check_status handles F2 events while status register is set.
-func (d *Device) check_status(buf []uint32) error {
-	d.trace("check_status:start")
-	for {
-		// TODO(soypat): rewrite below with tryPoll?
-		status := d.spi.Status()
-		if status.F2PacketAvailable() {
-			length := status.F2PacketLength()
-			err := d.wlan_read(buf[:], int(length))
-			if err != nil {
-				return err
-			}
-			buf8 := u32AsU8(buf[:])
-			d.debug("check_status:got", slog.Uint64("plen", uint64(length)))
-			_, _, _, err = d.rx(buf8[:length])
-			if err != nil {
-				return err
-			}
-		} else {
-			break
-		}
+	if err == whd.ErrInvalidEtherType || err == errBDCInvalidLength { // Both result from event packet parsing.
+		// Spurious Poll error correction.
+		// TODO(soypat): get to the bottom of this-
+		// why are we getting these errors exclusively during first IO operations?
+		err = nil
 	}
-	return nil
+	return buf8[offset : offset+plen], hdrType, err
 }
 
 func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, err error) {
