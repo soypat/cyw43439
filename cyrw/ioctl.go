@@ -386,6 +386,7 @@ func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
 		// Spurious Poll error correction.
 		// TODO(soypat): get to the bottom of this-
 		// why are we getting these errors exclusively during first IO operations?
+		d.debug("tryPoll:ignore_spurious", slog.String("err", err.Error()))
 		err = nil
 	}
 	return buf8[offset : offset+plen], hdrType, err
