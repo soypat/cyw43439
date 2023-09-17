@@ -159,7 +159,7 @@ func (d *Device) set_iovar2(VAR string, iface whd.IoctlInterface, val0, val1 uin
 
 // set_iovar_n is "set_iovar" from reference.
 func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (err error) {
-	d.debug("set_iovar", slog.String("var", VAR))
+	d.trace("set_iovar", slog.String("var", VAR))
 	buf8 := u32AsU8(d._iovarBuf[:])
 	if len(val)+1+len(VAR) > len(buf8) {
 		return errors.New("set_iovar value too large")
@@ -174,14 +174,13 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 }
 
 func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (n int, err error) {
+	d.trace("doIoctlGet:start", slog.String("cmd", cmd.String()), slog.String("iface", iface.String()), slog.Int("len", len(data)))
 	packet, err := d.sendIoctlWait(ioctlGET, cmd, iface, data)
 	if err != nil {
 		return 0, err
 	}
 
 	n = copy(data[:], packet)
-	d.debug("doIoctlGet:resp", slog.Int("lenResponse", len(packet)), slog.Int("lenAvailable", len(data)), slog.String("resp", string(packet)))
-
 	return n, nil
 }
 
@@ -192,6 +191,7 @@ func (d *Device) doIoctlSet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data
 
 // sendIoctlWait sends an ioctl and waits for its completion
 func (d *Device) sendIoctlWait(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) ([]byte, error) {
+	d.trace("sendIoctlWait:start")
 	d.log_read()
 
 	err := d.waitForCredit(d._sendIoctlBuf[:])
@@ -204,7 +204,7 @@ func (d *Device) sendIoctlWait(kind uint8, cmd whd.SDPCMCommand, iface whd.Ioctl
 	}
 	packet, err := d.pollForIoctl(d._sendIoctlBuf[:])
 	if err != nil {
-		d.logerr("doIoctlGet:pollForIoctl", slog.String("err", err.Error()))
+		d.logerr("sendIoctlWait:pollForIoctl", slog.String("err", err.Error()))
 		return nil, err
 	}
 
@@ -213,6 +213,7 @@ func (d *Device) sendIoctlWait(kind uint8, cmd whd.SDPCMCommand, iface whd.Ioctl
 
 // sendIoctl sends a SDPCM+CDC ioctl command to the device with data.
 func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
+	d.trace("sendIoctl:start")
 	if !iface.IsValid() {
 		return errors.New("invalid ioctl interface")
 	} else if !cmd.IsValid() {
@@ -320,14 +321,13 @@ var (
 
 // waitForCredit waits for a credit to use for the next transaction
 func (d *Device) waitForCredit(buf []uint32) error {
-	d.trace("waitForCredit")
+	d.trace("waitForCredit:start")
 	if d.has_credit() {
 		return nil
 	}
 	for retries := 0; retries < 10; retries++ {
 		_, _, err := d.tryPoll(buf)
-		// TODO(soypat): ether type error?
-		if err != nil && err != errNoF2Avail && err != whd.ErrInvalidEtherType {
+		if err != nil && err != errNoF2Avail && !isSpuriousPollErr(err) {
 			return err
 		} else if d.has_credit() {
 			return nil
@@ -339,10 +339,10 @@ func (d *Device) waitForCredit(buf []uint32) error {
 
 // pollForIoctl polls until a control/ioctl/cdc packet is received.
 func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
-	d.trace("pollForIoctl")
+	d.trace("pollForIoctl:start")
 	for retries := 0; retries < 10; retries++ {
 		buf8, hdr, err := d.tryPoll(buf)
-		if err != nil && err != errNoF2Avail && err != whd.ErrInvalidEtherType {
+		if err != nil && err != errNoF2Avail && !isSpuriousPollErr(err) {
 			return nil, err
 		} else if hdr == whd.CONTROL_HEADER {
 			return buf8, nil
@@ -352,11 +352,19 @@ func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 	return nil, errors.New("pollForIoctl timeout")
 }
 
+// isSpuriousPollErr contains spurious errors encountered during polling.
+// TODO(soypat): get to the bottom of this- why are we getting these errors exclusively during first IO operations?
+func isSpuriousPollErr(err error) bool {
+	// Both result from event packet parsing.
+	return err == whd.ErrInvalidEtherType || err == errBDCInvalidLength
+}
+
 // tryPoll attempts a single read over the WLAN interface for a SDPCM packet.
 // If a packet is received then it is processed by rx and a nil error is returned.
 // If no packet is available then it returns errNoPacketAvail as the error.
 // If an error is returned it will return whd.UNKNOWN_HEADER as the header type.
 func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
+	d.trace("tryPoll:start")
 	avail, length := d.f2PacketAvail()
 	if !avail {
 		return nil, whd.UNKNOWN_HEADER, errNoF2Avail
@@ -372,7 +380,7 @@ func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
 
 // check_status handles F2 events while status register is set.
 func (d *Device) check_status(buf []uint32) error {
-	d.trace("check_status")
+	d.trace("check_status:start")
 	for {
 		// TODO(soypat): rewrite below with tryPoll?
 		status := d.spi.Status()
@@ -383,6 +391,7 @@ func (d *Device) check_status(buf []uint32) error {
 				return err
 			}
 			buf8 := u32AsU8(buf[:])
+			d.debug("check_status:got", slog.Uint64("plen", uint64(length)))
 			_, _, _, err = d.rx(buf8[:length])
 			if err != nil {
 				return err
@@ -395,6 +404,7 @@ func (d *Device) check_status(buf []uint32) error {
 }
 
 func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, err error) {
+	d.trace("rx:start")
 	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
 	if len(packet) < whd.SDPCM_HEADER_LEN+whd.BDC_HEADER_LEN+1 {
 		d.logerr("PACKET TOO SHORT", slog.Int("len", len(packet)))
@@ -428,8 +438,17 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 }
 
 func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
+	defer func() {
+		if err != nil {
+			d.logerr("rxControl",
+				slog.Int("len", len(packet)),
+				slog.Int("id", int(d.auxCDCHeader.ID)),
+				slog.Any("cdc", &d.auxCDCHeader),
+			)
+		}
+	}()
 	d.auxCDCHeader = whd.DecodeCDCHeader(_busOrder, packet)
-	d.debug("rxControl", slog.Int("len", len(packet)), slog.Int("id", int(d.auxCDCHeader.ID)), slog.Any("cdc", &d.auxCDCHeader))
+
 	if d.auxCDCHeader.ID == d.ioctlID {
 		if d.auxCDCHeader.Status != 0 {
 			return 0, 0, errors.New("IOCTL error:" + strconv.Itoa(int(d.auxCDCHeader.Status)))
@@ -438,43 +457,51 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 	offset = uint16(d.lastSDPCMHeader.HeaderLength + whd.CDC_HEADER_LEN)
 	// NB: losing some precision here (uint16(uint32)).
 	plen = uint16(d.auxCDCHeader.Length)
+	d.trace("rxControl:success", slog.Int("plen", int(plen)))
 	return offset, plen, nil
 }
 
-var errPacketSmol = errors.New("asyncEvent packet too small for parsing")
+var (
+	errBDCInvalidLength = errors.New("BDC header invalid length")
+	errPacketSmol       = errors.New("asyncEvent packet too small for parsing")
+)
 
-func (d *Device) rxEvent(packet []byte) error {
+func (d *Device) rxEvent(packet []byte) (err error) {
+	var bdcHdr whd.BDCHeader
+	var aePacket whd.EventPacket
+	defer func() {
+		if err != nil {
+			d.logerr("rxEvent",
+				slog.String("err", err.Error()),
+				slog.Int("plen", len(packet)),
+				slog.Any("bdc", &bdcHdr),
+				slog.Any("event", &aePacket),
+			)
+		}
+	}()
 	// Split packet into BDC header:payload.
 	if len(packet) < whd.BDC_HEADER_LEN+72 {
-		d.logerr("rxEvent", slog.Int("plen", len(packet)), slog.String("err", errPacketSmol.Error()))
 		return errPacketSmol
 	}
-	bdcHdr := whd.DecodeBDCHeader(packet)
+	bdcHdr = whd.DecodeBDCHeader(packet)
 	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
 	if packetStart > len(packet) {
-		return errors.New("rxEvent: Invalid length in BDC header")
+		return errBDCInvalidLength
 	}
 	bdcPacket := packet[packetStart:]
 
-	d.debug("rxEvent",
-		slog.Any("bdc", &bdcHdr),
-		slog.Int("packetStart", int(packetStart)),
-		slog.String("bdcPacket", hex.EncodeToString(bdcPacket)),
-	)
-
 	// Split BDC payload into Event header:payload.
 	// After this point we are in big endian (network order).
-	aePacket, err := whd.DecodeEventPacket(binary.BigEndian, bdcPacket)
-	d.debug("parsedEvent", slog.Any("aePacket", &aePacket), slog.Any("err", err))
+	aePacket, err = whd.DecodeEventPacket(binary.BigEndian, bdcPacket)
 	if err != nil {
 		return err
 	}
-
 	ev := aePacket.Message.EventType
 	if !d.eventmask.IsEnabled(ev) {
-		d.debug("ignoring packet", slog.String("event", ev.String()))
+		d.trace("rxEvent:ignore", slog.String("event", ev.String()))
 		return nil
 	}
+	d.info("rxEvent:success", slog.String("event", ev.String()))
 	return nil
 }
 

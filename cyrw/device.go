@@ -17,6 +17,7 @@ func DefaultConfig() Config {
 	return Config{
 		Firmware: wifiFW2,
 		CLM:      clmFW,
+		Level:    defaultLevel,
 	}
 }
 
@@ -43,6 +44,7 @@ type Device struct {
 	auxCDCHeader    whd.CDCHeader
 	auxBDCHeader    whd.BDCHeader
 	rcvEth          func([]byte) error
+	level           slog.Level
 }
 
 func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
@@ -60,11 +62,14 @@ func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
 type Config struct {
 	Firmware string
 	CLM      string
+	Level    slog.Level // Logging level.
 }
 
 func (d *Device) Init(cfg Config) (err error) {
 	d.lock()
 	defer d.unlock()
+	d.level = cfg.Level
+	d.info("Init:start", slog.String("slog.Level", _levelStr(d.level)))
 
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	err = d.initBus()

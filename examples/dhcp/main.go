@@ -19,15 +19,13 @@ func main() {
 			println("panic:", a)
 		}
 	}()
-	// handler := slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{Level: slog.LevelDebug})
-	// slog.SetDefault(slog.New(handler))
-
 	time.Sleep(2 * time.Second)
 	println("starting program")
 	slog.Debug("starting program")
 	dev := cyrw.DefaultNew()
-
-	err := dev.Init(cyrw.DefaultConfig())
+	cfg := cyrw.DefaultConfig()
+	// cfg.Level = slog.LevelInfo // Logging level.
+	err := dev.Init(cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -35,7 +33,6 @@ func main() {
 	for {
 		// Set ssid/pass in secrets.go
 		err = dev.JoinWPA2(ssid, pass)
-		//err = dev.StartAP(ssid, pass, 6)
 		if err == nil {
 			break
 		}

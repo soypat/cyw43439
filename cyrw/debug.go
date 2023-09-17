@@ -14,7 +14,7 @@ const (
 
 	// currentLevel decides which log levels are printed.
 	// A higher currentLevel means less logs (less verbose).
-	currentLevel slog.Level = levelTrace + 1
+	defaultLevel slog.Level = levelTrace + 1
 	levelTrace   slog.Level = slog.LevelDebug - 1
 	deviceLevel  slog.Level = slog.LevelError - 1
 	// dblogattrs decides whether to print key-value log attributes.
@@ -45,21 +45,11 @@ func (d *Device) trace(msg string, attrs ...slog.Attr) {
 
 func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 	canPrintDeviceLog := enableDeviceLog && level == deviceLevel
-	if level < currentLevel && !canPrintDeviceLog {
+	if level < d.level && !canPrintDeviceLog {
 		return
 	}
 
-	var levelStr string
-	switch level {
-	case deviceLevel:
-		levelStr = "CY43"
-	case levelTrace:
-		levelStr = "TRACE"
-	default:
-		levelStr = level.String()
-	}
-
-	print(levelStr)
+	print(_levelStr(level))
 	print(" ")
 	print(msg)
 	if dblogattrs {
@@ -75,6 +65,18 @@ func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 		}
 	}
 	println()
+}
+func _levelStr(level slog.Level) string {
+	var levelStr string
+	switch level {
+	case deviceLevel:
+		levelStr = "CY43"
+	case levelTrace:
+		levelStr = "TRACE"
+	default:
+		levelStr = level.String()
+	}
+	return levelStr
 }
 
 func (d *Device) log_init() error {
@@ -174,7 +176,6 @@ func printLowLevelTx(cmd uint32, data []uint32) {
 	}
 	println()
 }
-
 
 func hex32(u uint32) string {
 	return hex.EncodeToString([]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
