@@ -58,15 +58,11 @@ func (d *DHCPClient) HandleUDP(resp []byte, packet *UDPPacket) (_ int, err error
 			}
 			option := eth.DHCPOption(incpayload[ptr])
 			optlen := incpayload[ptr+1]
-			// optionData := incpayload[ptr+2 : ptr+2+int(optlen)]
-
-			// print("DHCP Option received ", option.String())
 			optionData := incpayload[ptr+2 : ptr+2+int(optlen)]
 			if d.State == dhcpStateWaitAck && option == eth.DHCP_MessageType && len(optionData) > 0 && optionData[0] == 5 {
 				d.State = dhcpStateDone
 				return 0, nil
 			}
-			println()
 			ptr += int(optlen) + 2
 		}
 	}
@@ -144,7 +140,7 @@ func (d *DHCPClient) initOurHeader(xid uint32) {
 }
 
 func (d *DHCPClient) setResponseUDP(packet *UDPPacket, payload []byte) {
-	const ipWordLen = 5
+	const ipLenInWords = 5
 	// Ethernet frame.
 	copy(packet.Eth.Destination[:], eth.BroadcastHW())
 	copy(packet.Eth.Source[:], d.MAC[:])
@@ -159,14 +155,18 @@ func (d *DHCPClient) setResponseUDP(packet *UDPPacket, payload []byte) {
 	packet.IP.ID ^= packet.IP.ID << 7
 	packet.IP.ID ^= packet.IP.ID >> 9
 	packet.IP.ID ^= packet.IP.ID << 8
-	packet.IP.VersionAndIHL = ipWordLen // Sets IHL: No IP options. Version set automatically.
-	packet.IP.TotalLength = 4*ipWordLen + eth.SizeUDPHeader + uint16(len(payload))
+	packet.IP.VersionAndIHL = ipLenInWords // Sets IHL: No IP options. Version set automatically.
+	packet.IP.TotalLength = 4*ipLenInWords + eth.SizeUDPHeader + uint16(len(payload))
 	packet.IP.Checksum = packet.IP.CalculateChecksum()
+	// TODO(soypat): Document why disabling ToS used by DHCP server may cause Request to fail.
+	// Apparently server sets ToS=192. Uncommenting this line causes DHCP to fail on my setup.
+	// packet.IP.ToS = 0
+	packet.IP.Flags = 0
 
 	// UDP frame.
 	packet.UDP.DestinationPort = 67
 	packet.UDP.SourcePort = 68
-	packet.UDP.Length = packet.IP.TotalLength - 4*ipWordLen
+	packet.UDP.Length = packet.IP.TotalLength - 4*ipLenInWords
 	packet.UDP.Checksum = packet.UDP.CalculateChecksumIPv4(&packet.IP, payload)
 }
 

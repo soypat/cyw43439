@@ -88,8 +88,11 @@ func (u *TCPPacket) HasPacket() bool {
 	return u.Rx != forcedTime && !u.Rx.IsZero()
 }
 
+// PutHeaders puts the Ethernet, IPv4 and TCP headers into b.
+// b must be at least 54 bytes or else PutHeaders panics.
 func (p *TCPPacket) PutHeaders(b []byte) {
-	if len(b) < eth.SizeEthernetHeader+eth.SizeIPv4Header+eth.SizeTCPHeader {
+	const minSize = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeTCPHeader
+	if len(b) < minSize {
 		panic("short tcpPacket buffer")
 	}
 	p.Eth.Put(b)
