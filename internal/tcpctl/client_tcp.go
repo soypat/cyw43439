@@ -8,9 +8,9 @@ import (
 	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
 
-// TCPClient specifies TCP connection state logic to interact with incoming packets
+// TCPController specifies TCP connection state logic to interact with incoming packets
 // and send correctly marshalled outgoing packets.
-type TCPClient struct {
+type TCPController struct {
 	cs      connState
 	ourPort uint16
 	us      netip.AddrPort
@@ -70,7 +70,7 @@ type rcvSpace struct {
 }
 
 // HandleTCP meant to be attached to a TCP socket on a [Stack].
-func (c *TCPClient) HandleTCP(resp []byte, packet *TCPPacket) (n int, err error) {
+func (c *TCPController) HandleTCP(resp []byte, packet *TCPPacket) (n int, err error) {
 	const (
 		payloadOffset = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeTCPHeader
 	)
@@ -90,13 +90,14 @@ func (c *TCPClient) HandleTCP(resp []byte, packet *TCPPacket) (n int, err error)
 		// Packet incoming case.
 		thdr := &packet.TCP
 		payload := packet.Payload()
-		err = c.cs.validateHeader(thdr, len(payload))
+		plen := len(payload)
+		err = c.cs.validateHeader(thdr, plen)
 		if err != nil {
 			return 0, err
 		}
-		c.cs.frameRcv(thdr)
+		c.cs.frameRcv(thdr, plen)
 
-		if len(payload) > 0 {
+		if plen > 0 {
 			c.rcv(payload)
 		}
 		if c.cs.pendingCtlFrame != 0 {
@@ -110,7 +111,7 @@ func (c *TCPClient) HandleTCP(resp []byte, packet *TCPPacket) (n int, err error)
 	return n, nil
 }
 
-func (cs *connState) frameRcv(hdr *eth.TCPHeader) {
+func (cs *connState) frameRcv(hdr *eth.TCPHeader, plen int) {
 	switch cs.state {
 	case StateListen:
 		var iss uint32 = 0 // TODO: use random start sequence when done debugging.
@@ -150,10 +151,11 @@ func (cs *connState) validateHeader(hdr *eth.TCPHeader, plen int) (err error) {
 	return err
 }
 
-func (c *TCPClient) setResponseTCP(packet *TCPPacket, payload []byte) {
+func (c *TCPController) setResponseTCP(packet *TCPPacket, payload []byte) {
 	const ipLenInWords = 5
 	// Ethernet frame.
 	for i := 0; i < 6; i++ {
+		// TODO: use actual MAC addresses.
 		packet.Eth.Destination[i], packet.Eth.Source[i] = packet.Eth.Source[i], packet.Eth.Destination[i]
 	}
 	packet.Eth.SizeOrEtherType = uint16(eth.EtherTypeIPv4)
