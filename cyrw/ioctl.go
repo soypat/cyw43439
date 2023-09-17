@@ -5,7 +5,6 @@ package cyrw
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"strconv"
 	"time"
@@ -68,6 +67,8 @@ func (d *Device) has_credit() bool {
 	return d.sdpcmSeq != d.sdpcmSeqMax && (d.sdpcmSeqMax-d.sdpcmSeq)&0x80 == 0
 }
 
+var errTxPacketTooLarge = errors.New("tx packet too large")
+
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
 	// reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L247
@@ -80,7 +81,9 @@ func (d *Device) tx(packet []byte) (err error) {
 
 	const PADDING_SIZE = 2
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + PADDING_SIZE + whd.BDC_HEADER_LEN + len(packet))
-
+	if totalLen > uint32(len(buf8)) || len(packet) > 0xffff {
+		return errTxPacketTooLarge
+	}
 	d.log_read()
 
 	err = d.waitForCredit(buf)
@@ -128,12 +131,11 @@ func (d *Device) get_iovar_n(VAR string, iface whd.IoctlInterface, res []byte) (
 	}
 
 	totalLen := max(length, len(res))
-	d.debug("get_iovar_n:ini", slog.String("var", VAR), slog.Int("reslen", len(res)), slog.String("buf", hex.EncodeToString(buf8[:totalLen])))
+	d.trace("get_iovar_n:ini", slog.String("var", VAR), slog.Int("reslen", totalLen))
 	plen, err = d.doIoctlGet(whd.WLC_GET_VAR, iface, buf8[:totalLen])
 	if plen > len(res) {
 		plen = len(res) // TODO: implement this correctly here and in IoctlGet.
 	}
-	d.debug("get_iovar_n:end", slog.String("var", VAR), slog.String("buf", hex.EncodeToString(buf8[:totalLen])))
 	copy(res[:], buf8[:plen])
 	return plen, err
 }

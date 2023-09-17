@@ -19,8 +19,6 @@ func main() {
 			println("panic:", a)
 		}
 	}()
-	// handler := slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{Level: slog.LevelDebug})
-	// slog.SetDefault(slog.New(handler))
 
 	time.Sleep(2 * time.Second)
 	println("starting program")
@@ -43,7 +41,7 @@ func main() {
 		time.Sleep(5 * time.Second)
 	}
 	mac := dev.MAC()
-	println("\n\n\nMAC:", mac.String())
+	println("MAC:", mac.String())
 	stack = tcpctl.NewStack(tcpctl.StackConfig{
 		MAC:         nil,
 		MaxUDPConns: 2,
