@@ -162,13 +162,12 @@ func (d *DHCPClient) setResponseUDP(packet *UDPPacket, payload []byte) {
 	// Apparently server sets ToS=192. Uncommenting this line causes DHCP to fail on my setup.
 	// If left fixed at 192, DHCP does not work.
 	// If left fixed at 0, DHCP does not work.
-	// Apparently ToS is a function of which state of DHCP one is in.
+	// Apparently ToS is a function of which state of DHCP one is in. Not sure why code below works.
 	if d.State <= dhcpStateWaitOffer {
 		packet.IP.ToS = 0
 	} else {
 		packet.IP.ToS = 192
 	}
-	// packet.IP.ToS = 192
 	packet.IP.Flags = 0
 
 	// UDP frame.
