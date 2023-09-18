@@ -160,7 +160,15 @@ func (d *DHCPClient) setResponseUDP(packet *UDPPacket, payload []byte) {
 	packet.IP.Checksum = packet.IP.CalculateChecksum()
 	// TODO(soypat): Document why disabling ToS used by DHCP server may cause Request to fail.
 	// Apparently server sets ToS=192. Uncommenting this line causes DHCP to fail on my setup.
-	// packet.IP.ToS = 0
+	// If left fixed at 192, DHCP does not work.
+	// If left fixed at 0, DHCP does not work.
+	// Apparently ToS is a function of which state of DHCP one is in.
+	if d.State <= dhcpStateWaitOffer {
+		packet.IP.ToS = 0
+	} else {
+		packet.IP.ToS = 192
+	}
+	// packet.IP.ToS = 192
 	packet.IP.Flags = 0
 
 	// UDP frame.
