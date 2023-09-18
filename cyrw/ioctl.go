@@ -454,7 +454,6 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 
 var (
 	errBDCInvalidLength = errors.New("BDC header invalid length")
-	errPacketSmol       = errors.New("asyncEvent packet too small for parsing")
 )
 
 func (d *Device) rxEvent(packet []byte) (err error) {
@@ -471,9 +470,6 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 		}
 	}()
 	// Split packet into BDC header:payload.
-	if len(packet) < whd.BDC_HEADER_LEN+72 {
-		return errPacketSmol
-	}
 	bdcHdr = whd.DecodeBDCHeader(packet)
 	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
 	if packetStart > len(packet) {
