@@ -81,7 +81,7 @@ func (d *Device) tx(packet []byte) (err error) {
 
 	const PADDING_SIZE = 2
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + PADDING_SIZE + whd.BDC_HEADER_LEN + len(packet))
-	if totalLen > uint32(len(buf8)) || len(packet) > 0xffff {
+	if totalLen > uint32(len(buf8)) {
 		return errTxPacketTooLarge
 	}
 	d.log_read()
