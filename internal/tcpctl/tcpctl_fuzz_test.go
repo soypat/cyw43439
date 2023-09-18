@@ -15,10 +15,14 @@ func FuzzSocket(f *testing.F) {
 		MaxUDPConns: 2,
 		MaxTCPConns: 2,
 	}
-	for i := range testTCPPackets {
-		f.Add(2, 2, testTCPPackets[i])
+	for _, packet := range testTCPPackets {
+		f.Add(2, 2, packet)
+	}
+	for _, packet := range interestingPackets {
+		f.Add(2, 2, packet)
 	}
 	f.Add(2, 2, testUDPPacket)
+	var buf [_MTU]byte
 	f.Fuzz(func(t *testing.T, nTCP, nUDP int, eth []byte) {
 		if uint(nTCP) > 3 || uint(nUDP) > 3 {
 			return
@@ -50,7 +54,7 @@ func FuzzSocket(f *testing.F) {
 		if err != nil {
 			return
 		}
-		s.HandleEth(eth)
+		s.HandleEth(buf[:])
 	})
 }
 
@@ -127,4 +131,10 @@ var testTCPPackets = [][]byte{
 		0x7d, 0x7b, 0x69, 0x70, 0x69, 0x6e, 0x66, 0x6f, 0x3a, 0x3a, 0x26, 0x6e, 0x62, 0x73, 0x70, 0x3b,
 		0x49, 0x50, 0x3a, 0x20, 0x30, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x30, 0x7d,
 	},
+}
+
+var interestingPackets = [][]byte{
+	[]byte("0"),
+	[]byte("000000000000\b\x00E0\x00<00000\x0600\xc0\xa8\x01\x93\xc0\xa8\x01\x01Ā\x00P\x16]\xc5e\x00\x00\x00\x00\xa0\x02\xfa\xf0\x11|\x00\x00\x02\x04\x05\xf1\xf1\xf1\xf1\xf1\xf1\xf1\xff\xfc\x00\x00\x00\x00\x01\x03\x03\a"),
+	[]byte("000000000000\b\x00E0\x00C0000000000000000"),
 }
