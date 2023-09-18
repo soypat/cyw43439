@@ -20,6 +20,7 @@ type StackConfig struct {
 	MAC         net.HardwareAddr
 	IP          net.IP
 	MaxUDPConns int
+	MaxTCPConns int
 }
 
 // NewStack creates a ready to use TCP/UDP Stack instance.
@@ -28,6 +29,7 @@ func NewStack(cfg StackConfig) *Stack {
 	s.MAC = cfg.MAC
 	s.IP = cfg.IP
 	s.UDPv4 = make([]udpSocket, cfg.MaxUDPConns)
+	s.TCPv4 = make([]tcpSocket, cfg.MaxTCPConns)
 	return &s
 }
 
@@ -78,7 +80,9 @@ func (s *Stack) RecvEth(ethernetFrame []byte) (err error) {
 			s.error("Stack.RecvEth", slog.String("err", err.Error()), slog.Any("IP", ihdr))
 		} else {
 			s.lastRxSuccess = s.lastRx
-			s.GlobalHandler(ethernetFrame)
+			if s.GlobalHandler != nil {
+				s.GlobalHandler(ethernetFrame)
+			}
 		}
 	}()
 	payload := ethernetFrame
@@ -108,7 +112,7 @@ func (s *Stack) RecvEth(ethernetFrame []byte) (err error) {
 		return errInvalidIHL
 	case s.IP != nil && string(ihdr.Destination[:]) != string(s.IP):
 		return nil // Not for us.
-	case uint16(offset) > end || int(offset) > len(payload):
+	case uint16(offset) > end || int(offset) > len(payload) || int(end) > len(payload):
 		return errors.New("bad IP TotalLength/IHL")
 	case end > _MTU:
 		return errPacketExceedsMTU
@@ -404,7 +408,7 @@ func (s *Stack) CloseTCP(port uint16) error {
 }
 
 func (s *Stack) getTCP(port uint16) *tcpSocket {
-	for i := range s.UDPv4 {
+	for i := range s.TCPv4 {
 		socket := &s.TCPv4[i]
 		if socket.Port == port {
 			return socket
