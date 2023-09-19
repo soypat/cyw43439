@@ -22,6 +22,10 @@ type TCPPacket struct {
 	payload [_MTU - eth.SizeEthernetHeader - eth.SizeIPv4Header - eth.SizeTCPHeader]byte
 }
 
+func (p *TCPPacket) String() string {
+	return "TCP Packet: " + p.Eth.String() + p.IP.String() + p.TCP.String() + " payload:" + strconv.Quote(string(p.Payload()))
+}
+
 // NeedsHandling returns true if the socket needs handling before it can
 // admit more pending packets.
 func (u *tcpSocket) NeedsHandling() bool {

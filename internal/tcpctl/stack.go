@@ -48,6 +48,7 @@ type Stack struct {
 	pendingTCPv4     uint32
 	droppedPackets   uint32
 	processedPackets uint32
+	level            slog.Level
 }
 
 // Common errors.
@@ -418,15 +419,21 @@ func (s *Stack) getTCP(port uint16) *tcpSocket {
 }
 
 func (s *Stack) info(msg string, attrs ...slog.Attr) {
-	logAttrsPrint(slog.LevelInfo, msg, attrs...)
+	s.logAttrsPrint(slog.LevelInfo, msg, attrs...)
 }
 
 func (s *Stack) error(msg string, attrs ...slog.Attr) {
-	logAttrsPrint(slog.LevelError, msg, attrs...)
+	s.logAttrsPrint(slog.LevelError, msg, attrs...)
 }
 
 func (s *Stack) debug(msg string, attrs ...slog.Attr) {
-	logAttrsPrint(slog.LevelDebug, msg, attrs...)
+	s.logAttrsPrint(slog.LevelDebug, msg, attrs...)
+}
+
+func (s *Stack) logAttrsPrint(level slog.Level, msg string, attrs ...slog.Attr) {
+	if s.level <= level {
+		logAttrsPrint(level, msg, attrs...)
+	}
 }
 
 func logAttrsPrint(level slog.Level, msg string, attrs ...slog.Attr) {
