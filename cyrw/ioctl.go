@@ -81,7 +81,7 @@ func (d *Device) tx(packet []byte) (err error) {
 
 	const PADDING_SIZE = 2
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + PADDING_SIZE + whd.BDC_HEADER_LEN + len(packet))
-	if totalLen > uint32(len(buf8)) || len(packet) > 0xffff {
+	if totalLen > uint32(len(buf8)) {
 		return errTxPacketTooLarge
 	}
 	d.log_read()
@@ -471,7 +471,7 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 		}
 	}()
 	// Split packet into BDC header:payload.
-	if len(packet) < whd.BDC_HEADER_LEN+72 {
+	if len(packet) < whd.BDC_HEADER_LEN {
 		return errPacketSmol
 	}
 	bdcHdr = whd.DecodeBDCHeader(packet)
