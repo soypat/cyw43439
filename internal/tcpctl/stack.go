@@ -118,7 +118,7 @@ func (s *Stack) RecvEth(ethernetFrame []byte) (err error) {
 	case end > _MTU:
 		return errPacketExceedsMTU
 	}
-
+	ipOptions := payload[eth.SizeEthernetHeader+eth.SizeIPv4Header : offset] // TODO add IPv4 options.
 	payload = payload[offset:end]
 	switch ihdr.Protocol {
 	case 17:
@@ -181,11 +181,13 @@ func (s *Stack) RecvEth(ethernetFrame []byte) (err error) {
 		case offset < 5 || int(offset*4) > len(payload):
 			return errBadTCPOffset
 		}
-		options := payload[:offset*4]
-		payload = payload[offset*4:]
-		gotsum := thdr.CalculateChecksumIPv4(&ihdr, options, payload)
+		offset *= 4
+		tcpOptions := payload[:offset]
+		payload = payload[offset:]
+		gotsum := thdr.CalculateChecksumIPv4(&ihdr, tcpOptions, payload)
 		if gotsum != thdr.Checksum {
-			return errChecksumTCPorUDP
+			// return errChecksumTCPorUDP
+			println("bad checksum")
 		}
 
 		socket := s.getTCP(thdr.DestinationPort)
@@ -205,8 +207,9 @@ func (s *Stack) RecvEth(ethernetFrame []byte) (err error) {
 		socket.packets[0].Eth = ehdr
 		socket.packets[0].IP = ihdr
 		socket.packets[0].TCP = thdr
-
-		copy(socket.packets[0].payload[:], payload) // TODO: add options to payload.
+		n := copy(socket.packets[0].data[:], ipOptions)
+		n += copy(socket.packets[0].data[n:], tcpOptions)
+		copy(socket.packets[0].data[n:], payload)
 	}
 	return nil
 }

@@ -8,17 +8,13 @@ import (
 	"github.com/soypat/cyw43439/internal/tcpctl/eth"
 )
 
-// TCPController specifies TCP connection state logic to interact with incoming packets
+// tcpController specifies TCP connection state logic to interact with incoming packets
 // and send correctly marshalled outgoing packets.
-type TCPController struct {
+type tcpController struct {
 	cs      connState
 	ourPort uint16
 	us      netip.AddrPort
 	them    netip.AddrPort
-	rcv     func([]byte)
-
-	pending     int
-	pendingSend [_MTU - eth.SizeEthernetHeader - eth.SizeIPv4Header - eth.SizeTCPHeader]byte
 }
 
 // connState contains the state of a TCP connection likely to change throughout
@@ -69,45 +65,31 @@ type rcvSpace struct {
 	UP  bool   // receive urgent pointer (deprecated)
 }
 
-// HandleTCP meant to be attached to a TCP socket on a [Stack].
-func (c *TCPController) HandleTCP(resp []byte, packet *TCPPacket) (n int, err error) {
+// handleTCP handles an incoming TCP packet and modifies the corresponding internal state.
+// If the output number of bytes written of handleTCP is non-zero then
+// a control packet has been written to dst.
+// packet is modified to be the data of the packet being sent.
+func (c *tcpController) handleTCP(dst []byte, packet *TCPPacket) (n int, err error) {
 	const (
 		payloadOffset = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeTCPHeader
 	)
-
-	switch packet.HasPacket() {
-	case true:
-		// User packet outgoing case.
-		if c.pending > 0 {
-			payload := c.pendingSend[:c.pending]
-			c.setResponseTCP(packet, payload)
-			packet.PutHeaders(resp)
-			n += payloadOffset
-			n += copy(resp[payloadOffset:], payload)
-		}
-
-	case false:
-		// Packet incoming case.
-		thdr := &packet.TCP
-		payload := packet.Payload()
-		plen := len(payload)
-		err = c.cs.validateHeader(thdr, plen)
-		if err != nil {
-			return 0, err
-		}
-		c.cs.frameRcv(thdr, plen)
-
-		if plen > 0 {
-			c.rcv(payload)
-		}
-		if c.cs.pendingCtlFrame != 0 {
-			// There is a pending CTL packet to send, we make use of this moment to
-			// write our CTL response.
-			c.setResponseTCP(packet, nil)
-			packet.PutHeaders(resp)
-			n = payloadOffset
-		}
+	thdr := &packet.TCP
+	payload := packet.Payload()
+	plen := len(payload)
+	err = c.cs.validateHeader(thdr, plen)
+	if err != nil {
+		return 0, err
 	}
+	c.cs.frameRcv(thdr, plen)
+
+	if c.cs.pendingCtlFrame != 0 {
+		// There is a pending CTL packet to send, we make use of this moment to
+		// write our CTL response.
+		c.setResponseTCP(packet, nil)
+		packet.PutHeaders(dst)
+		n = payloadOffset
+	}
+
 	return n, nil
 }
 
@@ -151,7 +133,7 @@ func (cs *connState) validateHeader(hdr *eth.TCPHeader, plen int) (err error) {
 	return err
 }
 
-func (c *TCPController) setResponseTCP(packet *TCPPacket, payload []byte) {
+func (c *tcpController) setResponseTCP(packet *TCPPacket, payload []byte) {
 	const ipLenInWords = 5
 	// Ethernet frame.
 	for i := 0; i < 6; i++ {

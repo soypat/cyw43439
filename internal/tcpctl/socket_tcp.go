@@ -12,14 +12,16 @@ type tcpSocket struct {
 	handler func(response []byte, self *TCPPacket) (int, error)
 	Port    uint16
 	packets [1]TCPPacket
+	ctl     tcpController
 }
 
 type TCPPacket struct {
-	Rx      time.Time
-	Eth     eth.EthernetHeader
-	IP      eth.IPv4Header
-	TCP     eth.TCPHeader
-	payload [_MTU - eth.SizeEthernetHeader - eth.SizeIPv4Header - eth.SizeTCPHeader]byte
+	Rx  time.Time
+	Eth eth.EthernetHeader
+	IP  eth.IPv4Header
+	TCP eth.TCPHeader
+	// data contains TCP options and then the actual data.
+	data [_MTU - eth.SizeEthernetHeader - eth.SizeIPv4Header - eth.SizeTCPHeader]byte
 }
 
 func (p *TCPPacket) String() string {
@@ -43,14 +45,26 @@ func (u *tcpSocket) IsPendingHandling() bool {
 // HandleEth writes the socket's response into dst to be sent over an ethernet interface.
 // HandleEth can return 0 bytes written and a nil error to indicate no action must be taken.
 // If
-func (u *tcpSocket) HandleEth(dst []byte) (int, error) {
+func (u *tcpSocket) HandleEth(dst []byte) (n int, err error) {
 	if u.handler == nil {
 		panic("nil udp handler on port " + strconv.Itoa(int(u.Port)))
 	}
 	packet := &u.packets[0]
+	if packet.HasPacket() {
+		// The normal case, we've received a packet and need to process it
+		// via TCP control logic. The TCP controller can choose to write a
+		// control packet to dst or not. We'll know because the packet will
+		// will be marked with PSH flag to mark it as non-control packet.
+		n, err = u.ctl.handleTCP(dst, packet)
+		if packet.TCP.Flags().HasFlags(eth.FlagTCP_PSH) {
+			n, err = u.handler(dst, &u.packets[0]) // TODO: I'm not happy with this API.
+		}
+	} else {
+		// If no packet is pending the user has likely flagged they want to send a packet
+		n, err = u.handler(dst, &u.packets[0])
+	}
 
-	n, err := u.handler(dst, &u.packets[0])
-	packet.Rx = time.Time{} // Invalidate packet.
+	packet.Rx = time.Time{} // Invalidate packet. TODO(soypat): we'll often send more than a single packet...
 	return n, err
 }
 
@@ -93,7 +107,7 @@ func (u *TCPPacket) HasPacket() bool {
 }
 
 // PutHeaders puts the Ethernet, IPv4 and TCP headers into b.
-// b must be at least 54 bytes or else PutHeaders panics.
+// b must be at least 54 bytes or else PutHeaders panics. No options are marshalled.
 func (p *TCPPacket) PutHeaders(b []byte) {
 	const minSize = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeTCPHeader
 	if len(b) < minSize {
@@ -104,17 +118,59 @@ func (p *TCPPacket) PutHeaders(b []byte) {
 	p.TCP.Put(b[eth.SizeEthernetHeader+eth.SizeIPv4Header:])
 }
 
+func (p *TCPPacket) PutHeadersWithOptions(b []byte) error {
+	const minSize = eth.SizeEthernetHeader + eth.SizeIPv4Header + eth.SizeTCPHeader
+	if len(b) < minSize {
+		panic("short tcpPacket buffer")
+	}
+	panic("PutHeadersWithOptions not implemented")
+}
+
 // Payload returns the UDP payload. If UDP or IPv4 header data is incorrect/bad it returns nil.
 // If the response is "forced" then payload will be nil.
 func (p *TCPPacket) Payload() []byte {
 	if !p.HasPacket() {
 		return nil
 	}
-	// TODO(soypat): store TCP options in payload.
-	// options := p.payload[:p.TCP.OffsetInBytes()-eth.SizeTCPHeader]
-	ipLen := int(p.IP.TotalLength) - int(p.IP.IHL()*4) - eth.SizeTCPHeader // Total length(including header) - header length = payload length
-	if ipLen > len(p.payload) {
-		return nil // Mismatching IP and UDP data or bad length.
+	payloadStart, payloadEnd, _ := p.dataPtrs()
+	if payloadStart < 0 {
+		return nil // Bad header value
 	}
-	return p.payload[:ipLen]
+	return p.data[payloadStart:payloadEnd]
+}
+
+// Options returns the TCP options in the packet.
+func (p *TCPPacket) TCPOptions() []byte {
+	if !p.HasPacket() {
+		return nil
+	}
+	payloadStart, _, tcpOptStart := p.dataPtrs()
+	if payloadStart < 0 {
+		return nil // Bad header value
+	}
+	return p.data[tcpOptStart:payloadStart]
+}
+
+// Options returns the TCP options in the packet.
+func (p *TCPPacket) IPOptions() []byte {
+	if !p.HasPacket() {
+		return nil
+	}
+	_, _, tcpOpts := p.dataPtrs()
+	if tcpOpts < 0 {
+		return nil // Bad header value
+	}
+	return p.data[:tcpOpts]
+}
+
+//go:inline
+func (p *TCPPacket) dataPtrs() (payloadStart, payloadEnd, tcpOptStart int) {
+	tcpOptStart = int(4*p.IP.IHL()) - eth.SizeIPv4Header
+	payloadStart = tcpOptStart + int(p.TCP.OffsetInBytes()) - eth.SizeTCPHeader
+	payloadEnd = int(p.IP.TotalLength) - tcpOptStart - eth.SizeTCPHeader - eth.SizeIPv4Header
+	if payloadStart < 0 || payloadEnd < 0 || tcpOptStart < 0 || payloadStart > payloadEnd ||
+		payloadEnd > len(p.data) || tcpOptStart > payloadStart {
+		return -1, -1, -1
+	}
+	return payloadStart, payloadEnd, tcpOptStart
 }

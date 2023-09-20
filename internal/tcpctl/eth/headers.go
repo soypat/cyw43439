@@ -343,15 +343,27 @@ func (iphdr *IPv4Header) Put(buf []byte) {
 
 // PutPseudo marshals the pseudo-header representation of IPv4 frame onto buf.
 // buf needs to be 12 bytes in length or PutPseudo panics.
+//
+//	+--------+--------+--------+--------+
+//	|           Source Address          |
+//	+--------+--------+--------+--------+
+//	|         Destination Address       |
+//	+--------+--------+--------+--------+
+//	|  zero  |  PTCL  |    TCP Length   |
+//	+--------+--------+--------+--------+
+//
+// The TCP Length is the TCP header length plus the data length in octets
+// (this is not an explicitly transmitted quantity, but is computed),
+// and it does not count the 12 octets of the pseudo header (See [RFC 793])
+//
+// [RFC 793]: https://www.rfc-editor.org/rfc/rfc793
 func (iphdr *IPv4Header) PutPseudo(buf []byte) {
-	// |8 TTL |9 Proto |10 Checksum |12  Source  |16  Destination |20
-	// |set 0 |  nop   | set length | nop        | nop            |
 	_ = buf[11]
-	buf[0] = 0
-	buf[1] = iphdr.Protocol
-	binary.BigEndian.PutUint16(buf[2:], iphdr.TotalLength)
-	copy(buf[4:8], iphdr.Source[:])
-	copy(buf[8:12], iphdr.Destination[:])
+	copy(buf[0:4], iphdr.Source[:])
+	copy(buf[4:8], iphdr.Destination[:])
+	buf[8] = 0
+	buf[9] = iphdr.Protocol
+	binary.BigEndian.PutUint16(buf[10:12], iphdr.TotalLength)
 }
 
 func (iphdr *IPv4Header) CalculateChecksum() uint16 {
@@ -405,7 +417,7 @@ func (udphdr *UDPHeader) Put(buf []byte) {
 // CalculateChecksumIPv4 calculates the checksum for a UDP packet over IPv4.
 func (udphdr *UDPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, payload []byte) uint16 {
 	const sizePseudo = 12
-	crc := CRC791{}
+	var crc CRC791
 	crc.Write(pseudoHeader.Source[:])
 	crc.Write(pseudoHeader.Destination[:])
 	crc.AddUint16(uint16(pseudoHeader.Protocol)) // Pads with 0.
@@ -499,13 +511,13 @@ func (tcphdr *TCPHeader) SetOffset(tcpWords uint8) {
 		panic("attempted to set an offset too large")
 	}
 	onlyFlags := tcphdr.OffsetAndFlags[0] & tcpFlagmask
-	tcphdr.OffsetAndFlags[0] |= onlyFlags | (uint16(tcpWords) << 12)
+	tcphdr.OffsetAndFlags[0] = onlyFlags | (uint16(tcpWords) << 12)
 }
 
 // CalculateChecksumIPv4 calculates the checksum of the TCP header, options and payload.
 func (tcphdr *TCPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, tcpOptions, payload []byte) uint16 {
 	const sizePseudo = 12
-	crc := CRC791{}
+	var crc CRC791
 	var buf [sizePseudo + 20]byte
 	pseudoHeader.PutPseudo(buf[:sizePseudo])
 	tcphdr.Put(buf[sizePseudo:])
