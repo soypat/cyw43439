@@ -1,4 +1,4 @@
-//go:build pico
+//go:build pico && cy43nopio
 
 package cyrw
 
@@ -55,7 +55,11 @@ func DefaultNew() *Device {
 	mockCS.Configure(OUT)
 	mockCS.High()
 	spi.Configure()
-	return New(WL_REG_ON.Set, CS.Set, spi)
+	bus := spibus{
+		cs:  CS.Set,
+		spi: spi,
+	}
+	return New(WL_REG_ON.Set, CS.Set, bus)
 }
 
 const (

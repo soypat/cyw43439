@@ -1,0 +1,79 @@
+//go:build pico && !cy43nopio
+
+package cyrw
+
+import (
+	"encoding/binary"
+	"machine"
+
+	pio "github.com/tinygo-org/pio/rp2-pio"
+	"github.com/tinygo-org/pio/rp2-pio/piolib"
+)
+
+var _busOrder = binary.LittleEndian
+
+type spibus struct {
+	cs  OutputPin
+	spi piolib.SPI3w
+}
+
+func DefaultNew() *Device {
+	// Raspberry Pi Pico W pin definitions for the CY43439.
+	const (
+		// WL_REG_ON = machine.GPIO23
+		// DATA_OUT  = machine.GPIO24
+		// DATA_IN   = machine.GPIO24
+		// IRQ       = machine.GPIO24 // AKA WL_HOST_WAKE
+		// CLK       = machine.GPIO29
+		// CS        = machine.GPIO25
+		WL_REG_ON = machine.GPIO23
+		DATA_OUT  = machine.GPIO24
+		DATA_IN   = DATA_OUT
+		CLK       = machine.GPIO29
+		CS        = machine.GPIO25
+	)
+	WL_REG_ON.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	CS.Configure(machine.PinConfig{Mode: machine.PinOutput})
+	CS.High()
+	sm, err := pio.PIO0.ClaimStateMachine()
+	if err != nil {
+		panic(err.Error())
+	}
+	spi, err := piolib.NewSPI3w(sm, DATA_IN, CLK, 500_000)
+	if err != nil {
+		panic(err.Error())
+	}
+	spi.EnableStatus(true)
+	err = spi.EnableDMA(true)
+	if err != nil {
+		panic(err.Error())
+	}
+	return New(WL_REG_ON.Set, CS.Set, spibus{
+		cs:  CS.Set,
+		spi: *spi,
+	})
+}
+
+func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {
+	d.csEnable(true)
+	err = d.spi.CmdRead(cmd, buf)
+	d.csEnable(false)
+	return d.spi.LastStatus(), err
+}
+
+func (d *spibus) cmd_write(buf []uint32) (status uint32, err error) {
+	// TODO(soypat): add cmd as argument and remove copies elsewhere?
+	d.csEnable(true)
+	err = d.spi.CmdWrite(buf[0], buf[1:])
+	d.csEnable(false)
+	return d.spi.LastStatus(), err
+}
+
+func (d *spibus) csEnable(b bool) {
+	d.cs(!b)
+	// machine.GPIO1.Set(!b) // When mocking.
+}
+
+func (d *spibus) Status() Status {
+	return Status(d.spi.LastStatus())
+}

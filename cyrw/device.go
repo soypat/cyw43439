@@ -8,7 +8,6 @@ import (
 
 	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
-	"tinygo.org/x/drivers"
 )
 
 type OutputPin func(bool)
@@ -47,13 +46,10 @@ type Device struct {
 	level           slog.Level
 }
 
-func New(pwr, cs OutputPin, spi drivers.SPI) *Device {
+func New(pwr, cs OutputPin, spi spibus) *Device {
 	d := &Device{
-		pwr: pwr,
-		spi: spibus{
-			spi: spi,
-			cs:  cs,
-		},
+		pwr:         pwr,
+		spi:         spi,
 		sdpcmSeqMax: 1,
 	}
 	return d
