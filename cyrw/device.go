@@ -123,16 +123,16 @@ func (d *Device) Init(cfg Config) (err error) {
 		return errors.New("core not up after reset")
 	}
 	d.debug("core up")
-	retries := 256
+	deadline := time.Now().Add(20 * time.Millisecond)
 	for {
 		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
 		if got&0x80 != 0 {
 			break
 		}
-		if retries <= 0 {
+		if time.Since(deadline) >= 0 {
 			return errors.New("timeout waiting for chip clock")
 		}
-		retries--
+		runtime.Gosched()
 	}
 
 	// "Set up the interrupt mask and enable interrupts"
@@ -145,12 +145,12 @@ func (d *Device) Init(cfg Config) (err error) {
 	d.write8(FuncBackplane, REG_BACKPLANE_FUNCTION2_WATERMARK, 32)
 
 	// Wait for wifi startup.
-	retries = 1000
+	deadline = time.Now().Add(100 * time.Millisecond)
 	for !d.status().F2RxReady() {
-		retries--
-		if retries <= 0 {
+		if time.Since(deadline) >= 0 {
 			return errors.New("wifi startup timeout")
 		}
+		runtime.Gosched()
 	}
 
 	// Clear pulls.

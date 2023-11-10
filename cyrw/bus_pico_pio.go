@@ -20,12 +20,7 @@ type spibus struct {
 func DefaultNew() *Device {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
 	const (
-		// WL_REG_ON = machine.GPIO23
-		// DATA_OUT  = machine.GPIO24
-		// DATA_IN   = machine.GPIO24
 		// IRQ       = machine.GPIO24 // AKA WL_HOST_WAKE
-		// CLK       = machine.GPIO29
-		// CS        = machine.GPIO25
 		WL_REG_ON = machine.GPIO23
 		DATA_OUT  = machine.GPIO24
 		DATA_IN   = DATA_OUT
@@ -39,7 +34,7 @@ func DefaultNew() *Device {
 	if err != nil {
 		panic(err.Error())
 	}
-	spi, err := piolib.NewSPI3w(sm, DATA_IN, CLK, 500_000)
+	spi, err := piolib.NewSPI3w(sm, DATA_IN, CLK, 25000_000-1)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -61,10 +56,10 @@ func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {
 	return d.spi.LastStatus(), err
 }
 
-func (d *spibus) cmd_write(buf []uint32) (status uint32, err error) {
+func (d *spibus) cmd_write(cmd uint32, buf []uint32) (status uint32, err error) {
 	// TODO(soypat): add cmd as argument and remove copies elsewhere?
 	d.csEnable(true)
-	err = d.spi.CmdWrite(buf[0], buf[1:])
+	err = d.spi.CmdWrite(cmd, buf)
 	d.csEnable(false)
 	return d.spi.LastStatus(), err
 }

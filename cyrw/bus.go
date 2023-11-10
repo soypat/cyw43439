@@ -206,10 +206,8 @@ func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
 }
 
 func (d *Device) wlan_write(data []uint32, plen uint32) (err error) {
-	var buf [513]uint32
-	buf[0] = cmd_word(true, true, FuncWLAN, 0, plen)
-	copy(buf[1:], data)
-	_, err = d.spi.cmd_write(buf[:len(data)+1])
+	cmd := cmd_word(true, true, FuncWLAN, 0, plen)
+	_, err = d.spi.cmd_write(cmd, data)
 	d.lastStatusGet = time.Now()
 	return err
 }
@@ -271,7 +269,7 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 		slog.String("last16", hex.EncodeToString(data[max(0, len(data)-16):])), // mismatch with reference?
 	)
 	var buf [maxTxSize/4 + 1]uint32
-	buf8 := unsafeAsSlice[uint32, byte](buf[1:]) // Slice excluding first word reserved for command.
+	buf8 := unsafeAsSlice[uint32, byte](buf[:])
 	for err == nil && len(data) > 0 {
 		// Calculate address and length of next write to ensure transfer doesn't cross a window boundary.
 		windowOffset := addr & whd.BACKPLANE_ADDR_MASK
@@ -283,9 +281,9 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 		if err != nil {
 			return err
 		}
-		buf[0] = cmd_word(true, true, FuncBackplane, windowOffset, length)
+		cmd := cmd_word(true, true, FuncBackplane, windowOffset, length)
 
-		_, err = d.spi.cmd_write(buf[:(length+3)/4+1])
+		_, err = d.spi.cmd_write(cmd, buf[:(length+3)/4+1])
 		addr += length
 		data = data[length:]
 	}
@@ -396,8 +394,8 @@ func (d *Device) write8(fn Function, addr uint32, val uint8) error {
 // writen is primitive SPI write function for <= 4 byte writes.
 func (d *Device) writen(fn Function, addr, val, size uint32) (err error) {
 	cmd := cmd_word(true, true, fn, addr, size)
-	d.rwBuf = [2]uint32{cmd, val}
-	_, err = d.spi.cmd_write(d.rwBuf[:2])
+	d.rwBuf = [2]uint32{val, 0}
+	_, err = d.spi.cmd_write(cmd, d.rwBuf[:1])
 	d.lastStatusGet = time.Now()
 	return err
 }
@@ -424,8 +422,8 @@ func (d *Device) read32_swapped(addr uint32) uint32 {
 }
 func (d *Device) write32_swapped(addr uint32, value uint32) {
 	cmd := cmd_word(true, true, FuncBus, addr, 4)
-	d.rwBuf = [2]uint32{swap16(cmd), swap16(value)}
-	d.spi.cmd_write(d.rwBuf[:2])
+	d.rwBuf = [2]uint32{swap16(value), 0}
+	d.spi.cmd_write(swap16(cmd), d.rwBuf[:1])
 }
 
 func u32AsU8(buf []uint32) []byte {
