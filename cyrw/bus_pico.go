@@ -1,4 +1,4 @@
-//go:build pico
+//go:build pico && cy43nopio
 
 package cyrw
 
@@ -55,7 +55,11 @@ func DefaultNew() *Device {
 	mockCS.Configure(OUT)
 	mockCS.High()
 	spi.Configure()
-	return New(WL_REG_ON.Set, CS.Set, spi)
+	bus := spibus{
+		cs:  CS.Set,
+		spi: spi,
+	}
+	return New(WL_REG_ON.Set, CS.Set, bus)
 }
 
 const (
@@ -83,12 +87,13 @@ func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {
 	return d.status, err
 }
 
-func (d *spibus) cmd_write(buf []uint32) (status uint32, err error) {
+func (d *spibus) cmd_write(cmd uint32, buf []uint32) (status uint32, err error) {
 	// TODO(soypat): add cmd as argument and remove copies elsewhere?
 	d.csEnable(true)
 	if sharedDATA {
 		sdPin.Configure(machine.PinConfig{Mode: machine.PinOutput})
 	}
+	d.transfer(cmd)
 	for i := range buf {
 		d.transfer(buf[i])
 	}
