@@ -145,8 +145,9 @@ type TCPHeader struct {
 	// The sequence number of the first data octet in this segment (except when SYN present)
 	// If SYN present this is the Initial Sequence Number (ISN) and the first data octet would be ISN+1.
 	Seq seqs.Value // 4:8
-	// If ACK present this contains the value of the next sequence number (Seq field) the sender is
-	// expecting to receive. Once a connection is established the ACK flag should always be set.
+	// Value of the next sequence number (Seq field) the sender is expecting to receive (when ACK is present).
+	// In other words an Ack of X indicates all octets up to but not including X have been received.
+	// Once a connection is established the ACK flag should always be set.
 	Ack seqs.Value // 8:12
 	// Contains 4 bit TCP offset (in 32bit words), the 6 bit TCP flags field and a 6 bit reserved field.
 	OffsetAndFlags [1]uint16 // 12:14 bitfield
@@ -197,18 +198,6 @@ const (
 	// TCP words are 4 octals, or uint32s
 	tcpWordlen         = 4
 	tcpFlagmask uint16 = 0x01ff
-)
-
-const (
-	FlagTCP_FIN TCPFlags = 1 << iota
-	FlagTCP_SYN
-	FlagTCP_RST
-	FlagTCP_PSH
-	FlagTCP_ACK
-	FlagTCP_URG
-	FlagTCP_ECE
-	FlagTCP_CWR
-	FlagTCP_NS
 )
 
 // These are minimum sizes that do not take into consideration the presence of
@@ -503,11 +492,11 @@ func (tcphdr *TCPHeader) OffsetInBytes() uint8 {
 	return tcphdr.Offset() * tcpWordlen
 }
 
-func (tcphdr *TCPHeader) Flags() TCPFlags {
-	return TCPFlags(tcphdr.OffsetAndFlags[0] & tcpFlagmask)
+func (tcphdr *TCPHeader) Flags() seqs.Flags {
+	return seqs.Flags(tcphdr.OffsetAndFlags[0] & tcpFlagmask)
 }
 
-func (tcphdr *TCPHeader) SetFlags(v TCPFlags) {
+func (tcphdr *TCPHeader) SetFlags(v seqs.Flags) {
 	onlyOffset := tcphdr.OffsetAndFlags[0] &^ tcpFlagmask
 	tcphdr.OffsetAndFlags[0] = onlyOffset | uint16(v)&tcpFlagmask
 }
@@ -543,44 +532,6 @@ func (tcphdr *TCPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, tcpOpti
 func (tcp *TCPHeader) String() string {
 	return strcat("TCP port ", u32toa(uint32(tcp.SourcePort)), "->", u32toa(uint32(tcp.DestinationPort)),
 		tcp.Flags().String(), "seq ", u32toa(uint32(tcp.Seq)), " ack ", u32toa(uint32(tcp.Ack)))
-}
-
-type TCPFlags uint16
-
-// HasFlags checks if argument bits are all set in the receiver flags.
-func (flags TCPFlags) HasFlags(argument TCPFlags) bool { return argument&flags == argument }
-
-// StringFlags returns human readable flag string. i.e:
-//
-//	"[SYN,ACK]"
-//
-// Flags are printed in order from LSB (FIN) to MSB (NS).
-// All flags are printed with length of 3, so a NS flag will
-// end with a space i.e. [ACK,NS ]
-func (flags TCPFlags) String() string {
-	// String Flag const
-	const flaglen = 3
-	var flagbuff [2 + (flaglen+1)*9]byte
-	const strflags = "FINSYNRSTPSHACKURGECECWRNS "
-	n := 0
-	for i := 0; i*3 < len(strflags)-flaglen; i++ {
-		if flags&(1<<i) != 0 {
-			if n == 0 {
-				flagbuff[0] = '['
-				n++
-			} else {
-				flagbuff[n] = ','
-				n++
-			}
-			copy(flagbuff[n:n+3], []byte(strflags[i*flaglen:i*flaglen+flaglen]))
-			n += 3
-		}
-	}
-	if n > 0 {
-		flagbuff[n] = ']'
-		n++
-	}
-	return string(flagbuff[:n])
 }
 
 func u32toa(u uint32) string {

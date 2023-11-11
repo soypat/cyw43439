@@ -1,5 +1,8 @@
 /*
 package seqs implements sequence number operations as per RFC 793.
+
+All arithmetic dealing with sequence numbers must be performed modulo 2**32
+which brings with it subtleties to computer modulo arithmetic.
 */
 package seqs
 

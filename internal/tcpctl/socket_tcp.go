@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/soypat/cyw43439/internal/tcpctl/eth"
+	"github.com/soypat/cyw43439/internal/tcpctl/eth/seqs"
 )
 
 type tcpSocket struct {
@@ -56,7 +57,7 @@ func (u *tcpSocket) HandleEth(dst []byte) (n int, err error) {
 		// control packet to dst or not. We'll know because the packet will
 		// will be marked with PSH flag to mark it as non-control packet.
 		n, err = u.ctl.handleTCP(dst, packet)
-		if packet.TCP.Flags().HasFlags(eth.FlagTCP_PSH) {
+		if packet.TCP.Flags().HasAny(seqs.FlagPSH) {
 			n, err = u.handler(dst, &u.packets[0]) // TODO: I'm not happy with this API.
 		}
 	} else {
