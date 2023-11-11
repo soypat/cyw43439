@@ -37,6 +37,8 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+
+	"github.com/soypat/cyw43439/internal/tcpctl/eth/seqs"
 )
 
 // EthernetHeader is a 14 byte ethernet header representation with no VLAN support on its own.
@@ -138,14 +140,19 @@ type IPv4Header struct {
 
 // TCPHeader are the first 20 bytes of a TCP header. Does not include options.
 type TCPHeader struct {
-	SourcePort      uint16    // 0:2
-	DestinationPort uint16    // 2:4
-	Seq             uint32    // 4:8
-	Ack             uint32    // 8:12
-	OffsetAndFlags  [1]uint16 // 12:14 bitfield
-	WindowSize      uint16    // 14:16
-	Checksum        uint16    // 16:18
-	UrgentPtr       uint16    // 18:20
+	SourcePort      uint16 // 0:2
+	DestinationPort uint16 // 2:4
+	// The sequence number of the first data octet in this segment (except when SYN present)
+	// If SYN present this is the Initial Sequence Number (ISN) and the first data octet would be ISN+1.
+	Seq seqs.Value // 4:8
+	// If ACK present this contains the value of the next sequence number (Seq field) the sender is
+	// expecting to receive. Once a connection is established the ACK flag should always be set.
+	Ack seqs.Value // 8:12
+	// Contains 4 bit TCP offset (in 32bit words), the 6 bit TCP flags field and a 6 bit reserved field.
+	OffsetAndFlags [1]uint16 // 12:14 bitfield
+	WindowSizeRaw  uint16    // 14:16
+	Checksum       uint16    // 16:18
+	UrgentPtr      uint16    // 18:20
 }
 
 // UDPHeader represents a UDP header. 8 bytes in size. UDP is protocol 17.
@@ -416,7 +423,6 @@ func (udphdr *UDPHeader) Put(buf []byte) {
 
 // CalculateChecksumIPv4 calculates the checksum for a UDP packet over IPv4.
 func (udphdr *UDPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, payload []byte) uint16 {
-	const sizePseudo = 12
 	var crc CRC791
 	crc.Write(pseudoHeader.Source[:])
 	crc.Write(pseudoHeader.Destination[:])
@@ -460,10 +466,10 @@ func DecodeTCPHeader(buf []byte) (tcphdr TCPHeader) {
 	_ = buf[19]
 	tcphdr.SourcePort = binary.BigEndian.Uint16(buf[0:])
 	tcphdr.DestinationPort = binary.BigEndian.Uint16(buf[2:])
-	tcphdr.Seq = binary.BigEndian.Uint32(buf[4:])
-	tcphdr.Ack = binary.BigEndian.Uint32(buf[8:])
+	tcphdr.Seq = seqs.Value(binary.BigEndian.Uint32(buf[4:]))
+	tcphdr.Ack = seqs.Value(binary.BigEndian.Uint32(buf[8:]))
 	tcphdr.OffsetAndFlags[0] = binary.BigEndian.Uint16(buf[12:])
-	tcphdr.WindowSize = binary.BigEndian.Uint16(buf[14:])
+	tcphdr.WindowSizeRaw = binary.BigEndian.Uint16(buf[14:])
 	tcphdr.Checksum = binary.BigEndian.Uint16(buf[16:])
 	tcphdr.UrgentPtr = binary.BigEndian.Uint16(buf[18:])
 	return tcphdr
@@ -474,10 +480,10 @@ func (tcphdr *TCPHeader) Put(buf []byte) {
 	_ = buf[19]
 	binary.BigEndian.PutUint16(buf[0:], tcphdr.SourcePort)
 	binary.BigEndian.PutUint16(buf[2:], tcphdr.DestinationPort)
-	binary.BigEndian.PutUint32(buf[4:], tcphdr.Seq)
-	binary.BigEndian.PutUint32(buf[8:], tcphdr.Ack)
+	binary.BigEndian.PutUint32(buf[4:], uint32(tcphdr.Seq))
+	binary.BigEndian.PutUint32(buf[8:], uint32(tcphdr.Ack))
 	binary.BigEndian.PutUint16(buf[12:], tcphdr.OffsetAndFlags[0])
-	binary.BigEndian.PutUint16(buf[14:], tcphdr.WindowSize)
+	binary.BigEndian.PutUint16(buf[14:], tcphdr.WindowSizeRaw)
 	binary.BigEndian.PutUint16(buf[16:], tcphdr.Checksum)
 	binary.BigEndian.PutUint16(buf[18:], tcphdr.UrgentPtr)
 }
@@ -514,6 +520,11 @@ func (tcphdr *TCPHeader) SetOffset(tcpWords uint8) {
 	tcphdr.OffsetAndFlags[0] = onlyFlags | (uint16(tcpWords) << 12)
 }
 
+// WindowSize is a convenience method for obtaining a seqs.Size from the TCP header internal WindowSize 16bit field.
+func (tcphdr *TCPHeader) WindowSize() seqs.Size {
+	return seqs.Size(tcphdr.WindowSizeRaw)
+}
+
 // CalculateChecksumIPv4 calculates the checksum of the TCP header, options and payload.
 func (tcphdr *TCPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, tcpOptions, payload []byte) uint16 {
 	const sizePseudo = 12
@@ -531,7 +542,7 @@ func (tcphdr *TCPHeader) CalculateChecksumIPv4(pseudoHeader *IPv4Header, tcpOpti
 
 func (tcp *TCPHeader) String() string {
 	return strcat("TCP port ", u32toa(uint32(tcp.SourcePort)), "->", u32toa(uint32(tcp.DestinationPort)),
-		tcp.Flags().String(), "seq ", u32toa(tcp.Seq), " ack ", u32toa(tcp.Ack))
+		tcp.Flags().String(), "seq ", u32toa(uint32(tcp.Seq)), " ack ", u32toa(uint32(tcp.Ack)))
 }
 
 type TCPFlags uint16
