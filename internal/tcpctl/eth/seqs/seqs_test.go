@@ -9,17 +9,17 @@ import (
 
 func TestExchange_helloworld_client(t *testing.T) {
 	// Client Transmission Control Block.
-	var tcb seqs.CtlBlock
+	var tcb seqs.ControlBlock
 	// The client starts in the SYN_SENT state with a random sequence number.
 	gotClientSeg := parseSegment(t, exchangeHelloWorld[0])
 
 	// We add the SYN state to the client.
-	tcb.TestInitState(seqs.StateSynSent, gotClientSeg.SEQ, gotClientSeg.SEQ, gotClientSeg.WND)
+	tcb.HelperInitState(seqs.StateSynSent, gotClientSeg.SEQ, gotClientSeg.SEQ, gotClientSeg.WND)
 	err := tcb.Snd(gotClientSeg)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	tcb.HelperPrintSegment(t, false, gotClientSeg)
 	packets := exchangeHelloWorld[1:]
 
 	for i, packet := range packets {
@@ -41,11 +41,13 @@ func TestExchange_helloworld_client(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			tcb.HelperPrintSegment(t, false, gotClientSeg)
 			continue // we only pass server packets to the client.
 		}
 		err = tcb.Rcv(seg)
+		tcb.HelperPrintSegment(t, true, seg)
 		if err != nil {
-			t.Fatalf("%s %+v", err, tcb.RelativeAutoSegment(gotClientSeg))
+			t.Fatalf("%d %s\nseg=%+v\nrcv=%+v\nsnd=%+v", i, err, tcb.RelativeAutoSegment(seg), tcb.TestRelativeRecvSpace(), tcb.TestRelativeSendSpace())
 		}
 		gotClientSeg = tcb.PendingSegment(0)
 	}

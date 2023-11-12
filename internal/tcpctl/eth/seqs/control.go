@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// CtlBlock implements the Transmission Control Block (TCB) of a TCP connection as specified in RFC 793
+// ControlBlock implements the Transmission Control Block (TCB) of a TCP connection as specified in RFC 793
 // in page 19 and clarified further in page 25. It records the state of a TCP connection.
-type CtlBlock struct {
+type ControlBlock struct {
 	// # Send Sequence Space
 	//
 	// 'Send' sequence numbers correspond to local data being sent.
@@ -35,7 +35,7 @@ type CtlBlock struct {
 	//	1 - old sequence numbers which have been acknowledged
 	//	2 - sequence numbers allowed for new reception
 	//	3 - future sequence numbers which are not yet allowed
-	rcv rcvSpace
+	rcv recvSpace
 	// pending and state are modified by rcv* methods and Close method.
 	pending Flags
 	state   State
@@ -44,15 +44,15 @@ type CtlBlock struct {
 // sendSpace contains Send Sequence Space data. Its sequence numbers correspond to local data.
 type sendSpace struct {
 	ISS Value // initial send sequence number, defined locally on connection start
-	UNA Value // send unacknowledged. Seqs equal to UNA and above have NOT been acked. Corresponds to local data.
+	UNA Value // send unacknowledged. Seqs equal to UNA and above have NOT been acked by remote. Corresponds to local data.
 	NXT Value // send next. This seq and up to UNA+WND-1 are allowed to be sent. Corresponds to local data.
-	WL1 Value // segment sequence number used for last window update
-	WL2 Value // segment acknowledgment number used for last window update
-	WND Size  // send window defined by remote. Permitted number unacked octets in flight.
+	// WL1 Value // segment sequence number used for last window update
+	// WL2 Value // segment acknowledgment number used for last window update
+	WND Size // send window defined by remote. Permitted number unacked octets in flight.
 }
 
-// rcvSpace contains Receive Sequence Space data. Its sequence numbers correspond to remote data.
-type rcvSpace struct {
+// recvSpace contains Receive Sequence Space data. Its sequence numbers correspond to remote data.
+type recvSpace struct {
 	IRS Value // initial receive sequence number, defined by remote in SYN segment received.
 	NXT Value // receive next. seqs before this have been acked. this seq and up to NXT+WND-1 are allowed to be sent. Corresponds to remote data.
 	WND Size  // receive window defined by local. Permitted number unacked octets in flight.
@@ -60,8 +60,8 @@ type rcvSpace struct {
 
 // Segment represents a TCP segment as the sequence number of the first octet and the length of the segment.
 type Segment struct {
-	SEQ     Value // first sequence number of a segment.
-	ACK     Value // acknowledgment number.
+	SEQ     Value // sequence number of first octet of segment. If SYN is set it is the initial sequence number (ISN) and the first data octet is ISN+1.
+	ACK     Value // acknowledgment number. If ACK is set it is sequence number of first octet the sender of the segment is expecting to receive next.
 	DATALEN Size  // The number of octets occupied by the data (payload) not counting SYN and FIN.
 	WND     Size  // segment window
 	Flags   Flags // TCP flags.
@@ -84,7 +84,7 @@ func (seg *Segment) Last() Value {
 }
 
 // PendingSegment calculates a suitable next segment to send from a payload length.
-func (tcb *CtlBlock) PendingSegment(payloadLen int) Segment {
+func (tcb *ControlBlock) PendingSegment(payloadLen int) Segment {
 	if payloadLen > math.MaxUint16 || Size(payloadLen) > tcb.snd.WND {
 		payloadLen = int(tcb.snd.WND)
 	}
@@ -98,17 +98,20 @@ func (tcb *CtlBlock) PendingSegment(payloadLen int) Segment {
 	return seg
 }
 
-func (tcb *CtlBlock) Snd(seg Segment) error {
+func (tcb *ControlBlock) Snd(seg Segment) error {
 	err := tcb.validateOutgoingSegment(seg)
 	if err != nil {
 		return err
 	}
-	tcb.snd.NXT.UpdateForward(seg.LEN())
+
+	// The segment is valid, we can update TCB state.
+	seglen := seg.LEN()
+	tcb.snd.NXT.UpdateForward(seglen)
 	tcb.rcv.WND = seg.WND
 	return nil
 }
 
-func (tcb *CtlBlock) Rcv(seg Segment) (err error) {
+func (tcb *ControlBlock) Rcv(seg Segment) (err error) {
 	err = tcb.validateIncomingSegment(seg)
 	if err != nil {
 		return err
@@ -130,21 +133,23 @@ func (tcb *CtlBlock) Rcv(seg Segment) (err error) {
 	default:
 		err = errors.New("rcv: unexpected state " + tcb.state.String())
 	}
+	if err != nil {
+		return err
+	}
 	if prevNxt != 0 && tcb.snd.NXT != prevNxt {
 		// NXT modified in Snd() method.
-		err = fmt.Errorf("rcv %s: snd.nxt changed from %x to %x", tcb.state, prevNxt, tcb.snd.NXT)
+		return fmt.Errorf("rcv %s: snd.nxt changed from %x to %x", tcb.state, prevNxt, tcb.snd.NXT)
 	}
-	if err == nil {
-		// We accept the segment.
-		tcb.snd.WND = seg.WND
-		tcb.snd.UNA = seg.ACK
-		seglen := seg.LEN()
-		tcb.rcv.NXT.UpdateForward(seglen)
-	}
+
+	// We accept the segment and update TCB state.
+	tcb.snd.WND = seg.WND
+	tcb.snd.UNA = seg.ACK
+	seglen := seg.LEN()
+	tcb.rcv.NXT.UpdateForward(seglen)
 	return err
 }
 
-func (tcb *CtlBlock) rcvEstablished(seg Segment) (err error) {
+func (tcb *ControlBlock) rcvEstablished(seg Segment) (err error) {
 	if seg.Flags.HasAny(FlagFIN) {
 		// See diagram on page 23 of RFC 793.
 		tcb.state = StateCloseWait
@@ -154,7 +159,7 @@ func (tcb *CtlBlock) rcvEstablished(seg Segment) (err error) {
 	return nil
 }
 
-func (tcb *CtlBlock) rcvListen(seg Segment) (err error) {
+func (tcb *ControlBlock) rcvListen(seg Segment) (err error) {
 	switch {
 	case !seg.Flags.HasAll(FlagSYN): //|| flags.HasAny(eth.FlagTCP_ACK):
 		err = errors.New("rcvListen: no SYN or unexpected flag set")
@@ -174,7 +179,7 @@ func (tcb *CtlBlock) rcvListen(seg Segment) (err error) {
 	}
 
 	wnd := tcb.rcv.WND
-	tcb.rcv = rcvSpace{
+	tcb.rcv = recvSpace{
 		IRS: seg.SEQ,
 		NXT: seg.SEQ, // +1 includes SYN flag as part of sequence octets is added outside.
 		WND: wnd,
@@ -185,7 +190,7 @@ func (tcb *CtlBlock) rcvListen(seg Segment) (err error) {
 	return nil
 }
 
-func (tcb *CtlBlock) rcvSynSent(seg Segment) (err error) {
+func (tcb *ControlBlock) rcvSynSent(seg Segment) (err error) {
 	switch {
 	case !seg.Flags.HasAll(synack):
 		err = errors.New("rcvSynSent: expected SYN|ACK") // Not prepared for simultaneous intitialization yet.
@@ -196,7 +201,7 @@ func (tcb *CtlBlock) rcvSynSent(seg Segment) (err error) {
 		return err
 	}
 	wnd := tcb.rcv.WND
-	tcb.rcv = rcvSpace{
+	tcb.rcv = recvSpace{
 		IRS: seg.SEQ,
 		NXT: seg.SEQ, // +1 includes SYN flag as part of sequence octets.
 		WND: wnd,
@@ -206,7 +211,7 @@ func (tcb *CtlBlock) rcvSynSent(seg Segment) (err error) {
 	return nil
 }
 
-func (tcb *CtlBlock) rcvSynRcvd(seg Segment) (err error) {
+func (tcb *ControlBlock) rcvSynRcvd(seg Segment) (err error) {
 	switch {
 	case !seg.Flags.HasAll(FlagACK):
 		err = errors.New("rcvSynRcvd: expected ACK")
@@ -216,18 +221,17 @@ func (tcb *CtlBlock) rcvSynRcvd(seg Segment) (err error) {
 	if err != nil {
 		return err
 	}
-	tcb.snd.UNA = seg.ACK
 	tcb.state = StateEstablished
 	tcb.pending = FlagACK
 	return nil
 }
 
-func (tcb *CtlBlock) rst(seq Value) {
+func (tcb *ControlBlock) rst(seq Value) {
 	// cs.pending = FlagRST
 	tcb.state = StateListen
 }
 
-func (tcb *CtlBlock) validateIncomingSegment(seg Segment) (err error) {
+func (tcb *ControlBlock) validateIncomingSegment(seg Segment) (err error) {
 	const errPfx = "reject incoming seg: "
 	flags := seg.Flags
 	hasAck := flags.HasAll(FlagACK)
@@ -256,7 +260,9 @@ func (tcb *CtlBlock) validateIncomingSegment(seg Segment) (err error) {
 	return err
 }
 
-func (tcb *CtlBlock) validateOutgoingSegment(seg Segment) (err error) {
+func (tcb *ControlBlock) validateOutgoingSegment(seg Segment) (err error) {
+	// hasAck := seg.Flags.HasAny(FlagACK)
+
 	const errPfx = "invalid out segment: "
 	seglast := seg.Last()
 	switch {
@@ -276,7 +282,7 @@ func (tcb *CtlBlock) validateOutgoingSegment(seg Segment) (err error) {
 	return err
 }
 
-func (tcb *CtlBlock) newISS() Value {
+func (tcb *ControlBlock) newISS() Value {
 	return Value(time.Now().UnixMicro() / 4)
 }
 

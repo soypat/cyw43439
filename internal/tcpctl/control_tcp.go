@@ -10,7 +10,7 @@ import (
 // tcpController specifies TCP connection state logic to interact with incoming packets
 // and send correctly marshalled outgoing packets.
 type tcpController struct {
-	cs      seqs.CtlBlock
+	cs      seqs.ControlBlock
 	ourPort uint16
 	us      netip.AddrPort
 	them    netip.AddrPort
@@ -81,11 +81,11 @@ func (c *tcpController) setResponseTCP(packet *TCPPacket, seg seqs.Segment, payl
 		DestinationPort: c.them.Port(),
 		Seq:             seg.SEQ,
 		Ack:             seg.ACK,
-		OffsetAndFlags:  [1]uint16{uint16(offset) << 12},
 		WindowSizeRaw:   uint16(seg.WND),
 		UrgentPtr:       0, // We do not implement urgent pointer.
 	}
 	packet.TCP.SetFlags(seg.Flags)
+	packet.TCP.SetOffset(offset)
 	packet.TCP.Checksum = packet.TCP.CalculateChecksumIPv4(&packet.IP, nil, payload)
 }
 
