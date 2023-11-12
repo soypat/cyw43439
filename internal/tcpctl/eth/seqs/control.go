@@ -2,6 +2,7 @@ package seqs
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"time"
@@ -11,6 +12,8 @@ import (
 // in page 19 and clarified further in page 25. It records the state of a TCP connection.
 type CtlBlock struct {
 	// # Send Sequence Space
+	//
+	// 'Send' sequence numbers correspond to local data being sent.
 	//
 	//	     1         2          3          4
 	//	----------|----------|----------|----------
@@ -22,6 +25,8 @@ type CtlBlock struct {
 	//	4. future sequence numbers which are not yet allowed
 	snd sendSpace
 	// # Receive Sequence Space
+	//
+	// 'Receive' sequence numbers correspond to remote data being received.
 	//
 	//		1          2          3
 	//	----------|----------|----------
@@ -35,20 +40,20 @@ type CtlBlock struct {
 	state   State
 }
 
-// sendSpace contains Send Sequence Space data.
+// sendSpace contains Send Sequence Space data. Its sequence numbers correspond to local data.
 type sendSpace struct {
 	ISS Value // initial send sequence number, defined locally on connection start
-	UNA Value // send unacknowledged. Seqs equal to UNA and above have NOT been acked.
-	NXT Value // send next. This seq and up to UNA+WND-1 are allowed to be sent.
+	UNA Value // send unacknowledged. Seqs equal to UNA and above have NOT been acked. Corresponds to local data.
+	NXT Value // send next. This seq and up to UNA+WND-1 are allowed to be sent. Corresponds to local data.
 	WL1 Value // segment sequence number used for last window update
 	WL2 Value // segment acknowledgment number used for last window update
 	WND Size  // send window defined by remote. Permitted number unacked octets in flight.
 }
 
-// rcvSpace contains Receive Sequence Space data.
+// rcvSpace contains Receive Sequence Space data. Its sequence numbers correspond to remote data.
 type rcvSpace struct {
-	IRS Value // initial receive sequence number, defined by remote in SYN segment received
-	NXT Value // receive next. seqs before this have been acked. this seq and up to NXT+WND-1 are allowed to be sent.
+	IRS Value // initial receive sequence number, defined by remote in SYN segment received.
+	NXT Value // receive next. seqs before this have been acked. this seq and up to NXT+WND-1 are allowed to be sent. Corresponds to remote data.
 	WND Size  // receive window defined by local. Permitted number unacked octets in flight.
 }
 
@@ -56,12 +61,12 @@ type rcvSpace struct {
 type Segment struct {
 	SEQ     Value // first sequence number of a segment.
 	ACK     Value // acknowledgment number.
-	WND     Size  // segment window
 	DATALEN Size  // The number of octets occupied by the data (payload) not counting SYN and FIN.
+	WND     Size  // segment window
 	Flags   Flags // TCP flags.
 }
 
-// LEN returns the length of the segment in octets.
+// LEN returns the length of the segment in octets including SYN and FIN flags.
 func (seg *Segment) LEN() Size {
 	add := Size(seg.Flags>>0) & 1 // Add FIN bit.
 	add += Size(seg.Flags>>1) & 1 // Add SYN bit.
@@ -70,7 +75,11 @@ func (seg *Segment) LEN() Size {
 
 // End returns the sequence number of the last octet of the segment.
 func (seg *Segment) Last() Value {
-	return Add(seg.SEQ, seg.LEN()) - 1
+	seglen := seg.LEN()
+	if seglen == 0 {
+		return seg.SEQ
+	}
+	return Add(seg.SEQ, seglen) - 1
 }
 
 // PendingSegment calculates a suitable next segment to send from a payload length.
@@ -89,7 +98,11 @@ func (tcb *CtlBlock) PendingSegment(payloadLen int) Segment {
 }
 
 func (tcb *CtlBlock) Snd(seg Segment) error {
-	tcb.rcv.NXT.UpdateForward(seg.LEN())
+	err := tcb.validateOutgoingSegment(seg)
+	if err != nil {
+		return err
+	}
+	tcb.snd.NXT.UpdateForward(seg.LEN())
 	tcb.rcv.WND = seg.WND
 	return nil
 }
@@ -103,7 +116,7 @@ func (tcb *CtlBlock) Rcv(seg Segment) (err error) {
 		tcb.rst(seg.SEQ)
 		return nil
 	}
-
+	prevNxt := tcb.snd.NXT
 	switch tcb.state {
 	case StateListen:
 		err = tcb.rcvListen(seg)
@@ -113,6 +126,14 @@ func (tcb *CtlBlock) Rcv(seg Segment) (err error) {
 		err = tcb.rcvSynRcvd(seg)
 	default:
 		err = errors.New("rcv: unexpected state " + tcb.state.String())
+	}
+	if prevNxt != 0 && tcb.snd.NXT != prevNxt {
+		// NXT modified in Snd() method.
+		err = fmt.Errorf("rcv %s: snd.nxt changed from %x to %x", tcb.state, prevNxt, tcb.snd.NXT)
+	}
+	if err == nil {
+		// We accept the segment.
+		tcb.snd.WND = seg.WND
 	}
 	return err
 }
@@ -192,28 +213,50 @@ func (tcb *CtlBlock) rst(seq Value) {
 }
 
 func (tcb *CtlBlock) validateIncomingSegment(seg Segment) (err error) {
+	const errPfx = "reject incoming seg: "
 	flags := seg.Flags
 	hasAck := flags.HasAll(FlagACK)
-	checkSEQ := flags.HasAny(FlagSYN)
+	// Short circuit SEQ checks if SYN present since the incoming segment initializes connection.
+	checkSEQ := !flags.HasAny(FlagSYN)
 
-	// First condition below short circuits if ACK not present to ignore ACK check.
-	acceptableAck := !hasAck || LessThan(tcb.snd.UNA, seg.ACK) && LessThanEq(seg.ACK, tcb.snd.NXT) // RFC 793 page 25.
-
-	segend := seg.Last()
-	// First condition below short circuits if SYN present since the incoming segment initializes connection.
-	// Second part of test checks to see if beginning of the segment falls in the window,
-	// Third part of test checks to see if the end of the segment falls in the window.
-	// If test passes then segment contains data in the window and we can accept full or partial data from it.
-	validSeqSpace := checkSEQ || InWindow(seg.SEQ, tcb.rcv.NXT, tcb.rcv.WND) || InWindow(segend, tcb.rcv.NXT, tcb.rcv.WND) // RFC 793 page 25.
+	// See RFC 793 page 25 for more on these checks.
 	switch {
 	case seg.WND > math.MaxUint16:
-		err = errors.New("reject seg: seg.wnd > 2**16")
+		err = errors.New(errPfx + "wnd > 2**16")
 	case tcb.state == StateClosed:
 		err = io.ErrClosedPipe
-	case !acceptableAck:
-		err = errors.New("reject ack: failed condition snd.una<seg.ack<=snd.nxt")
-	case !validSeqSpace:
-		err = errors.New("reject seq: segment does not occupy valid portion of receive sequence space")
+
+	case hasAck && !LessThan(tcb.snd.UNA, seg.ACK):
+		err = errors.New(errPfx + "ack points to old local data")
+
+	case hasAck && !LessThanEq(seg.ACK, tcb.snd.NXT):
+		err = errors.New(errPfx + "acks unsent data")
+
+	case checkSEQ && !InWindow(seg.SEQ, tcb.rcv.NXT, tcb.rcv.WND):
+		err = errors.New(errPfx + "seq not in receive window")
+
+	case checkSEQ && !InWindow(seg.Last(), tcb.rcv.NXT, tcb.rcv.WND):
+		err = errors.New(errPfx + "last not in receive window")
+	}
+	return err
+}
+
+func (tcb *CtlBlock) validateOutgoingSegment(seg Segment) (err error) {
+	const errPfx = "invalid out segment: "
+	seglast := seg.Last()
+	switch {
+	case tcb.state == StateClosed:
+		err = io.ErrClosedPipe
+	case seg.WND > math.MaxUint16:
+		err = errors.New(errPfx + "wnd > 2**16")
+	case seg.ACK != tcb.rcv.NXT:
+		err = errors.New(errPfx + "ack != rcv.nxt")
+
+	case !InWindow(seg.SEQ, tcb.snd.NXT, tcb.snd.WND):
+		err = errors.New(errPfx + "seq not in send window")
+
+	case !InWindow(seglast, tcb.snd.NXT, tcb.snd.WND):
+		err = errors.New(errPfx + "last not in send window")
 	}
 	return err
 }
