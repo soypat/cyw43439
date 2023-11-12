@@ -16,3 +16,24 @@ func (tcb *CtlBlock) TestInitState(state State, iss, nxt Value, localWindow Size
 		WND: localWindow,
 	}
 }
+
+func (tcb *CtlBlock) RelativeRcvSegment(seg Segment) Segment {
+	seg.SEQ -= tcb.rcv.IRS
+	seg.ACK -= tcb.snd.ISS
+	return seg
+}
+
+func (tcb *CtlBlock) RelativeSndSegment(seg Segment) Segment {
+	seg.SEQ -= tcb.snd.ISS
+	seg.ACK -= tcb.rcv.IRS
+	return seg
+}
+
+func (tcb *CtlBlock) RelativeAutoSegment(seg Segment) Segment {
+	rcv := tcb.RelativeRcvSegment(seg)
+	snd := tcb.RelativeSndSegment(seg)
+	if rcv.SEQ > snd.SEQ {
+		return snd
+	}
+	return rcv
+}

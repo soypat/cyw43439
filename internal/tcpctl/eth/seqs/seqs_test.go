@@ -45,7 +45,7 @@ func TestExchange_helloworld_client(t *testing.T) {
 		}
 		err = tcb.Rcv(seg)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s %+v", err, tcb.RelativeAutoSegment(gotClientSeg))
 		}
 		gotClientSeg = tcb.PendingSegment(0)
 	}
