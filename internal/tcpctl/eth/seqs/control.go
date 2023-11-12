@@ -35,7 +35,8 @@ type CtlBlock struct {
 	//	1 - old sequence numbers which have been acknowledged
 	//	2 - sequence numbers allowed for new reception
 	//	3 - future sequence numbers which are not yet allowed
-	rcv     rcvSpace
+	rcv rcvSpace
+	// pending and state are modified by rcv* methods and Close method.
 	pending Flags
 	state   State
 }
@@ -124,6 +125,8 @@ func (tcb *CtlBlock) Rcv(seg Segment) (err error) {
 		err = tcb.rcvSynSent(seg)
 	case StateSynRcvd:
 		err = tcb.rcvSynRcvd(seg)
+	case StateEstablished:
+		err = tcb.rcvEstablished(seg)
 	default:
 		err = errors.New("rcv: unexpected state " + tcb.state.String())
 	}
@@ -134,8 +137,21 @@ func (tcb *CtlBlock) Rcv(seg Segment) (err error) {
 	if err == nil {
 		// We accept the segment.
 		tcb.snd.WND = seg.WND
+		tcb.snd.UNA = seg.ACK
+		seglen := seg.LEN()
+		tcb.rcv.NXT.UpdateForward(seglen)
 	}
 	return err
+}
+
+func (tcb *CtlBlock) rcvEstablished(seg Segment) (err error) {
+	if seg.Flags.HasAny(FlagFIN) {
+		// See diagram on page 23 of RFC 793.
+		tcb.state = StateCloseWait
+		tcb.pending = FlagACK
+		return nil
+	}
+	return nil
 }
 
 func (tcb *CtlBlock) rcvListen(seg Segment) (err error) {
@@ -160,7 +176,7 @@ func (tcb *CtlBlock) rcvListen(seg Segment) (err error) {
 	wnd := tcb.rcv.WND
 	tcb.rcv = rcvSpace{
 		IRS: seg.SEQ,
-		NXT: seg.SEQ + 1, // +1 includes SYN flag as part of sequence octets.
+		NXT: seg.SEQ, // +1 includes SYN flag as part of sequence octets is added outside.
 		WND: wnd,
 	}
 	// We must respond with SYN|ACK frame after receiving SYN in listen state (three way handshake).
@@ -182,10 +198,9 @@ func (tcb *CtlBlock) rcvSynSent(seg Segment) (err error) {
 	wnd := tcb.rcv.WND
 	tcb.rcv = rcvSpace{
 		IRS: seg.SEQ,
-		NXT: seg.SEQ + 1, // +1 includes SYN flag as part of sequence octets.
+		NXT: seg.SEQ, // +1 includes SYN flag as part of sequence octets.
 		WND: wnd,
 	}
-	tcb.snd.UNA = seg.ACK
 	tcb.state = StateEstablished
 	tcb.pending = FlagACK
 	return nil

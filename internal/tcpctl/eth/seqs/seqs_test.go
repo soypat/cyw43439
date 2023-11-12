@@ -12,12 +12,14 @@ func TestExchange_helloworld_client(t *testing.T) {
 	var tcb seqs.CtlBlock
 	// The client starts in the SYN_SENT state with a random sequence number.
 	gotClientSeg := parseSegment(t, exchangeHelloWorld[0])
+
 	// We add the SYN state to the client.
 	tcb.TestInitState(seqs.StateSynSent, gotClientSeg.SEQ, gotClientSeg.SEQ, gotClientSeg.WND)
 	err := tcb.Snd(gotClientSeg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	packets := exchangeHelloWorld[1:]
 
 	for i, packet := range packets {
