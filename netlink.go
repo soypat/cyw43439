@@ -8,8 +8,9 @@ import (
 	"net"
 	"time"
 
+	"log/slog"
+
 	"github.com/soypat/cyw43439/internal/netlink"
-	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 )
 
@@ -64,14 +65,14 @@ func (d *Device) showIP() {
 func (d *Device) netConnect(reset bool) error {
 	if reset {
 		/*
-		country := d.params.Country
-		if country == "" {
-			country = "XX"
-		}
-		code := whd.CountryCode(country, 0)
-		if err := d.EnableStaMode(code); err != nil {
-			return err
-		}
+			country := d.params.Country
+			if country == "" {
+				country = "XX"
+			}
+			code := whd.CountryCode(country, 0)
+			if err := d.EnableStaMode(code); err != nil {
+				return err
+			}
 		*/
 	}
 

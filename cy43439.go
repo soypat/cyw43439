@@ -32,8 +32,9 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/soypat/cyw43439/internal/netlink"
-	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers"
 )

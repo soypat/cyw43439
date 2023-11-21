@@ -10,7 +10,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/soypat/cyw43439/internal/slog"
+	"log/slog"
+
 	"github.com/soypat/cyw43439/whd"
 )
 

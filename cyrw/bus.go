@@ -7,11 +7,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"reflect"
 	"time"
 	"unsafe"
 
-	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 	"golang.org/x/exp/constraints"
 )

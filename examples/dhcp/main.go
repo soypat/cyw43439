@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"time"
 
+	"log/slog"
+
 	"github.com/soypat/cyw43439/cyrw"
-	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/internal/tcpctl"
 )
 

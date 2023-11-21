@@ -7,7 +7,7 @@ import (
 	"io"
 	"machine"
 
-	"github.com/soypat/cyw43439/internal/slog"
+	"log/slog"
 )
 
 const (

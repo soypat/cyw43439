@@ -6,8 +6,9 @@ import (
 	"time"
 	"unsafe"
 
+	"log/slog"
+
 	"github.com/soypat/cyw43439/internal/netlink"
-	"github.com/soypat/cyw43439/internal/slog"
 	"github.com/soypat/cyw43439/whd"
 )
 
