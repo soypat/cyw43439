@@ -39,3 +39,8 @@ The PWM API is much more closely matched between the [C](https://github.com/rasp
 
 ### Go and TinyGo Ethernet/IP/TCP stack comparisons
 ![stack comparison](stack_comparison.png)
+
+### Install stringer command
+```sh
+go install golang.org/x/tools/cmd/stringer@latest
+```

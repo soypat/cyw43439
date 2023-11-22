@@ -70,6 +70,10 @@ func (d *Device) has_credit() bool {
 
 var errTxPacketTooLarge = errors.New("tx packet too large")
 
+// 2 is padding necessary in the SDPCM header.
+const mtuPrefix = 2 + whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
+const MTU = 2048 - mtuPrefix
+
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
 	// reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L247
@@ -81,8 +85,8 @@ func (d *Device) tx(packet []byte) (err error) {
 	// "¯\_(ツ)_/¯"
 
 	const PADDING_SIZE = 2
-	totalLen := uint32(whd.SDPCM_HEADER_LEN + PADDING_SIZE + whd.BDC_HEADER_LEN + len(packet))
-	if totalLen > uint32(len(buf8)) {
+	totalLen := mtuPrefix + len(packet)
+	if totalLen > len(buf8) {
 		return errTxPacketTooLarge
 	}
 	d.log_read()
@@ -111,7 +115,7 @@ func (d *Device) tx(packet []byte) (err error) {
 
 	copy(buf8[whd.SDPCM_HEADER_LEN+PADDING_SIZE+whd.BDC_HEADER_LEN:], packet)
 
-	return d.wlan_write(buf[:align(totalLen, 4)/4], totalLen)
+	return d.wlan_write(buf[:align(uint32(totalLen), 4)/4], uint32(totalLen))
 }
 
 func (d *Device) get_iovar(VAR string, iface whd.IoctlInterface) (_ uint32, err error) {

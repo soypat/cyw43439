@@ -1,19 +1,22 @@
 package main
 
 import (
-	"errors"
-	"strconv"
+	"net/netip"
 	"time"
 
 	"log/slog"
 
 	"github.com/soypat/cyw43439/cyrw"
-	"github.com/soypat/cyw43439/internal/tcpctl"
+	"github.com/soypat/seqs/eth"
+	"github.com/soypat/seqs/stacks"
 )
+
+const MTU = cyrw.MTU // CY43439 permits 2030 bytes of ethernet frame.
 
 var lastRx, lastTx time.Time
 
 func main() {
+
 	defer func() {
 		println("program finished")
 		if a := recover(); a != nil {
@@ -24,9 +27,8 @@ func main() {
 	println("starting program")
 	slog.Debug("starting program")
 	dev := cyrw.DefaultNew()
-	cfg := cyrw.DefaultConfig()
 	// cfg.Level = slog.LevelInfo // Logging level.
-	err := dev.Init(cfg)
+	err := dev.Init(cyrw.DefaultConfig())
 	if err != nil {
 		panic(err)
 	}
@@ -40,28 +42,45 @@ func main() {
 		println("wifi join failed:", err.Error())
 		time.Sleep(5 * time.Second)
 	}
-	mac := dev.MAC()
-	println("\n\n\nMAC:", mac.String())
-	stack = tcpctl.NewStack(tcpctl.StackConfig{
-		MAC:         nil,
-		MaxUDPConns: 2,
+	println("\n\n\nMAC:", dev.MAC().String())
+
+	stack := stacks.NewPortStack(stacks.PortStackConfig{
+		MAC:             dev.MACAs6(),
+		MaxOpenPortsUDP: 1,
+		MaxOpenPortsTCP: 1,
+		GlobalHandler: func(ehdr *eth.EthernetHeader, ethPayload []byte) error {
+			lastRx = time.Now()
+			return nil
+		},
+		MTU: MTU,
 	})
-	stack.GlobalHandler = func(b []byte) {
-		lastRx = time.Now()
-	}
+
 	dev.RecvEthHandle(stack.RecvEth)
+
+	// Begin asynchronous packet handling.
+	go NICLoop(dev, stack)
+
+	println("Start DHCP...")
+	var dhcp stacks.DHCPv4Client
+	dhcp.RequestedIP = [4]byte{192, 168, 1, 69}
+	dhcpOngoing := true
 	for {
-		println("Trying DoDHCP")
-		err = DoDHCP(stack, dev)
-		if err == nil {
-			println("========\nDHCP done, your IP: ", stack.IP.String(), "\n========")
+		stack.OpenUDP(68, dhcp.HandleUDP)
+		stack.FlagPendingUDP(68) // Force a DHCP discovery.
+		for i := 0; dhcpOngoing && i < 16; i++ {
+			time.Sleep(time.Second / 2) // Check every half second for DHCP completion.
+			dhcpOngoing = dhcp.YourIP != [4]byte{}
+		}
+		if !dhcpOngoing {
 			break
 		}
-		println(err.Error())
-		time.Sleep(8 * time.Second)
+		// Redo.
+		stack.CloseUDP(68) // DHCP failed, reset state.
+		dhcp.Reset()
 	}
-
-	println("finished init OK")
+	ip := netip.AddrFrom4(dhcp.YourIP)
+	println("DHCP complete IP:", ip.String())
+	stack.SetAddr(ip)
 
 	const refresh = 300 * time.Millisecond
 	lastLED := false
@@ -77,43 +96,63 @@ func main() {
 	}
 }
 
-var (
-	stack *tcpctl.Stack
-	txbuf [1500]byte
-)
-
-func DoDHCP(s *tcpctl.Stack, dev *cyrw.Device) error {
-	var dc tcpctl.DHCPClient
-	copy(dc.MAC[:], dev.MAC())
-	err := s.OpenUDP(68, dc.HandleUDP)
-	if err != nil {
-		return err
+func NICLoop(dev *cyrw.Device, Stack *stacks.PortStack) {
+	// Maximum number of packets to queue before sending them.
+	const (
+		queueSize                = 4
+		maxRetriesBeforeDropping = 3
+	)
+	var queue [queueSize][MTU]byte
+	var lenBuf [queueSize]int
+	var retries [queueSize]int
+	markSent := func(i int) {
+		queue[i] = [MTU]byte{} // Not really necessary.
+		lenBuf[i] = 0
+		retries[i] = 0
 	}
-	defer s.CloseUDP(68)
-	err = s.FlagUDPPending(68) // Force a DHCP discovery.
-	if err != nil {
-		return err
-	}
-	for retry := 0; retry < 20 && dc.State < 3; retry++ {
-		n, err := stack.HandleEth(txbuf[:])
-		if err != nil {
-			return err
+	for {
+		// Queue packets to be sent.
+		sending := 0
+		for i := range queue {
+			if retries[i] != 0 {
+				continue // Packet currently queued for retransmission.
+			}
+			var err error
+			buf := queue[i][:]
+			lenBuf[i], err = Stack.HandleEth(buf[:])
+			if err != nil {
+				println("stack error n(should be 0)=", lenBuf[i], "err=", err.Error())
+				lenBuf[i] = 0
+				continue
+			}
+			if lenBuf[i] == 0 {
+				break
+			}
+			sending += lenBuf[i]
 		}
-		if n == 0 {
-			time.Sleep(200 * time.Millisecond)
+
+		if sending == 0 {
+			time.Sleep(51 * time.Millisecond) // Nothing to send, sleep.
 			continue
 		}
-		err = dev.SendEth(txbuf[:n])
-		if err != nil {
-			return err
+
+		// Send queued packets.
+		for i := range queue {
+			n := lenBuf[i]
+			if n <= 0 {
+				continue
+			}
+			err := dev.SendEth(queue[i][:n])
+			if err != nil {
+				// Queue packet for retransmission.
+				retries[i]++
+				if retries[i] > maxRetriesBeforeDropping {
+					markSent(i)
+					println("dropped outgoing packet:", err.Error())
+				}
+			} else {
+				markSent(i)
+			}
 		}
 	}
-	if dc.State != 3 { // TODO: find way to make this value more self descriptive.
-		return errors.New("DHCP did not complete, state=" + strconv.Itoa(int(dc.State)))
-	}
-	if len(s.IP) == 0 {
-		s.IP = make([]byte, 4)
-	}
-	copy(s.IP, dc.YourIP[:])
-	return nil
 }
