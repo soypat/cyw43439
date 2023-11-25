@@ -52,7 +52,8 @@ func main() {
 			lastRx = time.Now()
 			return nil
 		},
-		MTU: MTU,
+		MTU:    MTU,
+		Logger: slog.Default(),
 	})
 
 	dev.RecvEthHandle(stack.RecvEth)
@@ -61,21 +62,30 @@ func main() {
 	go NICLoop(dev, stack)
 
 	println("Start DHCP...")
-	var dhcp stacks.DHCPv4Client
-	dhcp.RequestedIP = [4]byte{192, 168, 1, 69}
+	dhcp := stacks.DHCPv4Client{
+		MAC:         dev.MACAs6(),
+		RequestedIP: [4]byte{192, 168, 1, 69},
+	}
 	dhcpOngoing := true
 	for {
-		stack.OpenUDP(68, dhcp.HandleUDP)
+		err = stack.OpenUDP(68, dhcp.HandleUDP)
+		if err != nil {
+			panic(err)
+		}
 		stack.FlagPendingUDP(68) // Force a DHCP discovery.
 		for i := 0; dhcpOngoing && i < 16; i++ {
 			time.Sleep(time.Second / 2) // Check every half second for DHCP completion.
-			dhcpOngoing = dhcp.YourIP != [4]byte{}
+			dhcpOngoing = !dhcp.Done()
 		}
 		if !dhcpOngoing {
 			break
 		}
 		// Redo.
-		stack.CloseUDP(68) // DHCP failed, reset state.
+		println("redo DHCP...")
+		err = stack.CloseUDP(68) // DHCP failed, reset state.
+		if err != nil {
+			panic(err)
+		}
 		dhcp.Reset()
 	}
 	ip := netip.AddrFrom4(dhcp.YourIP)
