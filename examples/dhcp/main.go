@@ -120,6 +120,17 @@ func NICLoop(dev *cyrw.Device, Stack *stacks.PortStack) {
 		retries[i] = 0
 	}
 	for {
+		// Poll for incoming packets.
+		for i := 0; i < 2; i++ {
+			gotPacket, err := dev.TryPoll()
+			if err != nil {
+				println("poll error:", err.Error())
+			}
+			if !gotPacket {
+				break
+			}
+		}
+
 		// Queue packets to be sent.
 		sending := 0
 		for i := range queue {

@@ -120,7 +120,7 @@ func (d *Device) wifiLinkStatus(itf uint8) (linkStat int32) {
 func (d *Device) wifiJoin(ssid, key string, bssid *[6]byte, authType, channel uint32) (err error) {
 	defer func() {
 		if err != nil {
-			d.logError("wifiJoin:failed", slog.Any("err", err))
+			d.logError("wifiJoin:failed", slog.String("err", err.Error()))
 		} else {
 			d.info("wifiJoin:success")
 		}

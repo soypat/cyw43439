@@ -45,7 +45,7 @@ func (d *Device) connectToAP() error {
 
 	err := d.WifiConnectTimeout(d.params.SSID, d.params.Passphrase, auth, timeout)
 	if err != nil {
-		d.logError("connectToAP:WifiConnectTimeout", slog.Any("err", err))
+		d.logError("connectToAP:WifiConnectTimeout", slog.String("err", err.Error()))
 		return err
 	}
 	d.info("connected to AP", slog.String("SSID", d.params.SSID))

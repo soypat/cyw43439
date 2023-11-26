@@ -278,6 +278,16 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 	return err
 }
 
+func (d *Device) TryPoll() (gotPacket bool, err error) {
+	d.lock()
+	defer d.unlock()
+	_, cmd, err := d.tryPoll(d._rxBuf[:])
+	if err == errNoF2Avail {
+		return false, nil
+	}
+	return err == nil && cmd == whd.CONTROL_HEADER, err
+}
+
 // poll services any F2 packets.
 //
 // This is the moral equivalent of an ISR to service hw interrupts.  In this
@@ -439,7 +449,9 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 			d.logerr("rxControl",
 				slog.Int("len", len(packet)),
 				slog.Int("id", int(d.auxCDCHeader.ID)),
-				slog.Any("cdc", &d.auxCDCHeader),
+				slog.String("cdc.Cmd", d.auxCDCHeader.Cmd.String()),
+				slog.Int("cdc.Flags", int(d.auxCDCHeader.Flags)),
+				slog.Int("cdc.Len", int(d.auxCDCHeader.Length)),
 			)
 		}
 	}()
@@ -470,8 +482,9 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 			d.logerr("rxEvent",
 				slog.String("err", err.Error()),
 				slog.Int("plen", len(packet)),
-				slog.Any("bdc", &bdcHdr),
-				slog.Any("event", &aePacket),
+				slog.Int("bdc.Flags", int(bdcHdr.Flags)),
+				slog.Int("bdc.Priority", int(bdcHdr.Priority)),
+				slog.Int("ae.Status", int(aePacket.Message.Status)),
 			)
 		}
 	}()
