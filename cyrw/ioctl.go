@@ -278,6 +278,8 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 	return err
 }
 
+// TryPoll attempts to read a packet from the device. Returns true if a packet
+// was read, false if no packet was available.
 func (d *Device) TryPoll() (gotPacket bool, err error) {
 	d.lock()
 	defer d.unlock()

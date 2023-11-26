@@ -15,6 +15,10 @@ github.com/soypat/seqs v0.0.0-20231122002606-b18ce4c4b639 h1:lanQQac7KckG61LI0tn
 github.com/soypat/seqs v0.0.0-20231122002606-b18ce4c4b639/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
 github.com/soypat/seqs v0.0.0-20231126174347-2c161be60c59 h1:xDnqNKyXwQuTvCUo2V/bG5AQd9MyNLkStXXlSZP4fgA=
 github.com/soypat/seqs v0.0.0-20231126174347-2c161be60c59/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
+github.com/soypat/seqs v0.0.0-20231126210142-1920b1608c6c h1:ex2k/YeWqCmc+9kA0ZTwWrsZKWlEC5sbAUeItgs+Kl4=
+github.com/soypat/seqs v0.0.0-20231126210142-1920b1608c6c/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
+github.com/soypat/seqs v0.0.0-20231126225235-34ccb4dc07b1 h1:X1qzqQ+lJ3BRuw9JXkdQAq4d4nhX1nrsT9p6jAXhbVI=
+github.com/soypat/seqs v0.0.0-20231126225235-34ccb4dc07b1/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
 github.com/tinygo-org/pio v0.0.0-20231110210127-06bcd7c58cb1 h1:LmEem4bB5E5xYiL10eltiiGNZaevuJHAEgb3Gq4hZgM=
 github.com/tinygo-org/pio v0.0.0-20231110210127-06bcd7c58cb1/go.mod h1:LU7Dw00NJ+N86QkeTGjMLNkYcEYMor6wTDpTCu0EaH8=
 github.com/valyala/fastjson v1.6.3/go.mod h1:CLCAqky6SMuOcxStkYQvblddUtoRxhYMGLrsQns1aXY=
