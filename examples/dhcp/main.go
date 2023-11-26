@@ -16,7 +16,6 @@ const MTU = cyrw.MTU // CY43439 permits 2030 bytes of ethernet frame.
 var lastRx, lastTx time.Time
 
 func main() {
-
 	defer func() {
 		println("program finished")
 		if a := recover(); a != nil {
