@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"machine"
 	"net/netip"
 	"time"
 	"unsafe"
@@ -53,8 +54,10 @@ func main() {
 			lastRx = time.Now()
 			return nil
 		},
-		MTU:    MTU,
-		Logger: slog.Default(),
+		MTU: MTU,
+		Logger: slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		})),
 	})
 
 	dev.RecvEthHandle(stack.RecvEth)
@@ -74,7 +77,10 @@ func main() {
 	if err != nil {
 		panic("socket create:" + err.Error())
 	}
-
+	err = socket.OpenListenTCP(listenPort, 300)
+	if err != nil {
+		panic("socket listen:" + err.Error())
+	}
 	var buf [socketBuf]byte
 	println("listening at:", listenAddr.String())
 	for {
