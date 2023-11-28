@@ -144,8 +144,9 @@ func NICLoop(dev *cyrw.Device, Stack *stacks.PortStack) {
 		retries[i] = 0
 	}
 	for {
+		stallRx := true
 		// Poll for incoming packets.
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 1; i++ {
 			gotPacket, err := dev.TryPoll()
 			if err != nil {
 				println("poll error:", err.Error())
@@ -153,10 +154,10 @@ func NICLoop(dev *cyrw.Device, Stack *stacks.PortStack) {
 			if !gotPacket {
 				break
 			}
+			stallRx = false
 		}
 
 		// Queue packets to be sent.
-		sending := 0
 		for i := range queue {
 			if retries[i] != 0 {
 				continue // Packet currently queued for retransmission.
@@ -172,11 +173,13 @@ func NICLoop(dev *cyrw.Device, Stack *stacks.PortStack) {
 			if lenBuf[i] == 0 {
 				break
 			}
-			sending += lenBuf[i]
 		}
-
-		if sending == 0 {
-			time.Sleep(51 * time.Millisecond) // Nothing to send, sleep.
+		stallTx := lenBuf == [queueSize]int{}
+		if stallTx {
+			if stallRx {
+				// Avoid busy waiting when both Rx and Tx stall.
+				time.Sleep(51 * time.Millisecond)
+			}
 			continue
 		}
 
