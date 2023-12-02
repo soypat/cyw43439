@@ -1,15 +1,16 @@
 package main
 
 import (
-	"io"
+	"errors"
 	"machine"
+	"net"
 	"net/netip"
 	"time"
-	"unsafe"
 
 	"log/slog"
 
 	"github.com/soypat/cyw43439/cyrw"
+	"github.com/soypat/seqs"
 	"github.com/soypat/seqs/eth"
 	"github.com/soypat/seqs/stacks"
 )
@@ -77,22 +78,41 @@ func main() {
 	if err != nil {
 		panic("socket create:" + err.Error())
 	}
-	err = socket.OpenListenTCP(listenPort, 300)
+	println("start listening on:", listenAddr.String())
+	err = ForeverTCPListenEcho(socket, listenAddr)
 	if err != nil {
 		panic("socket listen:" + err.Error())
 	}
-	var buf [socketBuf]byte
-	println("listening at:", listenAddr.String())
+}
+
+func ForeverTCPListenEcho(socket *stacks.TCPSocket, addr netip.AddrPort) error {
+	var iss seqs.Value = 100
+	var buf [512]byte
 	for {
-		n, err := socket.Recv(buf[:])
-		if err != nil && err != io.EOF {
-			panic("socket recv:" + err.Error())
-		} else if n == 0 {
-			time.Sleep(50 * time.Millisecond)
-			continue
+		iss += 200
+		err := socket.OpenListenTCP(addr.Port(), iss)
+		if err != nil {
+			return err
 		}
-		println("got message:", unsafe.String(&buf[0], n))
-		socket.Send(buf[:n])
+		for {
+			n, err := socket.Recv(buf[:])
+			if errors.Is(err, net.ErrClosed) {
+				break
+			}
+			if n == 0 {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			err = socket.Send(buf[:n])
+			if err != nil {
+				return err
+			}
+		}
+		socket.Close()
+		println("flushing output buffer...")
+		socket.FlushOutputBuffer()
+		println("done flushing output buffer...")
+		time.Sleep(time.Second)
 	}
 }
 

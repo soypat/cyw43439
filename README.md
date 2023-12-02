@@ -6,6 +6,12 @@ Run DHCP example:
 tinygo flash -target=pico -opt=1 -stack-size=16kb -size=short -monitor  ./examples/dhcp/
 ```
 
+Run TCP server example:
+```shell
+tinygo flash -target=pico -opt=1 -stack-size=32kb -size=short -monitor  ./examples/tcpserver/
+```
+
+
 ## Contributions
 PRs welcome! Please read most recent developments on [this issue](https://github.com/tinygo-org/tinygo/issues/2947) before contributing.
 
