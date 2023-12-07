@@ -1,13 +1,16 @@
 package whd
 
-import "testing"
+import (
+	"encoding/binary"
+	"testing"
+)
 
 func TestParseAsyncEvent(t *testing.T) {
 	var buf [48]byte
 	for i := range buf {
 		buf[i] = byte(i)
 	}
-	ev, err := ParseAsyncEvent(buf[:])
+	ev, err := ParseAsyncEvent(binary.LittleEndian, buf[:])
 	if err != nil {
 		t.Fatal(err)
 	}

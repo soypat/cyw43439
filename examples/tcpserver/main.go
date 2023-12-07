@@ -95,7 +95,7 @@ func ForeverTCPListenEcho(socket *stacks.TCPSocket, addr netip.AddrPort) error {
 			return err
 		}
 		for {
-			n, err := socket.Recv(buf[:])
+			n, err := socket.Read(buf[:])
 			if errors.Is(err, net.ErrClosed) {
 				break
 			}
@@ -103,7 +103,7 @@ func ForeverTCPListenEcho(socket *stacks.TCPSocket, addr netip.AddrPort) error {
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}
-			err = socket.Send(buf[:n])
+			_, err = socket.Write(buf[:n])
 			if err != nil {
 				return err
 			}
