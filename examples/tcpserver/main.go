@@ -1,13 +1,16 @@
 package main
 
 import (
+	"errors"
+	"machine"
+	"net"
 	"net/netip"
 	"time"
 
 	"log/slog"
 
 	cyw43439 "github.com/soypat/cyw43439"
-
+	"github.com/soypat/seqs"
 	"github.com/soypat/seqs/eth"
 	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
@@ -24,12 +27,17 @@ func main() {
 			println("panic:", a)
 		}
 	}()
+	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+		Level: slog.LevelDebug, // Go lower (Debug-1) to see more verbosity on wifi device.
+	}))
+
 	time.Sleep(2 * time.Second)
 	println("starting program")
-	slog.Debug("starting program")
+	logger.Debug("starting program")
 	dev := cyw43439.NewPicoWDevice()
-	// cfg.Level = slog.LevelInfo // Logging level.
-	err := dev.Init(cyw43439.DefaultWifiConfig())
+	cfg := cyw43439.DefaultWifiConfig()
+	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
+	err := dev.Init(cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -54,7 +62,7 @@ func main() {
 			return nil
 		},
 		MTU:    MTU,
-		Logger: slog.Default(),
+		Logger: logger,
 	})
 
 	dev.RecvEthHandle(stack.RecvEth)
@@ -62,35 +70,64 @@ func main() {
 	// Begin asynchronous packet handling.
 	go NICLoop(dev, stack)
 
-	println("Start DHCP...")
-	dhcp := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
-
-	err = dhcp.BeginRequest(stacks.DHCPRequestConfig{
+	// Perform DHCP request.
+	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
+	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
 		RequestedAddr: netip.AddrFrom4([4]byte{192, 168, 1, 69}),
 		Xid:           0x12345678,
 	})
 	if err != nil {
-		panic("dhcp begin request:" + err.Error())
+		panic("dhcp failed: " + err.Error())
 	}
-	for !dhcp.Done() {
-		println("trying DHCP...")
-		time.Sleep(time.Second)
+	for !dhcpClient.Done() {
+		println("dhcp ongoing...")
+		time.Sleep(time.Second / 2)
 	}
-	ip := dhcp.Offer()
+	ip := dhcpClient.Offer()
 	println("DHCP complete IP:", ip.String())
-	stack.SetAddr(ip)
+	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
 
-	const refresh = 300 * time.Millisecond
-	lastLED := false
+	// Start TCP server.
+	const socketBuf = 256
+	const listenPort = 1234
+	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
+	socket, err := stacks.NewTCPSocket(stack, stacks.TCPSocketConfig{TxBufSize: socketBuf, RxBufSize: socketBuf})
+	if err != nil {
+		panic("socket create:" + err.Error())
+	}
+	println("start listening on:", listenAddr.String())
+	err = ForeverTCPListenEcho(socket, listenAddr)
+	if err != nil {
+		panic("socket listen:" + err.Error())
+	}
+}
+
+func ForeverTCPListenEcho(socket *stacks.TCPSocket, addr netip.AddrPort) error {
+	var iss seqs.Value = 100
+	var buf [512]byte
 	for {
-		recentRx := time.Since(lastRx) < refresh*3/2
-		recentTx := time.Since(lastTx) < refresh*3/2
-		ledStatus := recentRx || recentTx
-		if ledStatus != lastLED {
-			dev.GPIOSet(0, ledStatus)
-			lastLED = ledStatus
+		iss += 200
+		err := socket.OpenListenTCP(addr.Port(), iss)
+		if err != nil {
+			return err
 		}
-		time.Sleep(refresh)
+		for {
+			n, err := socket.Read(buf[:])
+			if errors.Is(err, net.ErrClosed) {
+				break
+			}
+			if n == 0 {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
+			_, err = socket.Write(buf[:n])
+			if err != nil {
+				return err
+			}
+		}
+		socket.Close()
+		socket.FlushOutputBuffer()
+		time.Sleep(time.Second)
 	}
 }
 
@@ -109,8 +146,9 @@ func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 		retries[i] = 0
 	}
 	for {
+		stallRx := true
 		// Poll for incoming packets.
-		for i := 0; i < 2; i++ {
+		for i := 0; i < 1; i++ {
 			gotPacket, err := dev.TryPoll()
 			if err != nil {
 				println("poll error:", err.Error())
@@ -118,10 +156,10 @@ func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 			if !gotPacket {
 				break
 			}
+			stallRx = false
 		}
 
 		// Queue packets to be sent.
-		sending := 0
 		for i := range queue {
 			if retries[i] != 0 {
 				continue // Packet currently queued for retransmission.
@@ -137,11 +175,13 @@ func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 			if lenBuf[i] == 0 {
 				break
 			}
-			sending += lenBuf[i]
 		}
-
-		if sending == 0 {
-			time.Sleep(51 * time.Millisecond) // Nothing to send, sleep.
+		stallTx := lenBuf == [queueSize]int{}
+		if stallTx {
+			if stallRx {
+				// Avoid busy waiting when both Rx and Tx stall.
+				time.Sleep(51 * time.Millisecond)
+			}
 			continue
 		}
 

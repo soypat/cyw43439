@@ -1,38 +1,19 @@
 # cyw43439
 Driver for the Wifi+bluetooth integrated circuit on the pico.
 
+Run DHCP example:
+```shell
+tinygo flash -target=pico -opt=1 -stack-size=8kb -size=short -monitor  ./examples/dhcp/
+```
+
+Run TCP server example:
+```shell
+tinygo flash -target=pico -opt=1 -stack-size=8kb -size=short -monitor  ./examples/tcpserver/
+```
+
+
 ## Contributions
 PRs welcome! Please read most recent developments on [this issue](https://github.com/tinygo-org/tinygo/issues/2947) before contributing.
-## Development
-
-Compile and flash the development program to the currently connected Pico W by running:
-
-```shell
-tinygo flash -monitor -target=pico ./shelltest/.
-```
-
-After the program is done flashing it will enter shell-mode communications with the
-Pico W. One has several commands they can run from there on out.
-
-To initialize the board type in the following **shell command** and press enter
-
-```
-$i0
-```
-
-A shell command is composed of 4 parts and serves the purpose of debugging:
-
-1. `$`: While in shell-mode the program waits for the `$` character before parsing input.
-2. The next character after the `$` is the "command" character.
-3. After the "command" is the number argument, which may not have effect in
-some commands
-4. The <kbd>Enter</kbd> or newline.
-
-All commands must have these 4 parts
-
-To develop add a command under the [`TestShellmode` function (switch statement)](./shelltest/test_shellmode.go).
-This command will probably contain a function or action with the CYW43439 you wish to test.
-
 
 ## FYI
 * [RP2040 datasheet](https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf).
@@ -69,3 +50,8 @@ The PWM API is much more closely matched between the [C](https://github.com/rasp
 
 ### Go and TinyGo Ethernet/IP/TCP stack comparisons
 ![stack comparison](stack_comparison.png)
+
+### Install stringer command
+```sh
+go install golang.org/x/tools/cmd/stringer@latest
+```

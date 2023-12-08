@@ -1,71 +1,132 @@
-//go:build tinygo
-
-package cyw43439
+package cy43439
 
 import (
 	"context"
-	"io"
-	"machine"
+	"encoding/hex"
 
-	"github.com/soypat/cyw43439/internal/slog"
+	"log/slog"
 )
 
 const (
-	verbose_debug     = true
-	initReadback      = false
-	validateDownloads = false
-	LevelDebugIO      = slog.LevelDebug
-	defaultLevel      = LevelDebugIO
+	enableDeviceLog = true
+
+	// currentLevel decides which log levels are printed.
+	// A higher currentLevel means less logs (less verbose).
+	defaultLevel slog.Level = levelTrace + 1
+	levelTrace   slog.Level = slog.LevelDebug - 1
+	deviceLevel  slog.Level = slog.LevelDebug - 1
+	// dblogattrs decides whether to print key-value log attributes.
+	dblogattrs = true
+	// print out raw bus transactions.
+	printLowestLevelBusTransactions = false
 )
 
-func (d *Device) debugIO(msg string, attrs ...slog.Attr) {
-	d.log.LogAttrs(context.Background(), LevelDebugIO, msg, attrs...)
+func (d *Device) logerr(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelError, msg, attrs...)
 }
 
-func (d *Device) debug(msg string, attrs ...slog.Attr) {
-	d.log.LogAttrs(context.Background(), slog.LevelDebug, msg, attrs...)
+func (d *Device) warn(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelWarn, msg, attrs...)
 }
 
 func (d *Device) info(msg string, attrs ...slog.Attr) {
-	d.log.LogAttrs(context.Background(), slog.LevelInfo, msg, attrs...)
+	d.logattrs(slog.LevelInfo, msg, attrs...)
 }
 
-func (d *Device) logError(msg string, attrs ...slog.Attr) {
-	d.log.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)
+func (d *Device) debug(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelDebug, msg, attrs...)
 }
 
-func (d *Device) SetLogger(log *slog.Logger) {
-	d.log = log
+func (d *Device) trace(msg string, attrs ...slog.Attr) {
+	d.logattrs(slog.LevelDebug-1, msg, attrs...)
 }
 
-func _setDefaultLogger(d *Device) {
-	writer := machine.Serial
-	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{Level: defaultLevel})
-	// Small slog handler implemented on our side:
-	// smallHandler := &handler{w: writer, level: slog.LevelDebug}
-	d.log = slog.New(handler)
+func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
+	if d.logger != nil {
+		d.logger.LogAttrs(context.Background(), level, msg, attrs...)
+	}
 }
 
-var _ slog.Handler = (*handler)(nil)
-
-// handler implements slog.Handler interface minimally.
-type handler struct {
-	level slog.Level
-	w     io.Writer
-	buf   [256]byte
+// SetLogger sets the logger for the device. If nil logging is disabled.
+func (d *Device) SetLogger(l *slog.Logger) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.logger = l
 }
 
-func (h *handler) Enabled(_ context.Context, level slog.Level) bool { return level >= h.level }
-
-func (h *handler) Handle(_ context.Context, r slog.Record) error {
-	n := copy(h.buf[:len(h.buf)-2], r.Message)
-	h.buf[n] = '\n'
-	_, err := h.w.Write(h.buf[:n+1])
-	return err
-}
-func (h *handler) WithAttrs(attrs []slog.Attr) slog.Handler {
+func (d *Device) log_init() error {
+	if d.logger == nil || !d.logger.Handler().Enabled(context.Background(), deviceLevel) {
+		return nil
+	}
+	d.trace("log_init")
+	const (
+		ramBase           = 0
+		ramSize           = 512 * 1024
+		socram_srmem_size = 64 * 1024
+	)
+	const addr = ramBase + ramSize - 4 - socram_srmem_size
+	sharedAddr, err := d.bp_read32(addr)
+	if err != nil {
+		return err
+	}
+	shared := make([]byte, 32)
+	d.bp_read(sharedAddr, shared)
+	caddr := _busOrder.Uint32(shared[20:])
+	smem := decodeSharedMem(_busOrder, shared)
+	d.log.addr = smem.console_addr + 8
+	d.trace("log addr",
+		slog.String("shared", hex.EncodeToString(shared)),
+		slog.String("shared[20:]", hex.EncodeToString(shared[20:])),
+		slog.Uint64("sharedAddr", uint64(sharedAddr)),
+		slog.Uint64("consoleAddr", uint64(d.log.addr)),
+		slog.Uint64("caddr", uint64(caddr)),
+	)
 	return nil
 }
-func (h *handler) WithGroup(name string) slog.Handler {
+
+// log_read reads the CY43439's internal logs and prints them to the structured logger
+// under the CY43 level.
+func (d *Device) log_read() error {
+	if d.logger == nil || !d.logger.Handler().Enabled(context.Background(), deviceLevel) {
+		return nil
+	}
+	d.trace("log_read")
+	buf8 := u32AsU8(d._sendIoctlBuf[:])
+	err := d.bp_read(d.log.addr, buf8[:16])
+	if err != nil {
+		return err
+	}
+	smem := decodeSharedMemLog(_busOrder, buf8[:16])
+	idx := smem.idx
+	if idx == d.log.last_idx {
+		d.trace("CYLOG: no new data")
+		return nil // Pointer not moved, nothing to do.
+	}
+
+	err = d.bp_read(smem.buf, buf8[:])
+	if err != nil {
+		return err
+	}
+
+	for d.log.last_idx != idx {
+		b := buf8[d.log.last_idx]
+		if b == '\r' || b == '\n' {
+			if d.log.bufcount != 0 {
+				d.logattrs(deviceLevel, string(d.log.buf[:d.log.bufcount]))
+				d.log.bufcount = 0
+			}
+		} else if d.log.bufcount < uint32(len(d.log.buf)) {
+			d.log.buf[d.log.bufcount] = b
+			d.log.bufcount++
+		}
+		d.log.last_idx++
+		if d.log.last_idx == 0x400 {
+			d.log.last_idx = 0
+		}
+	}
 	return nil
+}
+
+func hex32(u uint32) string {
+	return hex.EncodeToString([]byte{byte(u >> 24), byte(u >> 16), byte(u >> 8), byte(u)})
 }

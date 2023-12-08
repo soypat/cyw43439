@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/soypat/cyw43439/internal/tcpctl/eth"
+	"github.com/soypat/seqs/eth"
 )
 
 type SDPCMHeader struct {
