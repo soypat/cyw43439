@@ -12,6 +12,7 @@ import (
 	"github.com/soypat/cyw43439/cyrw"
 	"github.com/soypat/seqs"
 	"github.com/soypat/seqs/eth"
+	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
 
@@ -30,8 +31,9 @@ func main() {
 	println("starting program")
 	slog.Debug("starting program")
 	dev := cyrw.DefaultNew()
-	// cfg.Level = slog.LevelInfo // Logging level.
-	err := dev.Init(cyrw.DefaultConfig())
+	cfg := cyrw.DefaultConfig()
+	cfg.Level = slog.LevelError // Logging level.
+	err := dev.Init(cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -65,12 +67,21 @@ func main() {
 
 	// Begin asynchronous packet handling.
 	go NICLoop(dev, stack)
-
-	err = DoDHCP(stack)
+	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
+	err = dhcpClient.BeginIPv4Request(stacks.DHCPRequestConfig{
+		RequestedAddr: netip.AddrFrom4([4]byte{192, 168, 1, 69}),
+		Xid:           0x12345678,
+	})
 	if err != nil {
 		panic("dhcp failed: " + err.Error())
 	}
-
+	for !dhcpClient.Done() {
+		println("dhcp ongoing...")
+		time.Sleep(time.Second / 2)
+	}
+	ip := dhcpClient.Offer()
+	println("DHCP complete IP:", ip.String())
+	stack.SetAddr(ip)
 	const socketBuf = 256
 	const listenPort = 1234
 	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
@@ -109,44 +120,9 @@ func ForeverTCPListenEcho(socket *stacks.TCPSocket, addr netip.AddrPort) error {
 			}
 		}
 		socket.Close()
-		println("flushing output buffer...")
 		socket.FlushOutputBuffer()
-		println("done flushing output buffer...")
 		time.Sleep(time.Second)
 	}
-}
-
-func DoDHCP(stack *stacks.PortStack) error {
-	dhcp := stacks.DHCPv4Client{
-		MAC:         stack.MACAs6(),
-		RequestedIP: [4]byte{192, 168, 1, 69},
-	}
-	dhcpOngoing := true
-	for {
-		err := stack.OpenUDP(68, dhcp.HandleUDP)
-		if err != nil {
-			return err
-		}
-		stack.FlagPendingUDP(68) // Force a DHCP discovery.
-		for i := 0; dhcpOngoing && i < 16; i++ {
-			time.Sleep(time.Second / 2) // Check every half second for DHCP completion.
-			dhcpOngoing = !dhcp.Done()
-		}
-		if !dhcpOngoing {
-			break
-		}
-		// Redo.
-		println("redo DHCP...")
-		err = stack.CloseUDP(68) // DHCP failed, reset state.
-		if err != nil {
-			return err
-		}
-		dhcp.Reset()
-	}
-	ip := netip.AddrFrom4(dhcp.YourIP)
-	println("DHCP complete IP:", ip.String())
-	stack.SetAddr(ip)
-	return nil
 }
 
 func NICLoop(dev *cyrw.Device, Stack *stacks.PortStack) {
