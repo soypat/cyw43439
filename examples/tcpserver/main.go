@@ -9,14 +9,14 @@ import (
 
 	"log/slog"
 
-	"github.com/soypat/cyw43439/cyrw"
+	cyw43439 "github.com/soypat/cyw43439"
 	"github.com/soypat/seqs"
 	"github.com/soypat/seqs/eth"
 	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
 
-const MTU = cyrw.MTU // CY43439 permits 2030 bytes of ethernet frame.
+const MTU = cyw43439.MTU // CY43439 permits 2030 bytes of ethernet frame.
 
 var lastRx, lastTx time.Time
 
@@ -34,8 +34,8 @@ func main() {
 	time.Sleep(2 * time.Second)
 	println("starting program")
 	logger.Debug("starting program")
-	dev := cyrw.NewPicoWDevice()
-	cfg := cyrw.DefaultWifiConfig()
+	dev := cyw43439.NewPicoWDevice()
+	cfg := cyw43439.DefaultWifiConfig()
 	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
 	err := dev.Init(cfg)
 	if err != nil {
@@ -69,8 +69,10 @@ func main() {
 
 	// Begin asynchronous packet handling.
 	go NICLoop(dev, stack)
+
+	// Perform DHCP request.
 	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
-	err = dhcpClient.BeginIPv4Request(stacks.DHCPRequestConfig{
+	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
 		RequestedAddr: netip.AddrFrom4([4]byte{192, 168, 1, 69}),
 		Xid:           0x12345678,
 	})
@@ -83,7 +85,9 @@ func main() {
 	}
 	ip := dhcpClient.Offer()
 	println("DHCP complete IP:", ip.String())
-	stack.SetAddr(ip)
+	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
+
+	// Start TCP server.
 	const socketBuf = 256
 	const listenPort = 1234
 	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
@@ -127,7 +131,7 @@ func ForeverTCPListenEcho(socket *stacks.TCPSocket, addr netip.AddrPort) error {
 	}
 }
 
-func NICLoop(dev *cyrw.Device, Stack *stacks.PortStack) {
+func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 	// Maximum number of packets to queue before sending them.
 	const (
 		queueSize                = 4

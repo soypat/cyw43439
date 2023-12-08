@@ -6,12 +6,14 @@ import (
 
 	"log/slog"
 
-	"github.com/soypat/cyw43439/cyrw"
+	cyw43439 "github.com/soypat/cyw43439"
+
 	"github.com/soypat/seqs/eth"
+	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
 
-const MTU = cyrw.MTU // CY43439 permits 2030 bytes of ethernet frame.
+const MTU = cyw43439.MTU // CY43439 permits 2030 bytes of ethernet frame.
 
 var lastRx, lastTx time.Time
 
@@ -25,9 +27,9 @@ func main() {
 	time.Sleep(2 * time.Second)
 	println("starting program")
 	slog.Debug("starting program")
-	dev := cyrw.NewPicoWDevice()
+	dev := cyw43439.NewPicoWDevice()
 	// cfg.Level = slog.LevelInfo // Logging level.
-	err := dev.Init(cyrw.DefaultWifiConfig())
+	err := dev.Init(cyw43439.DefaultWifiConfig())
 	if err != nil {
 		panic(err)
 	}
@@ -61,33 +63,20 @@ func main() {
 	go NICLoop(dev, stack)
 
 	println("Start DHCP...")
-	dhcp := stacks.DHCPv4Client{
-		MAC:         dev.MACAs6(),
-		RequestedIP: [4]byte{192, 168, 1, 69},
+	dhcp := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
+
+	err = dhcp.BeginRequest(stacks.DHCPRequestConfig{
+		RequestedAddr: netip.AddrFrom4([4]byte{192, 168, 1, 69}),
+		Xid:           0x12345678,
+	})
+	if err != nil {
+		panic("dhcp begin request:" + err.Error())
 	}
-	dhcpOngoing := true
-	for {
-		err = stack.OpenUDP(68, dhcp.HandleUDP)
-		if err != nil {
-			panic(err)
-		}
-		stack.FlagPendingUDP(68) // Force a DHCP discovery.
-		for i := 0; dhcpOngoing && i < 16; i++ {
-			time.Sleep(time.Second / 2) // Check every half second for DHCP completion.
-			dhcpOngoing = !dhcp.Done()
-		}
-		if !dhcpOngoing {
-			break
-		}
-		// Redo.
-		println("redo DHCP...")
-		err = stack.CloseUDP(68) // DHCP failed, reset state.
-		if err != nil {
-			panic(err)
-		}
-		dhcp.Reset()
+	for !dhcp.Done() {
+		println("trying DHCP...")
+		time.Sleep(time.Second)
 	}
-	ip := netip.AddrFrom4(dhcp.YourIP)
+	ip := dhcp.Offer()
 	println("DHCP complete IP:", ip.String())
 	stack.SetAddr(ip)
 
@@ -105,7 +94,7 @@ func main() {
 	}
 }
 
-func NICLoop(dev *cyrw.Device, Stack *stacks.PortStack) {
+func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 	// Maximum number of packets to queue before sending them.
 	const (
 		queueSize                = 4

@@ -23,6 +23,8 @@ github.com/soypat/seqs v0.0.0-20231206005833-dd6ee8a482d1 h1:AXXtbV1c8touIAGbPiY
 github.com/soypat/seqs v0.0.0-20231206005833-dd6ee8a482d1/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
 github.com/soypat/seqs v0.0.0-20231208015755-39836e36bccc h1:Bj65dgmNa62M6NXzAe35oWN1/vcYzphSIdab4sSFU9c=
 github.com/soypat/seqs v0.0.0-20231208015755-39836e36bccc/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
+github.com/soypat/seqs v0.0.0-20231208024249-1d4935106b3f h1:SF+Ew6AASnZNP+C4ux7lP++BC0Z+48TZoRE5/RWym+g=
+github.com/soypat/seqs v0.0.0-20231208024249-1d4935106b3f/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
 github.com/tinygo-org/pio v0.0.0-20231110210127-06bcd7c58cb1 h1:LmEem4bB5E5xYiL10eltiiGNZaevuJHAEgb3Gq4hZgM=
 github.com/tinygo-org/pio v0.0.0-20231110210127-06bcd7c58cb1/go.mod h1:LU7Dw00NJ+N86QkeTGjMLNkYcEYMor6wTDpTCu0EaH8=
 github.com/valyala/fastjson v1.6.3/go.mod h1:CLCAqky6SMuOcxStkYQvblddUtoRxhYMGLrsQns1aXY=

@@ -1,6 +1,6 @@
 //go:build pico && !cy43nopio
 
-package cyrw
+package cy43439
 
 import (
 	"encoding/binary"

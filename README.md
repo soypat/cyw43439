@@ -3,12 +3,12 @@ Driver for the Wifi+bluetooth integrated circuit on the pico.
 
 Run DHCP example:
 ```shell
-tinygo flash -target=pico -opt=1 -stack-size=16kb -size=short -monitor  ./examples/dhcp/
+tinygo flash -target=pico -opt=1 -stack-size=8kb -size=short -monitor  ./examples/dhcp/
 ```
 
 Run TCP server example:
 ```shell
-tinygo flash -target=pico -opt=1 -stack-size=32kb -size=short -monitor  ./examples/tcpserver/
+tinygo flash -target=pico -opt=1 -stack-size=8kb -size=short -monitor  ./examples/tcpserver/
 ```
 
 
