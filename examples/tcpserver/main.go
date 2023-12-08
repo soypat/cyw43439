@@ -27,12 +27,16 @@ func main() {
 			println("panic:", a)
 		}
 	}()
+	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+		Level: slog.LevelDebug, // Go lower (Debug-1) to see more verbosity on wifi device.
+	}))
+
 	time.Sleep(2 * time.Second)
 	println("starting program")
-	slog.Debug("starting program")
-	dev := cyrw.DefaultNew()
-	cfg := cyrw.DefaultConfig()
-	cfg.Level = slog.LevelError // Logging level.
+	logger.Debug("starting program")
+	dev := cyrw.NewPicoWDevice()
+	cfg := cyrw.DefaultWifiConfig()
+	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
 	err := dev.Init(cfg)
 	if err != nil {
 		panic(err)
@@ -57,10 +61,8 @@ func main() {
 			lastRx = time.Now()
 			return nil
 		},
-		MTU: MTU,
-		Logger: slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
-		})),
+		MTU:    MTU,
+		Logger: logger,
 	})
 
 	dev.RecvEthHandle(stack.RecvEth)

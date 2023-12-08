@@ -13,11 +13,11 @@ import (
 var _busOrder = binary.LittleEndian
 
 type spibus struct {
-	cs  OutputPin
+	cs  outputPin
 	spi piolib.SPI3w
 }
 
-func DefaultNew() *Device {
+func NewPicoWDevice() *Device {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
 	const (
 		// IRQ       = machine.GPIO24 // AKA WL_HOST_WAKE

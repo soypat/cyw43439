@@ -1,10 +1,8 @@
 package cyrw
 
 import (
+	"context"
 	"encoding/hex"
-	"fmt"
-	"reflect"
-	"unsafe"
 
 	"log/slog"
 )
@@ -16,7 +14,7 @@ const (
 	// A higher currentLevel means less logs (less verbose).
 	defaultLevel slog.Level = levelTrace + 1
 	levelTrace   slog.Level = slog.LevelDebug - 1
-	deviceLevel  slog.Level = slog.LevelError - 1
+	deviceLevel  slog.Level = slog.LevelDebug - 1
 	// dblogattrs decides whether to print key-value log attributes.
 	dblogattrs = true
 	// print out raw bus transactions.
@@ -44,43 +42,20 @@ func (d *Device) trace(msg string, attrs ...slog.Attr) {
 }
 
 func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
-	canPrintDeviceLog := enableDeviceLog && level == deviceLevel
-	if level < d.level && !canPrintDeviceLog {
-		return
+	if d.logger != nil {
+		d.logger.LogAttrs(context.Background(), level, msg, attrs...)
 	}
-
-	print(_levelStr(level))
-	print(" ")
-	print(msg)
-	if dblogattrs {
-		for _, a := range attrs {
-			print(" ")
-			print(a.Key)
-			print("=")
-			if a.Value.Kind() == slog.KindAny {
-				fmt.Printf("%+v", a.Value.Any())
-			} else {
-				print(a.Value.String())
-			}
-		}
-	}
-	println()
 }
-func _levelStr(level slog.Level) string {
-	var levelStr string
-	switch level {
-	case deviceLevel:
-		levelStr = "CY43"
-	case levelTrace:
-		levelStr = "TRACE"
-	default:
-		levelStr = level.String()
-	}
-	return levelStr
+
+// SetLogger sets the logger for the device. If nil logging is disabled.
+func (d *Device) SetLogger(l *slog.Logger) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.logger = l
 }
 
 func (d *Device) log_init() error {
-	if !enableDeviceLog {
+	if d.logger == nil || !d.logger.Handler().Enabled(context.Background(), deviceLevel) {
 		return nil
 	}
 	d.trace("log_init")
@@ -112,7 +87,7 @@ func (d *Device) log_init() error {
 // log_read reads the CY43439's internal logs and prints them to the structured logger
 // under the CY43 level.
 func (d *Device) log_read() error {
-	if !enableDeviceLog {
+	if d.logger == nil || !d.logger.Handler().Enabled(context.Background(), deviceLevel) {
 		return nil
 	}
 	d.trace("log_read")
@@ -150,31 +125,6 @@ func (d *Device) log_read() error {
 		}
 	}
 	return nil
-}
-
-func printLowLevelTx(cmd uint32, data []uint32) {
-	if !printLowestLevelBusTransactions {
-		return
-	}
-	var buf [8]byte
-	ptr := unsafe.Pointer(&buf[0])
-	strhdr := reflect.StringHeader{
-		Data: uintptr(ptr),
-		Len:  uintptr(len(buf)),
-	}
-	h := *(*string)(unsafe.Pointer(&strhdr))
-	const hextable = "0123456789abcdef"
-
-	hex.Encode(buf[:], u32PtrTo4U8(&cmd)[:])
-	print("tx: ")
-	print(h)
-
-	for _, d := range data {
-		hex.Encode(buf[:], u32PtrTo4U8(&d)[:])
-		print(" ")
-		print(h)
-	}
-	println()
 }
 
 func hex32(u uint32) string {

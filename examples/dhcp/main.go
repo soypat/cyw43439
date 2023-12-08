@@ -25,9 +25,9 @@ func main() {
 	time.Sleep(2 * time.Second)
 	println("starting program")
 	slog.Debug("starting program")
-	dev := cyrw.DefaultNew()
+	dev := cyrw.NewPicoWDevice()
 	// cfg.Level = slog.LevelInfo // Logging level.
-	err := dev.Init(cyrw.DefaultConfig())
+	err := dev.Init(cyrw.DefaultWifiConfig())
 	if err != nil {
 		panic(err)
 	}
