@@ -20,6 +20,7 @@ const (
 	linkStateUp
 	linkStateFailed
 	linkStateAuthFailed
+	linkStateWaitForReconnect
 )
 
 type outputPin func(bool)

@@ -76,6 +76,9 @@ const MTU = 2048 - mtuPrefix
 
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
+	if !d.IsLinkUp() {
+		return errors.New("link down")
+	}
 	// reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L247
 	d.debug("tx", slog.Int("len", len(packet)))
 	buf := d._sendIoctlBuf[:]
@@ -514,10 +517,10 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	}
 	switch ev {
 	case whd.EvAUTH:
-		if aePacket.Message.Status == 0 && d.state == linkStateDown {
-			d.state = linkStateUpWaitForSSID
-		} else if aePacket.Message.Status != 0 {
+		if aePacket.Message.Status != 0 {
 			d.state = linkStateAuthFailed
+		} else if d.state == linkStateDown {
+			d.state = linkStateUpWaitForSSID
 		}
 	case whd.EvSET_SSID:
 		if aePacket.Message.Status == 0 && d.state == linkStateUpWaitForSSID {
@@ -525,10 +528,24 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 		} else if aePacket.Message.Status != 0 {
 			d.state = linkStateFailed
 		}
-	case whd.EvDEAUTH:
+	case whd.EvLINK:
+		if aePacket.Message.Flags == 0 {
+			d.state = linkStateWaitForReconnect // Disconnected, but will try to reconnect.
+		}
+	case whd.EvJOIN:
+		if d.state == linkStateWaitForReconnect {
+			d.state = linkStateUp
+		}
+	case whd.EvDEAUTH, whd.EvDISASSOC:
 		d.state = linkStateDown
 	}
-	d.info("rxEvent:success", slog.String("event", ev.String()))
+	d.info("rxEvent",
+		slog.String("event", ev.String()),
+		slog.Uint64("status", uint64(aePacket.Message.Status)),
+		slog.Uint64("reason", uint64(aePacket.Message.Reason)),
+		slog.Uint64("flags", uint64(aePacket.Message.Flags)),
+		slog.Uint64("dev.linkstate", uint64(d.state)),
+	)
 	return nil
 }
 

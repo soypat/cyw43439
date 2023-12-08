@@ -170,6 +170,11 @@ func (d *Device) wait_for_join(ssid string) (err error) {
 	}
 	switch d.state {
 	case linkStateUp:
+		// Begin listening in for link change/down events.
+		d.eventmask.Enable(whd.EvLINK)
+		d.eventmask.Enable(whd.EvJOIN)
+		d.eventmask.Enable(whd.EvDISASSOC)
+		d.eventmask.Enable(whd.EvDEAUTH)
 		return nil
 	case linkStateAuthFailed:
 		return errors.New("auth failed")
@@ -263,6 +268,11 @@ func (d *Device) setSSIDWithIndex(ssid string, index uint32) error {
 	infoIndex.Put(_busOrder, buf[:])
 
 	return d.set_iovar_n("bsscfg:ssid", whd.IF_STA, buf[:])
+}
+
+// IsLinkUp returns true if the wifi connection is up.
+func (d *Device) IsLinkUp() bool {
+	return d.state == linkStateUp
 }
 
 func (d *Device) JoinWPA2(ssid, pass string) error {
