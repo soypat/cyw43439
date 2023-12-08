@@ -160,15 +160,24 @@ func (d *Device) wait_for_join(ssid string) (err error) {
 
 	// Poll for async events.
 	deadline := time.Now().Add(10 * time.Second)
-	for time.Until(deadline) > 0 {
+	d.state = linkStateDown
+	for time.Until(deadline) > 0 && d.state == linkStateDown && d.state != linkStateUpWaitForSSID {
+		time.Sleep(270 * time.Millisecond)
 		err = d.check_status(d._sendIoctlBuf[:])
 		if err != nil {
 			return err
 		}
-		time.Sleep(time.Second)
 	}
-
-	return nil
+	switch d.state {
+	case linkStateUp:
+		return nil
+	case linkStateAuthFailed:
+		return errors.New("auth failed")
+	case linkStateFailed:
+		return errors.New("SET_SSID failed")
+	default:
+		return errors.New("join failed")
+	}
 }
 
 type passphraseInfo struct {

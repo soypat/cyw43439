@@ -512,6 +512,22 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 		d.trace("rxEvent:ignore", slog.String("event", ev.String()))
 		return nil
 	}
+	switch ev {
+	case whd.EvAUTH:
+		if aePacket.Message.Status == 0 && d.state == linkStateDown {
+			d.state = linkStateUpWaitForSSID
+		} else if aePacket.Message.Status != 0 {
+			d.state = linkStateAuthFailed
+		}
+	case whd.EvSET_SSID:
+		if aePacket.Message.Status == 0 && d.state == linkStateUpWaitForSSID {
+			d.state = linkStateUp // join operation ends with SET_SSID event
+		} else if aePacket.Message.Status != 0 {
+			d.state = linkStateFailed
+		}
+	case whd.EvDEAUTH:
+		d.state = linkStateDown
+	}
 	d.info("rxEvent:success", slog.String("event", ev.String()))
 	return nil
 }
