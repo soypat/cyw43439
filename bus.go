@@ -215,7 +215,8 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
-	buf := d._iovarBuf[:maxTxSize/4+1]
+	// buf := d._iovarBuf[:maxTxSize/4+1]
+	var buf [maxTxSize/4 + 1]uint32 // TODO: heapalloc replace.
 	buf8 := unsafeAsSlice[uint32, byte](buf[:])
 	for len(data) > 0 {
 		// Calculate address and length of next write.
@@ -265,8 +266,8 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	d.debug("bp_write",
 		slog.Uint64("addr", uint64(addr)),
 	)
-	buf := d._sendIoctlBuf[:maxTxSize/4+1]
-	// var buf [maxTxSize/4 + 1]uint32 // TODO(soypat): heapalloc replace.
+	// buf := d._iovarBuf[:maxTxSize/4+1]
+	var buf [maxTxSize/4 + 1]uint32 // TODO(soypat): heapalloc replace.
 	buf8 := unsafeAsSlice[uint32, byte](buf[:])
 	for err == nil && len(data) > 0 {
 		// Calculate address and length of next write to ensure transfer doesn't cross a window boundary.
