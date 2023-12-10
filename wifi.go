@@ -20,7 +20,7 @@ func (d *Device) initControl(clm string) error {
 	const chunkSize = 1024
 	remaining := clm
 	offset := 0
-	var buf8 [chunkSize + 20]byte
+	buf8 := unsafeAsSlice[uint32, uint8](d._iovarBuf[:])[:chunkSize+20]
 
 	for len(remaining) > 0 {
 		chunk := remaining[:min(len(remaining), chunkSize)]
