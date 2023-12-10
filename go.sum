@@ -1,7 +1,7 @@
 github.com/soypat/saleae v0.0.0-20230402180913-3584b7515dae h1:cOw342W+mYwRaahnxdhRVITGkGTTWqwy7AblKv0iQxM=
 github.com/soypat/saleae v0.0.0-20230402180913-3584b7515dae/go.mod h1:9SV+w6E9YK/BePxdxYGXthkrRztHJCQlojWOjAxW3M4=
-github.com/soypat/seqs v0.0.0-20231210202925-0af811d5116a h1:kak1rn3ajelidOyydDS+jqNjedKwG7IX26kfjVLlrc0=
-github.com/soypat/seqs v0.0.0-20231210202925-0af811d5116a/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
+github.com/soypat/seqs v0.0.0-20231210221426-5c1a398280e9 h1:sN8H539qHa2am8+baFWfX13UvgKpuJWMgaFdlemgPu4=
+github.com/soypat/seqs v0.0.0-20231210221426-5c1a398280e9/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
 github.com/tinygo-org/pio v0.0.0-20231210200048-0da43683898b h1:uVnSPi6djJ2BX5qaIg4yFLDqWw0sGgU71c/iaEPyvrM=
 github.com/tinygo-org/pio v0.0.0-20231210200048-0da43683898b/go.mod h1:LU7Dw00NJ+N86QkeTGjMLNkYcEYMor6wTDpTCu0EaH8=
 golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691 h1:/yRP+0AN7mf5DkD3BAI6TOFnd51gEoDEb8o35jIFtgw=
