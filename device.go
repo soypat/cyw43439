@@ -11,6 +11,18 @@ import (
 	"github.com/soypat/cyw43439/whd"
 )
 
+// CYW43439 internal link state enum.
+type linkState uint8
+
+const (
+	linkStateDown = iota
+	linkStateUpWaitForSSID
+	linkStateUp
+	linkStateFailed
+	linkStateAuthFailed
+	linkStateWaitForReconnect
+)
+
 type outputPin func(bool)
 
 func DefaultWifiConfig() Config {
@@ -44,6 +56,7 @@ type Device struct {
 	auxBDCHeader    whd.BDCHeader
 	rcvEth          func([]byte) error
 	logger          *slog.Logger
+	state           linkState
 }
 
 func New(pwr, cs outputPin, spi spibus) *Device {
@@ -174,7 +187,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	if err != nil {
 		return err
 	}
-
+	d.state = linkStateDown
 	return d.set_power_management(PowerSave)
 }
 
@@ -222,7 +235,7 @@ func (d *Device) Reset() {
 	d.pwr(false)
 	time.Sleep(20 * time.Millisecond)
 	d.pwr(true)
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond) // Wait for bus to initialize.
 }
 
 func (d *Device) getInterrupts() Interrupts {
