@@ -1,4 +1,4 @@
-package cy43439
+package cyw43439
 
 import (
 	"context"
@@ -82,13 +82,16 @@ func (d *Device) log_init() error {
 	caddr := _busOrder.Uint32(shared[20:])
 	smem := decodeSharedMem(_busOrder, shared)
 	d.log.addr = smem.console_addr + 8
-	d.trace("log addr",
-		slog.String("shared", hex.EncodeToString(shared)),
-		slog.String("shared[20:]", hex.EncodeToString(shared[20:])),
-		slog.Uint64("sharedAddr", uint64(sharedAddr)),
-		slog.Uint64("consoleAddr", uint64(d.log.addr)),
-		slog.Uint64("caddr", uint64(caddr)),
-	)
+	if d.isTraceEnabled() {
+		d.trace("log addr",
+			slog.String("shared", hex.EncodeToString(shared)),
+			slog.String("shared[20:]", hex.EncodeToString(shared[20:])),
+			slog.Uint64("sharedAddr", uint64(sharedAddr)),
+			slog.Uint64("consoleAddr", uint64(d.log.addr)),
+			slog.Uint64("caddr", uint64(caddr)),
+		)
+	}
+
 	return nil
 }
 

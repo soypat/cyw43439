@@ -3,7 +3,7 @@ package main
 import (
 	"time"
 
-	cyw43439 "github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439"
 )
 
 func main() {

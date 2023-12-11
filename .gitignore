@@ -20,7 +20,7 @@ cmd/cywanalyze/*.txt
 # Dependency directories (remove the comment below to include it)
 # vendor/
 .vscode/*
-
+local
 cyw43
 
 cmd/cyrw/secrets.go

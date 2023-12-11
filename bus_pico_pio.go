@@ -1,6 +1,6 @@
 //go:build pico && !cy43nopio
 
-package cy43439
+package cyw43439
 
 import (
 	"encoding/binary"
@@ -8,6 +8,7 @@ import (
 
 	pio "github.com/tinygo-org/pio/rp2-pio"
 	"github.com/tinygo-org/pio/rp2-pio/piolib"
+	"golang.org/x/exp/constraints"
 )
 
 var _busOrder = binary.LittleEndian
@@ -71,4 +72,9 @@ func (d *spibus) csEnable(b bool) {
 
 func (d *spibus) Status() Status {
 	return Status(d.spi.LastStatus())
+}
+
+// align rounds `val` up to nearest multiple of `align`.
+func align[T constraints.Unsigned](val, align T) T {
+	return (val + align - 1) &^ (align - 1)
 }

@@ -6,7 +6,7 @@ import (
 
 	"log/slog"
 
-	cyw43439 "github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439"
 
 	"github.com/soypat/seqs/eth"
 	"github.com/soypat/seqs/eth/dhcp"

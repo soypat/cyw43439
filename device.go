@@ -1,4 +1,4 @@
-package cy43439
+package cyw43439
 
 import (
 	"errors"
@@ -189,7 +189,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	}
 
 	err = d.set_power_management(PowerSave)
-  d.state = linkStateDown
+	d.state = linkStateDown
 	d.info("Init:done", slog.Duration("took", time.Since(start)))
 	return err
 }

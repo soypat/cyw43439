@@ -1,4 +1,4 @@
-package cy43439
+package cyw43439
 
 import (
 	"errors"
@@ -371,11 +371,6 @@ type _uinteger = interface {
 
 type _integer = interface {
 	~int | _uinteger
-}
-
-// align rounds `val` up to nearest multiple of `align`.
-func align[T constraints.Unsigned](val, align T) T {
-	return (val + align - 1) &^ (align - 1)
 }
 
 func max[T constraints.Integer](a, b T) T {
