@@ -410,6 +410,8 @@ func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
 		// why are we getting these errors exclusively during first IO operations?
 		d.debug("tryPoll:ignore_spurious", slog.String("err", err.Error()))
 		err = nil
+	} else if err != nil {
+		d.logerr("tryPoll:rx", slog.Uint64("plen", uint64(plen)), slog.String("err", err.Error()))
 	}
 	return buf8[offset : offset+plen], hdrType, err
 }
@@ -418,7 +420,6 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 	d.trace("rx:start")
 	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
 	if len(packet) < whd.SDPCM_HEADER_LEN+whd.BDC_HEADER_LEN+1 {
-		d.logerr("PACKET TOO SHORT", slog.Int("len", len(packet)))
 		return 0, 0, noPacket, errors.New("packet too short")
 	}
 
@@ -442,30 +443,22 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 	default:
 		err = errors.New("unknown sdpcm hdr type")
 	}
-	if err != nil {
-		d.logerr("rx", slog.String("err", err.Error()))
-	}
 	return offset, plen, hdrType, err
 }
 
 func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
-	defer func() {
-		if err != nil {
-			d.logerr("rxControl",
-				slog.Int("len", len(packet)),
-				slog.Int("id", int(d.auxCDCHeader.ID)),
-				slog.String("cdc.Cmd", d.auxCDCHeader.Cmd.String()),
-				slog.Int("cdc.Flags", int(d.auxCDCHeader.Flags)),
-				slog.Int("cdc.Len", int(d.auxCDCHeader.Length)),
-			)
-		}
-	}()
 	d.auxCDCHeader = whd.DecodeCDCHeader(_busOrder, packet)
-
-	if d.auxCDCHeader.ID == d.ioctlID {
-		if d.auxCDCHeader.Status != 0 {
-			return 0, 0, errors.New("IOCTL error:" + strconv.Itoa(int(d.auxCDCHeader.Status)))
-		}
+	if d.isTraceEnabled() {
+		d.trace("rxControl",
+			slog.Int("len", len(packet)),
+			slog.Int("id", int(d.auxCDCHeader.ID)),
+			slog.String("cdc.Cmd", d.auxCDCHeader.Cmd.String()),
+			slog.Int("cdc.Flags", int(d.auxCDCHeader.Flags)),
+			slog.Int("cdc.Len", int(d.auxCDCHeader.Length)),
+		)
+	}
+	if d.auxCDCHeader.ID == d.ioctlID && d.auxCDCHeader.Status != 0 {
+		return 0, 0, errors.New("IOCTL error:" + strconv.Itoa(int(d.auxCDCHeader.Status)))
 	}
 	offset = uint16(d.lastSDPCMHeader.HeaderLength + whd.CDC_HEADER_LEN)
 	// NB: losing some precision here (uint16(uint32)).
@@ -482,17 +475,6 @@ var (
 func (d *Device) rxEvent(packet []byte) (err error) {
 	var bdcHdr whd.BDCHeader
 	var aePacket whd.EventPacket
-	defer func() {
-		if err != nil {
-			d.logerr("rxEvent",
-				slog.String("err", err.Error()),
-				slog.Int("plen", len(packet)),
-				slog.Int("bdc.Flags", int(bdcHdr.Flags)),
-				slog.Int("bdc.Priority", int(bdcHdr.Priority)),
-				slog.Int("ae.Status", int(aePacket.Message.Status)),
-			)
-		}
-	}()
 	// Split packet into BDC header:payload.
 	if len(packet) < whd.BDC_HEADER_LEN {
 		return errPacketSmol
@@ -510,9 +492,17 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	if err != nil {
 		return err
 	}
+	if d.isTraceEnabled() {
+		d.trace("rxEvent",
+			slog.Int("plen", len(packet)),
+			slog.Int("bdc.Flags", int(bdcHdr.Flags)),
+			slog.Int("bdc.Priority", int(bdcHdr.Priority)),
+			slog.Int("ae.Status", int(aePacket.Message.Status)),
+			slog.String("event", aePacket.Message.EventType.String()),
+		)
+	}
 	ev := aePacket.Message.EventType
 	if !d.eventmask.IsEnabled(ev) {
-		d.trace("rxEvent:ignore", slog.String("event", ev.String()))
 		return nil
 	}
 	switch ev {

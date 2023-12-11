@@ -41,6 +41,14 @@ func (d *Device) trace(msg string, attrs ...slog.Attr) {
 	d.logattrs(slog.LevelDebug-1, msg, attrs...)
 }
 
+func (d *Device) enabled(level slog.Level) bool {
+	return d.logger != nil && d.logger.Handler().Enabled(context.Background(), level)
+}
+
+func (d *Device) isTraceEnabled() bool {
+	return d.enabled(levelTrace)
+}
+
 func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 	if d.logger != nil {
 		d.logger.LogAttrs(context.Background(), level, msg, attrs...)

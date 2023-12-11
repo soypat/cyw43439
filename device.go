@@ -79,7 +79,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	defer d.unlock()
 	d.logger = cfg.Logger
 	d.info("Init:start")
-
+	start := time.Now()
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	err = d.initBus()
 	if err != nil {
@@ -187,8 +187,11 @@ func (d *Device) Init(cfg Config) (err error) {
 	if err != nil {
 		return err
 	}
-	d.state = linkStateDown
-	return d.set_power_management(PowerSave)
+
+	err = d.set_power_management(PowerSave)
+  d.state = linkStateDown
+	d.info("Init:done", slog.Duration("took", time.Since(start)))
+	return err
 }
 
 func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
@@ -222,9 +225,10 @@ func (d *Device) SendEth(pkt []byte) error {
 func (d *Device) status() Status {
 	// TODO(soypat): Are we sure we don't want to re-acquire status if it's been very long?
 	sinceStat := time.Since(d.lastStatusGet)
-	if sinceStat < 12*time.Microsecond {
+	if sinceStat < 10*time.Microsecond {
 		runtime.Gosched() // Probably in hot loop.
 	} else {
+		d.lastStatusGet = time.Now()
 		got, _ := d.read32(FuncBus, whd.SPI_STATUS_REGISTER) // Explicitly get Status.
 		return Status(got)
 	}
