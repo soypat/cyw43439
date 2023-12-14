@@ -7,8 +7,12 @@ import (
 	"time"
 )
 
+const (
+	// Edit to match server's listening TCP addr:port
+	server = "10.0.0.122:1234"
+)
+
 func main() {
-	const server = "10.0.0.122:1234"
 	raddr := netip.MustParseAddrPort(server)
 	conn, err := net.DialTCP("tcp", nil, net.TCPAddrFromAddrPort(raddr))
 	if err != nil {
