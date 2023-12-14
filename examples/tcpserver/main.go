@@ -5,6 +5,7 @@ import (
 	"machine"
 	"net"
 	"net/netip"
+	"runtime"
 	"time"
 
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 const MTU = cyw43439.MTU // CY43439 permits 2030 bytes of ethernet frame.
 
 var lastRx, lastTx time.Time
+var logger *slog.Logger
 
 func main() {
 	defer func() {
@@ -27,7 +29,7 @@ func main() {
 			println("panic:", a)
 		}
 	}()
-	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
 	}))
 
@@ -146,6 +148,7 @@ func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 		retries[i] = 0
 	}
 	for {
+		printGCStatsIfChanged(logger)
 		stallRx := true
 		// Poll for incoming packets.
 		for i := 0; i < 1; i++ {
@@ -204,4 +207,56 @@ func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 			}
 		}
 	}
+}
+
+// Test GC stats printing.
+var (
+	memstats   runtime.MemStats
+	lastAllocs uint64
+	lastLog    time.Time
+)
+
+const enableGCPrint = true
+const minLogPeriod = 8 * time.Second
+
+// printGCStatsIfChanged prints GC stats if they have changed since the last call and
+// at least minLogPeriod has passed.
+func printGCStatsIfChanged(log *slog.Logger) {
+	if !enableGCPrint {
+		return
+	}
+	// Split logging into two calls since slog inlines at most 5 arguments per call.
+	// This way we avoid heap allocations for the log message to avoid interfering with GC.
+	runtime.ReadMemStats(&memstats)
+	now := time.Now()
+	if memstats.TotalAlloc == lastAllocs || now.Sub(lastLog) < minLogPeriod {
+		return // don't print if no change in allocations.
+	}
+	println("GC stats ", now.Unix())
+	print(" TotalAlloc= ", memstats.TotalAlloc)
+	print(" Frees=", memstats.Frees)
+	print(" Mallocs=", memstats.Mallocs)
+	print(" GCSys=", memstats.GCSys)
+	println(" Sys=", memstats.Sys)
+	print("HeapIdle=", memstats.HeapIdle)
+	print(" HeapInuse=", memstats.HeapInuse)
+	print(" HeapReleased=", memstats.HeapReleased)
+	println(" HeapSys=", memstats.HeapSys)
+	// log.LogAttrs(context.Background(), slog.LevelInfo, "MemStats",
+	// 	slog.Uint64("TotalAlloc", memstats.TotalAlloc),
+	// 	slog.Uint64("Frees", memstats.Frees),
+	// 	slog.Uint64("Mallocs", memstats.Mallocs),
+	// 	slog.Uint64("GCSys", memstats.GCSys),
+	// 	slog.Uint64("Sys", memstats.Sys),
+	// )
+	// log.LogAttrs(context.Background(), slog.LevelInfo, "MemStats.Heap",
+	// 	slog.Uint64("HeapIdle", memstats.HeapIdle),
+	// 	slog.Uint64("HeapInuse", memstats.HeapInuse),
+	// 	slog.Uint64("HeapReleased", memstats.HeapReleased),
+	// 	slog.Uint64("HeapSys", memstats.HeapSys),
+	// )
+	// Above calls may allocate.
+	runtime.ReadMemStats(&memstats)
+	lastAllocs = memstats.TotalAlloc
+	lastLog = now
 }
