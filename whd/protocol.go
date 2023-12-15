@@ -3,11 +3,33 @@ package whd
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"runtime"
-	"strconv"
 	"unsafe"
 
 	"github.com/soypat/seqs/eth"
+)
+
+var errShortBufferCDC = errors.New("short CDC.Parse buffer")
+
+// SDPCM header errors.
+var (
+	errSDPCMHeaderSizeComplementMismatch = errors.New("sdpcm hdr size complement mismatch")
+	errSDPCMHeaderSizeMismatch           = errors.New("len from header doesn't match len from spi")
+)
+
+// ScanResult errors
+var (
+	errBufferUnaligned = errors.New("buffer not aligned to 4 bytes")
+	errIEEndExceedsBSS = errors.New("IE end exceeds bss length")
+)
+
+// Common async event errors.
+var (
+	ErrInvalidEtherType   = errors.New("whd: invalid EtherType")
+	errInvalidOUI         = errors.New("invalid oui; expected broadcom OUI")
+	errInvalidSubtype     = errors.New("invalid subtype; expected BCMILCP_SUBTYPE_VENDOR_LONG=32769")
+	errInvalidUserSubtype = errors.New("invalid user subtype; expected BCMILCP_BCM_SUBTYPE_EVENT=1")
 )
 
 type SDPCMHeader struct {
@@ -56,14 +78,13 @@ func (s *SDPCMHeader) Put(order binary.ByteOrder, dst []byte) {
 
 func (s *SDPCMHeader) Parse(packet []byte) ([]byte, error) {
 	if len(packet) < int(s.Size) {
-		return nil, errors.New("packet shorter than sdpcm hdr, expected=" +
-			strconv.Itoa(int(s.Size)))
+		return nil, io.ErrShortBuffer
 	}
 	if s.Size != ^s.SizeCom {
-		return nil, errors.New("sdpcm hdr size complement mismatch")
+		return nil, errSDPCMHeaderSizeComplementMismatch
 	}
 	if int(s.Size) != len(packet) {
-		return nil, errors.New("len from header doesn't match len from spi")
+		return nil, errSDPCMHeaderSizeMismatch
 	}
 
 	return packet[s.HeaderLength:], nil
@@ -104,8 +125,7 @@ func (cdc *CDCHeader) Put(order binary.ByteOrder, b []byte) {
 
 func (cdc *CDCHeader) Parse(packet []byte) (payload []byte, err error) {
 	if len(packet) < CDC_HEADER_LEN+int(cdc.Length) {
-		err = errors.New("packet shorter than cdc hdr, len=" + strconv.Itoa(len(packet)))
-		return
+		return nil, errShortBufferCDC
 	}
 	payload = packet[CDC_HEADER_LEN:]
 	return
@@ -152,7 +172,7 @@ type AsyncEvent struct {
 // reference: cyw43_ll_parse_async_event
 func ParseAsyncEvent(order binary.ByteOrder, buf []byte) (ev AsyncEvent, err error) {
 	if len(buf) < 48 {
-		return ev, errors.New("buffer too small to parse async event")
+		return ev, io.ErrShortBuffer
 	}
 	ev.Flags = order.Uint16(buf[2:])
 	ev.EventType = AsyncEventType(order.Uint32(buf[4:]))
@@ -163,7 +183,7 @@ func ParseAsyncEvent(order binary.ByteOrder, buf []byte) (ev AsyncEvent, err err
 	if ev.EventType == CYW43_EV_ESCAN_RESULT && ev.Status == CYW43_STATUS_PARTIAL {
 		const sizeStruct = unsafe.Sizeof(ev)
 		if len(buf) < int(sizeStruct) {
-			return ev, errors.New("buffer too small to parse scan results")
+			return ev, io.ErrShortBuffer
 		}
 		ev.u, err = ParseScanResult(order, buf[48:])
 	}
@@ -230,17 +250,15 @@ func ParseScanResult(order binary.ByteOrder, buf []byte) (sr EventScanResult, er
 		bss      evscanresult
 	}
 	if len(buf) > int(unsafe.Sizeof(scanresult{})) {
-		return sr, errors.New("buffer to small for scanresult")
+		return sr, io.ErrShortBuffer
 	}
-
-	println("prep deref")
 	ptr := unsafe.Pointer(&buf[0])
 	if uintptr(ptr)%4 != 0 {
-		return sr, errors.New("buffer not aligned to 4 bytes")
+		return sr, errBufferUnaligned
 	}
 	scan := (*scanresult)(ptr)
 	if uint32(scan.bss.IEOffset)+scan.bss.IELength > scan.bss.Length {
-		return sr, errors.New("IE end exceeds bss length")
+		return sr, errIEEndExceedsBSS
 	}
 	// TODO(soypat): lots of stuff missing here.
 	return *(*EventScanResult)(unsafe.Pointer(&scan.bss)), nil
@@ -309,17 +327,12 @@ type EventMessage struct {
 	BSSCfgIdx uint8          // 47:48
 }
 
-// Common async event errors.
-var (
-	ErrInvalidEtherType = errors.New("whd: invalid EtherType")
-)
-
 // DecodeEventPacket decodes an async event packet. Requires 72 byte buffer.
 func DecodeEventPacket(order binary.ByteOrder, buf []byte) (ev EventPacket, err error) {
 	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/structs.rs#L234C18-L234C18
 	const totalLen = 14 + 10 + 48
 	if len(buf) < totalLen {
-		return ev, errors.New("buffer too small to parse event packet")
+		return ev, io.ErrShortBuffer
 	}
 	ev.EthHeader = eth.DecodeEthernetHeader(buf[:14])
 	if ev.EthHeader.AssertType() != 0x886c {
@@ -332,11 +345,11 @@ func DecodeEventPacket(order binary.ByteOrder, buf []byte) (ev EventPacket, err 
 	)
 	switch {
 	case ev.EventHeader.OUI != [3]byte{0x00, 0x10, 0x18}:
-		return ev, errors.New("invalid oui; expected broadcom OUI")
+		return ev, errInvalidOUI
 	case ev.EventHeader.Subtype != BCMILCP_SUBTYPE_VENDOR_LONG:
-		return ev, errors.New("invalid subtype; expected BCMILCP_SUBTYPE_VENDOR_LONG=32769")
+		return ev, errInvalidSubtype
 	case ev.EventHeader.UserSubtype != BCMILCP_BCM_SUBTYPE_EVENT:
-		return ev, errors.New("invalid user subtype; expected BCMILCP_BCM_SUBTYPE_EVENT=1")
+		return ev, errInvalidUserSubtype
 	}
 	ev.Message = DecodeEventMessage(order, buf[24:totalLen])
 	return ev, nil
