@@ -63,7 +63,7 @@ func (d *Device) initControl(clm string) error {
 	// read MAC Address:
 
 	d.get_iovar_n("cur_etheraddr", whd.IF_STA, d.mac[:6])
-	d.debug("MAC", slog.String("mac", d.MAC().String()))
+	d.debug("MAC", slog.String("mac", d.hwaddr().String()))
 
 	countryInfo := whd.CountryInfo("XX", 0)
 	d.set_iovar_n("country", whd.IF_STA, countryInfo[:])
@@ -113,9 +113,10 @@ func (d *Device) initControl(clm string) error {
 	return nil
 }
 
-func (d *Device) MAC() net.HardwareAddr {
+func (d *Device) hwaddr() net.HardwareAddr {
 	return net.HardwareAddr(d.mac[:6])
 }
+
 func (d *Device) MACAs6() [6]byte {
 	return d.mac
 }

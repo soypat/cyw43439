@@ -53,7 +53,8 @@ func main() {
 		println("wifi join failed:", err.Error())
 		time.Sleep(5 * time.Second)
 	}
-	println("\n\n\nMAC:", dev.MAC().String())
+	mac := dev.MACAs6()
+	println("\n\n\nMAC:", net.HardwareAddr(mac[:]).String())
 
 	stack := stacks.NewPortStack(stacks.PortStackConfig{
 		MAC:             dev.MACAs6(),
@@ -232,7 +233,7 @@ func printGCStatsIfChanged(log *slog.Logger) {
 	if memstats.TotalAlloc == lastAllocs || now.Sub(lastLog) < minLogPeriod {
 		return // don't print if no change in allocations.
 	}
-	println("GC stats ", now.Unix())
+	println("GC stats ", now.Unix(), "heap_inc=", int64(memstats.TotalAlloc)-int64(lastAllocs))
 	print(" TotalAlloc= ", memstats.TotalAlloc)
 	print(" Frees=", memstats.Frees)
 	print(" Mallocs=", memstats.Mallocs)

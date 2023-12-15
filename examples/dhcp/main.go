@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"net/netip"
 	"time"
 
@@ -43,7 +44,8 @@ func main() {
 		println("wifi join failed:", err.Error())
 		time.Sleep(5 * time.Second)
 	}
-	println("\n\n\nMAC:", dev.MAC().String())
+	mac := dev.MACAs6()
+	println("\n\n\nMAC:", net.HardwareAddr(mac[:]).String())
 
 	stack := stacks.NewPortStack(stacks.PortStackConfig{
 		MAC:             dev.MACAs6(),

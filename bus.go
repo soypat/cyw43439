@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"log/slog"
-	"reflect"
 	"time"
 	"unsafe"
 
@@ -246,13 +245,8 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 
 // bp_writestring exists to leverage static string data which is always put in flash.
 func (d *Device) bp_writestring(addr uint32, data string) error {
-	hdr := (*reflect.StringHeader)(unsafe.Pointer(&data))
-	sliceHdr := reflect.SliceHeader{
-		Data: hdr.Data,
-		Len:  hdr.Len,
-		Cap:  align(hdr.Len, 4),
-	}
-	return d.bp_write(addr, *(*[]byte)(unsafe.Pointer(&sliceHdr)))
+	slice := unsafe.Slice(unsafe.StringData(data), align(uint32(len(data)), 4))
+	return d.bp_write(addr, slice[:len(data)])
 }
 
 func (d *Device) bp_write(addr uint32, data []byte) (err error) {
@@ -263,9 +257,10 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	// var buf [maxTxSize]byte
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
-	d.debug("bp_write",
-		slog.Uint64("addr", uint64(addr)),
-	)
+	if d.logenabled(slog.LevelDebug) {
+		d.debug("bp_write", slog.Uint64("addr", uint64(addr)))
+	}
+
 	// buf := d._iovarBuf[:maxTxSize/4+1]
 	var buf [maxTxSize/4 + 1]uint32 // TODO(soypat): heapalloc replace.
 	buf8 := unsafeAsSlice[uint32, byte](buf[:])

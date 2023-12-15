@@ -6,12 +6,30 @@ package cyw43439
 import (
 	"encoding/binary"
 	"errors"
-	"strconv"
+	"io"
 	"time"
 
 	"log/slog"
 
 	"github.com/soypat/cyw43439/whd"
+)
+
+var (
+	errTxPacketTooLarge      = errors.New("tx packet too large")
+	errLinkDown              = errors.New("link down")
+	errIOVarTooLarge         = errors.New("iovar too large")
+	errInvalidIoctlIface     = errors.New("invalid ioctl iface")
+	errInvalidIoctlCmdOrKind = errors.New("invalid ioctl cmd/kind")
+	errIoctlDataTooLarge     = errors.New("ioctl data too large")
+	errInvalidRxBDCHeaderLen = errors.New("invalid recv BDC header length")
+	errRxIoctlStatus         = errors.New("non-zero ioctl status")
+)
+
+// Ioctl polling errors.
+var (
+	errNoF2Avail            = errors.New("no packet available")
+	errWaitForCreditTimeout = errors.New("waitForCredit timeout")
+	errIoctlPollTimeout     = errors.New("ioctl poll timeout")
 )
 
 const noPacket = whd.SDPCMHeaderType(0xff)
@@ -68,8 +86,6 @@ func (d *Device) has_credit() bool {
 	return d.sdpcmSeq != d.sdpcmSeqMax && (d.sdpcmSeqMax-d.sdpcmSeq)&0x80 == 0
 }
 
-var errTxPacketTooLarge = errors.New("tx packet too large")
-
 // 2 is padding necessary in the SDPCM header.
 const mtuPrefix = 2 + whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 const MTU = 2048 - mtuPrefix
@@ -77,7 +93,7 @@ const MTU = 2048 - mtuPrefix
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
 	if !d.IsLinkUp() {
-		return errors.New("link down")
+		return errLinkDown
 	}
 	// reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L247
 	d.debug("tx", slog.Int("len", len(packet)))
@@ -172,7 +188,7 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 	d.trace("set_iovar", slog.String("var", VAR))
 	buf8 := u32AsU8(d._iovarBuf[:])
 	if len(val)+1+len(VAR) > len(buf8) {
-		return errors.New("set_iovar value too large")
+		return errIOVarTooLarge
 	}
 
 	length := copy(buf8[:], VAR)
@@ -184,7 +200,9 @@ func (d *Device) set_iovar_n(VAR string, iface whd.IoctlInterface, val []byte) (
 }
 
 func (d *Device) doIoctlGet(cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (n int, err error) {
-	d.trace("doIoctlGet:start", slog.String("cmd", cmd.String()), slog.String("iface", iface.String()), slog.Int("len", len(data)))
+	if d.isTraceEnabled() {
+		d.trace("doIoctlGet:start", slog.String("cmd", cmd.String()), slog.String("iface", iface.String()), slog.Int("len", len(data)))
+	}
 	packet, err := d.sendIoctlWait(ioctlGET, cmd, iface, data)
 	if err != nil {
 		return 0, err
@@ -214,7 +232,9 @@ func (d *Device) sendIoctlWait(kind uint8, cmd whd.SDPCMCommand, iface whd.Ioctl
 	}
 	packet, err := d.pollForIoctl(d._sendIoctlBuf[:])
 	if err != nil {
-		d.logerr("sendIoctlWait:pollForIoctl", slog.String("err", err.Error()))
+		if d.logenabled(slog.LevelError) {
+			d.logerr("sendIoctlWait:pollForIoctl", slog.String("err", err.Error()))
+		}
 		return nil, err
 	}
 
@@ -225,20 +245,22 @@ func (d *Device) sendIoctlWait(kind uint8, cmd whd.SDPCMCommand, iface whd.Ioctl
 func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInterface, data []byte) (err error) {
 	d.trace("sendIoctl:start")
 	if !iface.IsValid() {
-		return errors.New("invalid ioctl interface")
+		return errInvalidIoctlIface
 	} else if !cmd.IsValid() {
-		return errors.New("invalid ioctl command")
+		return errInvalidIoctlCmdOrKind
 	} else if kind != whd.SDPCM_GET && kind != whd.SDPCM_SET {
-		return errors.New("invalid ioctl kind")
+		return errInvalidIoctlCmdOrKind
 	}
-	d.debug("sendIoctl", slog.Int("kind", int(kind)), slog.String("cmd", cmd.String()), slog.Int("len", len(data)))
+	if d.logenabled(slog.LevelDebug) {
+		d.debug("sendIoctl", slog.Int("kind", int(kind)), slog.String("cmd", cmd.String()), slog.Int("len", len(data)))
+	}
 
 	buf := d._sendIoctlBuf[:]
 	buf8 := u32AsU8(buf)
 
 	totalLen := uint32(whd.SDPCM_HEADER_LEN + whd.CDC_HEADER_LEN + len(data))
 	if int(totalLen) > len(buf8) {
-		return errors.New("ioctl data too large " + strconv.Itoa(len(data)))
+		return errIoctlDataTooLarge
 	}
 	sdpcmSeq := d.sdpcmSeq
 	d.sdpcmSeq++
@@ -268,8 +290,8 @@ func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInte
 
 // handle_irq waits for IRQ on F2 packet available
 func (d *Device) handle_irq(buf []uint32) (err error) {
+	d.trace("handle_irq:start")
 	irq := d.getInterrupts()
-	d.trace("handle_irq", slog.String("irq", irq.String()))
 
 	if irq.IsF2Available() {
 		err = d.check_status(buf)
@@ -334,12 +356,6 @@ func (d *Device) f2PacketAvail() (bool, uint16) {
 	}
 	return false, 0
 }
-
-// Ioctl polling errors.
-var (
-	errNoF2Avail            = errors.New("no packet available")
-	errWaitForCreditTimeout = errors.New("waitForCredit timeout")
-)
 
 // waitForCredit waits for a credit to use for the next transaction
 func (d *Device) waitForCredit(buf []uint32) error {
@@ -408,9 +424,11 @@ func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
 		// Spurious Poll error correction.
 		// TODO(soypat): get to the bottom of this-
 		// why are we getting these errors exclusively during first IO operations?
-		d.debug("tryPoll:ignore_spurious", slog.String("err", err.Error()))
+		if d.logenabled(slog.LevelDebug) {
+			d.debug("tryPoll:ignore_spurious", slog.String("err", err.Error()))
+		}
 		err = nil
-	} else if err != nil {
+	} else if err != nil && d.logenabled(slog.LevelError) {
 		d.logerr("tryPoll:rx", slog.Uint64("plen", uint64(plen)), slog.String("err", err.Error()))
 	}
 	return buf8[offset : offset+plen], hdrType, err
@@ -420,7 +438,7 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 	d.trace("rx:start")
 	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
 	if len(packet) < whd.SDPCM_HEADER_LEN+whd.BDC_HEADER_LEN+1 {
-		return 0, 0, noPacket, errors.New("packet too short")
+		return 0, 0, noPacket, io.ErrShortBuffer
 	}
 
 	d.lastSDPCMHeader = whd.DecodeSDPCMHeader(_busOrder, packet)
@@ -441,7 +459,7 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 	case whd.DATA_HEADER:
 		err = d.rxData(payload)
 	default:
-		err = errors.New("unknown sdpcm hdr type")
+		err = errInvalidIoctlCmdOrKind
 	}
 	return offset, plen, hdrType, err
 }
@@ -452,13 +470,14 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 		d.trace("rxControl",
 			slog.Int("len", len(packet)),
 			slog.Int("id", int(d.auxCDCHeader.ID)),
-			slog.String("cdc.Cmd", d.auxCDCHeader.Cmd.String()),
+			// slog.String("cdc.Cmd", d.auxCDCHeader.Cmd.String()),
 			slog.Int("cdc.Flags", int(d.auxCDCHeader.Flags)),
 			slog.Int("cdc.Len", int(d.auxCDCHeader.Length)),
 		)
 	}
 	if d.auxCDCHeader.ID == d.ioctlID && d.auxCDCHeader.Status != 0 {
-		return 0, 0, errors.New("IOCTL error:" + strconv.Itoa(int(d.auxCDCHeader.Status)))
+		d.logerr("rxControl:ioctlerror", slog.Uint64("status", uint64(d.auxCDCHeader.Status)))
+		return 0, 0, errRxIoctlStatus
 	}
 	offset = uint16(d.lastSDPCMHeader.HeaderLength + whd.CDC_HEADER_LEN)
 	// NB: losing some precision here (uint16(uint32)).
@@ -529,13 +548,15 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	case whd.EvDEAUTH, whd.EvDISASSOC:
 		d.state = linkStateDown
 	}
-	d.info("rxEvent",
-		slog.String("event", ev.String()),
-		slog.Uint64("status", uint64(aePacket.Message.Status)),
-		slog.Uint64("reason", uint64(aePacket.Message.Reason)),
-		slog.Uint64("flags", uint64(aePacket.Message.Flags)),
-		slog.Uint64("dev.linkstate", uint64(d.state)),
-	)
+	if d.logenabled(slog.LevelInfo) {
+		d.info("rxEvent",
+			slog.String("event", ev.String()),
+			slog.Uint64("status", uint64(aePacket.Message.Status)),
+			slog.Uint64("reason", uint64(aePacket.Message.Reason)),
+			slog.Uint64("flags", uint64(aePacket.Message.Flags)),
+			slog.Uint64("dev.linkstate", uint64(d.state)),
+		)
+	}
 	return nil
 }
 
@@ -544,7 +565,7 @@ func (d *Device) rxData(packet []byte) (err error) {
 		bdcHdr := whd.DecodeBDCHeader(packet)
 		packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
 		if packetStart > len(packet) {
-			return errors.New("rxData: Invalid length in BDC header")
+			return errInvalidRxBDCHeaderLen
 		}
 		payload := packet[packetStart:]
 		return d.rcvEth(payload)
