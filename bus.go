@@ -14,6 +14,46 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
+type spibus struct {
+	spi cmdBus
+	cs  outputPin
+}
+
+func New(pwr, cs outputPin, spi cmdBus) *Device {
+	d := &Device{
+		pwr: pwr,
+		spi: spibus{
+			spi: spi,
+			cs:  cs,
+		},
+		sdpcmSeqMax: 1,
+	}
+	return d
+}
+
+func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {
+	d.csEnable(true)
+	err = d.spi.CmdRead(cmd, buf)
+	d.csEnable(false)
+	return d.spi.LastStatus(), err
+}
+
+func (d *spibus) cmd_write(cmd uint32, buf []uint32) (status uint32, err error) {
+	// TODO(soypat): add cmd as argument and remove copies elsewhere?
+	d.csEnable(true)
+	err = d.spi.CmdWrite(cmd, buf)
+	d.csEnable(false)
+	return d.spi.LastStatus(), err
+}
+
+func (d *spibus) csEnable(b bool) {
+	d.cs(!b)
+}
+
+func (d *spibus) Status() Status {
+	return Status(d.spi.LastStatus())
+}
+
 func (d *Device) initBus() error {
 	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/bus.rs#L51
 	d.Reset()

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"github.com/soypat/cyw43439/whd"
+	"golang.org/x/exp/constraints"
 )
 
 // CYW43439 internal link state enum.
@@ -57,15 +58,6 @@ type Device struct {
 	rcvEth          func([]byte) error
 	logger          *slog.Logger
 	state           linkState
-}
-
-func New(pwr, cs outputPin, spi spibus) *Device {
-	d := &Device{
-		pwr:         pwr,
-		spi:         spi,
-		sdpcmSeqMax: 1,
-	}
-	return d
 }
 
 type Config struct {
@@ -252,3 +244,8 @@ func (d *Device) getInterrupts() Interrupts {
 
 func (d *Device) lock()   { d.mu.Lock() }
 func (d *Device) unlock() { d.mu.Unlock() }
+
+// align rounds `val` up to nearest multiple of `align`.
+func align[T constraints.Unsigned](val, align T) T {
+	return (val + align - 1) &^ (align - 1)
+}
