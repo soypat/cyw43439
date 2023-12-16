@@ -236,6 +236,7 @@ func decodeSharedMemLog(order binary.ByteOrder, buf []byte) (s sharedMemLog) {
 }
 
 func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
+	// d.trace("wlan_read:start")
 	cmd := cmd_word(false, true, FuncWLAN, 0, uint32(lenInBytes))
 	lenU32 := (lenInBytes + 3) / 4
 	_, err = d.spi.cmd_read(cmd, buf[:lenU32])
@@ -244,6 +245,7 @@ func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
 }
 
 func (d *Device) wlan_write(data []uint32, plen uint32) (err error) {
+	// d.trace("wlan_write:start")
 	cmd := cmd_word(true, true, FuncWLAN, 0, plen)
 	_, err = d.spi.cmd_write(cmd, data)
 	d.lastStatusGet = time.Now()
@@ -251,6 +253,7 @@ func (d *Device) wlan_write(data []uint32, plen uint32) (err error) {
 }
 
 func (d *Device) bp_read(addr uint32, data []byte) (err error) {
+	// d.trace("bp_read:start")
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]

@@ -336,6 +336,7 @@ func (d *Device) irqPoll() {
 // f2PacketAvail checks if a packet is available, and if so, returns
 // the packet length.
 func (d *Device) f2PacketAvail() (bool, uint16) {
+	d.trace("f2PacketAvail:start")
 	// First, check cached status from previous cmd_read|cmd_write
 	status := d.spi.Status()
 	if status.F2PacketAvailable() {
@@ -492,6 +493,7 @@ var (
 )
 
 func (d *Device) rxEvent(packet []byte) (err error) {
+	d.trace("rxEvent:start")
 	var bdcHdr whd.BDCHeader
 	var aePacket whd.EventPacket
 	// Split packet into BDC header:payload.
@@ -561,6 +563,7 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 }
 
 func (d *Device) rxData(packet []byte) (err error) {
+	d.trace("rxData:start")
 	if d.rcvEth != nil {
 		bdcHdr := whd.DecodeBDCHeader(packet)
 		packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)

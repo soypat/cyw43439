@@ -3,6 +3,7 @@ package cyw43439
 import (
 	"context"
 	"encoding/hex"
+	"runtime"
 
 	"log/slog"
 )
@@ -16,9 +17,9 @@ const (
 	levelTrace   slog.Level = slog.LevelDebug - 1
 	deviceLevel  slog.Level = slog.LevelDebug - 1
 	// dblogattrs decides whether to print key-value log attributes.
-	dblogattrs = true
-	// print out raw bus transactions.
-	printLowestLevelBusTransactions = false
+
+	// heapAllocDebugging enables heap allocation debugging. So Prints do not use the heap.
+	heapAllocDebugging = false
 )
 
 func (d *Device) logerr(msg string, attrs ...slog.Attr) {
@@ -38,10 +39,13 @@ func (d *Device) debug(msg string, attrs ...slog.Attr) {
 }
 
 func (d *Device) trace(msg string, attrs ...slog.Attr) {
-	d.logattrs(slog.LevelDebug-1, msg, attrs...)
+	d.logattrs(levelTrace, msg, attrs...)
 }
 
 func (d *Device) logenabled(level slog.Level) bool {
+	if heapAllocDebugging {
+		return true
+	}
 	return d.logger != nil && d.logger.Handler().Enabled(context.Background(), level)
 }
 
@@ -49,7 +53,40 @@ func (d *Device) isTraceEnabled() bool {
 	return d.logenabled(levelTrace)
 }
 
+var (
+	memstats   runtime.MemStats
+	lastAllocs uint64
+)
+
 func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
+	if heapAllocDebugging {
+		runtime.ReadMemStats(&memstats)
+		if memstats.TotalAlloc != lastAllocs {
+			print("[ALLOC] inc=", int64(memstats.TotalAlloc)-int64(lastAllocs))
+			print(" tot=", memstats.TotalAlloc)
+			println()
+		}
+		if level == levelTrace {
+			print("TRACE ")
+		} else if level < slog.LevelDebug {
+			print("CY43 ")
+		} else {
+			print(level.String(), " ")
+		}
+		print(msg)
+		for _, a := range attrs {
+			switch a.Value.Kind() {
+			case slog.KindString:
+				print(" ", a.Key, "=", a.Value.String())
+			}
+		}
+		println()
+		runtime.ReadMemStats(&memstats)
+		if memstats.TotalAlloc != lastAllocs {
+			lastAllocs = memstats.TotalAlloc
+		}
+		return
+	}
 	if d.logger != nil {
 		d.logger.LogAttrs(context.Background(), level, msg, attrs...)
 	}
@@ -91,7 +128,6 @@ func (d *Device) log_init() error {
 			slog.Uint64("caddr", uint64(caddr)),
 		)
 	}
-
 	return nil
 }
 
