@@ -7,13 +7,53 @@ import (
 	"encoding/binary"
 	"errors"
 	"log/slog"
-	"reflect"
 	"time"
 	"unsafe"
 
 	"github.com/soypat/cyw43439/whd"
 	"golang.org/x/exp/constraints"
 )
+
+type spibus struct {
+	spi cmdBus
+	cs  outputPin
+}
+
+func New(pwr, cs outputPin, spi cmdBus, logger *slog.Logger) *Device {
+	d := &Device{
+		pwr: pwr,
+		spi: spibus{
+			spi: spi,
+			cs:  cs,
+		},
+		sdpcmSeqMax: 1,
+		logger:      logger,
+	}
+	return d
+}
+
+func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {
+	d.csEnable(true)
+	err = d.spi.CmdRead(cmd, buf)
+	d.csEnable(false)
+	return d.spi.LastStatus(), err
+}
+
+func (d *spibus) cmd_write(cmd uint32, buf []uint32) (status uint32, err error) {
+	// TODO(soypat): add cmd as argument and remove copies elsewhere?
+	d.csEnable(true)
+	err = d.spi.CmdWrite(cmd, buf)
+	d.csEnable(false)
+	return d.spi.LastStatus(), err
+}
+
+func (d *spibus) csEnable(b bool) {
+	d.cs(!b)
+}
+
+func (d *spibus) Status() Status {
+	return Status(d.spi.LastStatus())
+}
 
 func (d *Device) initBus() error {
 	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/bus.rs#L51
@@ -197,6 +237,7 @@ func decodeSharedMemLog(order binary.ByteOrder, buf []byte) (s sharedMemLog) {
 }
 
 func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
+	// d.trace("wlan_read:start")
 	cmd := cmd_word(false, true, FuncWLAN, 0, uint32(lenInBytes))
 	lenU32 := (lenInBytes + 3) / 4
 	_, err = d.spi.cmd_read(cmd, buf[:lenU32])
@@ -205,6 +246,7 @@ func (d *Device) wlan_read(buf []uint32, lenInBytes int) (err error) {
 }
 
 func (d *Device) wlan_write(data []uint32, plen uint32) (err error) {
+	// d.trace("wlan_write:start")
 	cmd := cmd_word(true, true, FuncWLAN, 0, plen)
 	_, err = d.spi.cmd_write(cmd, data)
 	d.lastStatusGet = time.Now()
@@ -212,6 +254,7 @@ func (d *Device) wlan_write(data []uint32, plen uint32) (err error) {
 }
 
 func (d *Device) bp_read(addr uint32, data []byte) (err error) {
+	// d.trace("bp_read:start")
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
@@ -246,13 +289,8 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 
 // bp_writestring exists to leverage static string data which is always put in flash.
 func (d *Device) bp_writestring(addr uint32, data string) error {
-	hdr := (*reflect.StringHeader)(unsafe.Pointer(&data))
-	sliceHdr := reflect.SliceHeader{
-		Data: hdr.Data,
-		Len:  hdr.Len,
-		Cap:  align(hdr.Len, 4),
-	}
-	return d.bp_write(addr, *(*[]byte)(unsafe.Pointer(&sliceHdr)))
+	slice := unsafe.Slice(unsafe.StringData(data), align(uint32(len(data)), 4))
+	return d.bp_write(addr, slice[:len(data)])
 }
 
 func (d *Device) bp_write(addr uint32, data []byte) (err error) {
@@ -263,9 +301,10 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	// var buf [maxTxSize]byte
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
-	d.debug("bp_write",
-		slog.Uint64("addr", uint64(addr)),
-	)
+	if d.logenabled(slog.LevelDebug) {
+		d.debug("bp_write", slog.Uint64("addr", uint64(addr)))
+	}
+
 	// buf := d._iovarBuf[:maxTxSize/4+1]
 	var buf [maxTxSize/4 + 1]uint32 // TODO(soypat): heapalloc replace.
 	buf8 := unsafeAsSlice[uint32, byte](buf[:])

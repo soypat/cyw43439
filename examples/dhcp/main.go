@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"net/netip"
 	"time"
 
@@ -8,7 +9,6 @@ import (
 
 	"github.com/soypat/cyw43439"
 
-	"github.com/soypat/seqs/eth"
 	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
@@ -43,18 +43,15 @@ func main() {
 		println("wifi join failed:", err.Error())
 		time.Sleep(5 * time.Second)
 	}
-	println("\n\n\nMAC:", dev.MAC().String())
+	mac := dev.MACAs6()
+	println("\n\n\nMAC:", net.HardwareAddr(mac[:]).String())
 
 	stack := stacks.NewPortStack(stacks.PortStackConfig{
 		MAC:             dev.MACAs6(),
 		MaxOpenPortsUDP: 1,
 		MaxOpenPortsTCP: 1,
-		GlobalHandler: func(ehdr *eth.EthernetHeader, ethPayload []byte) error {
-			lastRx = time.Now()
-			return nil
-		},
-		MTU:    MTU,
-		Logger: slog.Default(),
+		MTU:             MTU,
+		Logger:          slog.Default(),
 	})
 
 	dev.RecvEthHandle(stack.RecvEth)

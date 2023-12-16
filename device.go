@@ -11,6 +11,7 @@ import (
 
 	"github.com/soypat/cyw43439/whd"
 	"tinygo.org/x/drivers/netlink"
+	"golang.org/x/exp/constraints"
 )
 
 // CYW43439 internal link state enum.
@@ -61,16 +62,6 @@ type Device struct {
 	logger          *slog.Logger
 	state           linkState
 	netConnected    bool
-}
-
-func New(pwr, cs outputPin, spi spibus, logger *slog.Logger) *Device {
-	d := &Device{
-		pwr:         pwr,
-		spi:         spi,
-		sdpcmSeqMax: 1,
-		logger:      logger,
-	}
-	return d
 }
 
 type Config struct {
@@ -241,7 +232,8 @@ func (d *Device) NetConnect(params *netlink.ConnectParams) error {
 		return netlink.ErrConnectFailed
 	}
 
-	println("\n\n\nMAC:", d.MAC().String())
+	mac, _ := d.GetHardwareAddr()
+	println("\n\n\nMAC:", mac.String())
 
 	if d.notifyCb != nil {
 		d.notifyCb(netlink.EventNetUp)
@@ -323,3 +315,8 @@ func (d *Device) getInterrupts() Interrupts {
 
 func (d *Device) lock()   { d.mu.Lock() }
 func (d *Device) unlock() { d.mu.Unlock() }
+
+// align rounds `val` up to nearest multiple of `align`.
+func align[T constraints.Unsigned](val, align T) T {
+	return (val + align - 1) &^ (align - 1)
+}

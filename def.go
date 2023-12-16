@@ -115,12 +115,6 @@ func (s Status) F3PacketLength() uint16 {
 	return uint16(s>>21) & mask
 }
 
-func (d *Device) GetStatus() (Status, error) {
-	busStatus, err := d.read32(FuncBus, whd.SPI_STATUS_REGISTER)
-	// d.debug("GetStatus", slog.String("stat", Status(busStatus).String()))
-	return Status(busStatus), err
-}
-
 type Interrupts uint16
 
 func (Int Interrupts) IsBusOverflowedOrUnderflowed() bool {
