@@ -12,7 +12,6 @@ import (
 
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/seqs"
-	"github.com/soypat/seqs/eth"
 	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
@@ -60,12 +59,8 @@ func main() {
 		MAC:             dev.MACAs6(),
 		MaxOpenPortsUDP: 1,
 		MaxOpenPortsTCP: 1,
-		GlobalHandler: func(ehdr *eth.EthernetHeader, ethPayload []byte) error {
-			lastRx = time.Now()
-			return nil
-		},
-		MTU:    MTU,
-		Logger: logger,
+		MTU:             MTU,
+		Logger:          logger,
 	})
 
 	dev.RecvEthHandle(stack.RecvEth)
@@ -228,8 +223,8 @@ func printGCStatsIfChanged(log *slog.Logger) {
 	}
 	// Split logging into two calls since slog inlines at most 5 arguments per call.
 	// This way we avoid heap allocations for the log message to avoid interfering with GC.
-	runtime.ReadMemStats(&memstats)
 	now := time.Now()
+	runtime.ReadMemStats(&memstats)
 	if memstats.TotalAlloc == lastAllocs || now.Sub(lastLog) < minLogPeriod {
 		return // don't print if no change in allocations.
 	}
@@ -239,7 +234,7 @@ func printGCStatsIfChanged(log *slog.Logger) {
 	print(" Mallocs=", memstats.Mallocs)
 	print(" GCSys=", memstats.GCSys)
 	println(" Sys=", memstats.Sys)
-	print("HeapIdle=", memstats.HeapIdle)
+	print(" HeapIdle=", memstats.HeapIdle)
 	print(" HeapInuse=", memstats.HeapInuse)
 	print(" HeapReleased=", memstats.HeapReleased)
 	println(" HeapSys=", memstats.HeapSys)

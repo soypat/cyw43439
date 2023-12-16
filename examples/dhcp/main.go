@@ -9,7 +9,6 @@ import (
 
 	"github.com/soypat/cyw43439"
 
-	"github.com/soypat/seqs/eth"
 	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
@@ -51,12 +50,8 @@ func main() {
 		MAC:             dev.MACAs6(),
 		MaxOpenPortsUDP: 1,
 		MaxOpenPortsTCP: 1,
-		GlobalHandler: func(ehdr *eth.EthernetHeader, ethPayload []byte) error {
-			lastRx = time.Now()
-			return nil
-		},
-		MTU:    MTU,
-		Logger: slog.Default(),
+		MTU:             MTU,
+		Logger:          slog.Default(),
 	})
 
 	dev.RecvEthHandle(stack.RecvEth)
