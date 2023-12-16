@@ -2,6 +2,7 @@ package cyw43439
 
 import (
 	"errors"
+	"net"
 	"runtime"
 	"sync"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 
 	"github.com/soypat/cyw43439/whd"
+	"tinygo.org/x/drivers/netlink"
 )
 
 // CYW43439 internal link state enum.
@@ -55,15 +57,18 @@ type Device struct {
 	auxCDCHeader    whd.CDCHeader
 	auxBDCHeader    whd.BDCHeader
 	rcvEth          func([]byte) error
+	notifyCb        func(netlink.Event)
 	logger          *slog.Logger
 	state           linkState
+	netConnected    bool
 }
 
-func New(pwr, cs outputPin, spi spibus) *Device {
+func New(pwr, cs outputPin, spi spibus, logger *slog.Logger) *Device {
 	d := &Device{
 		pwr:         pwr,
 		spi:         spi,
 		sdpcmSeqMax: 1,
+		logger:      logger,
 	}
 	return d
 }
@@ -71,13 +76,11 @@ func New(pwr, cs outputPin, spi spibus) *Device {
 type Config struct {
 	Firmware string
 	CLM      string
-	Logger   *slog.Logger
 }
 
 func (d *Device) Init(cfg Config) (err error) {
 	d.lock()
 	defer d.unlock()
-	d.logger = cfg.Logger
 	d.info("Init:start")
 	start := time.Now()
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
@@ -204,6 +207,74 @@ func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	d.lock()
 	defer d.unlock()
 	return d.set_iovar2("gpioout", whd.IF_STA, val0, val1)
+}
+
+func (d *Device) GetHardwareAddr() (net.HardwareAddr, error) {
+	return net.HardwareAddr(d.mac[:6]), nil
+}
+
+func (d *Device) NetNotify(cb func(netlink.Event)) {
+	d.notifyCb = cb
+}
+
+func (d *Device) NetConnect(params *netlink.ConnectParams) error {
+
+	if d.netConnected {
+		return netlink.ErrConnected
+	}
+
+	cfg := DefaultWifiConfig()
+	if err := d.Init(cfg); err != nil {
+		return err
+	}
+
+	for i := 0; params.Retries == 0 || i < params.Retries; i++ {
+		err := d.JoinWPA2(params.Ssid, params.Passphrase)
+		if err == nil {
+			d.netConnected = true
+			break
+		}
+		println("wifi join failed:", err.Error())
+	}
+
+	if !d.netConnected {
+		return netlink.ErrConnectFailed
+	}
+
+	println("\n\n\nMAC:", d.MAC().String())
+
+	if d.notifyCb != nil {
+		d.notifyCb(netlink.EventNetUp)
+	}
+
+	/*
+	if params.WatchdogTimeout != 0 {
+		go d.watchdog()
+	}
+	*/
+
+	return nil
+}
+
+func (d *Device) NetDisconnect() {
+
+	if !d.netConnected {
+		return
+	}
+
+	/*
+	if d.params.WatchdogTimeout != 0 {
+		d.killWatchdog <- true
+	}
+	*/
+
+	// TODO disconnect
+
+	d.netConnected = false
+
+	if d.notifyCb != nil {
+		d.notifyCb(netlink.EventNetDown)
+	}
 }
 
 // RecvEthHandle sets handler for receiving Ethernet pkt

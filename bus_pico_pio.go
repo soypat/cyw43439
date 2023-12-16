@@ -4,6 +4,7 @@ package cyw43439
 
 import (
 	"encoding/binary"
+	"log/slog"
 	"machine"
 
 	pio "github.com/tinygo-org/pio/rp2-pio"
@@ -18,7 +19,7 @@ type spibus struct {
 	spi piolib.SPI3w
 }
 
-func NewPicoWDevice() *Device {
+func NewPicoWDevice(logger *slog.Logger) *Device {
 	// Raspberry Pi Pico W pin definitions for the CY43439.
 	const (
 		// IRQ       = machine.GPIO24 // AKA WL_HOST_WAKE
@@ -47,7 +48,7 @@ func NewPicoWDevice() *Device {
 	return New(WL_REG_ON.Set, CS.Set, spibus{
 		cs:  CS.Set,
 		spi: *spi,
-	})
+	}, logger)
 }
 
 func (d *spibus) cmd_read(cmd uint32, buf []uint32) (status uint32, err error) {

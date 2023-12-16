@@ -36,9 +36,8 @@ func main() {
 	time.Sleep(2 * time.Second)
 	println("starting program")
 	logger.Debug("starting program")
-	dev := cyw43439.NewPicoWDevice()
+	dev := cyw43439.NewPicoWDevice(logger)
 	cfg := cyw43439.DefaultWifiConfig()
-	cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
 	err := dev.Init(cfg)
 	if err != nil {
 		panic(err)
@@ -56,7 +55,6 @@ func main() {
 	println("\n\n\nMAC:", dev.MAC().String())
 
 	stack := stacks.NewPortStack(stacks.PortStackConfig{
-		MAC:             dev.MACAs6(),
 		MaxOpenPortsUDP: 1,
 		MaxOpenPortsTCP: 1,
 		GlobalHandler: func(ehdr *eth.EthernetHeader, ethPayload []byte) error {
@@ -65,7 +63,9 @@ func main() {
 		},
 		MTU:    MTU,
 		Logger: logger,
+		Link:   dev,
 	})
+	stack.SetMAC(dev.MAC())
 
 	dev.RecvEthHandle(stack.RecvEth)
 
@@ -92,7 +92,8 @@ func main() {
 	// Start TCP server.
 	const socketBuf = 256
 	const listenPort = 1234
-	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
+	addr, _ := stack.Addr()
+	listenAddr := netip.AddrPortFrom(addr, listenPort)
 	socket, err := stacks.NewTCPSocket(stack, stacks.TCPSocketConfig{TxBufSize: socketBuf, RxBufSize: socketBuf})
 	if err != nil {
 		panic("socket create:" + err.Error())

@@ -290,7 +290,7 @@ func (d *Device) TryPoll() (gotPacket bool, err error) {
 	if err == errNoF2Avail {
 		return false, nil
 	}
-	return err == nil && cmd == whd.CONTROL_HEADER, err
+	return err == nil && cmd == whd.DATA_HEADER, err
 }
 
 // poll services any F2 packets.
