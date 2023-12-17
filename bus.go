@@ -19,7 +19,7 @@ type spibus struct {
 	cs  outputPin
 }
 
-func New(pwr, cs outputPin, spi cmdBus) *Device {
+func New(pwr, cs outputPin, spi cmdBus, logger *slog.Logger) *Device {
 	d := &Device{
 		pwr: pwr,
 		spi: spibus{
@@ -27,6 +27,7 @@ func New(pwr, cs outputPin, spi cmdBus) *Device {
 			cs:  cs,
 		},
 		sdpcmSeqMax: 1,
+		logger:      logger,
 	}
 	return d
 }

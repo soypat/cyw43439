@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"github.com/soypat/cyw43439/whd"
+	"tinygo.org/x/drivers/netlink"
 	"golang.org/x/exp/constraints"
 )
 
@@ -56,20 +57,20 @@ type Device struct {
 	auxCDCHeader    whd.CDCHeader
 	auxBDCHeader    whd.BDCHeader
 	rcvEth          func([]byte) error
+	notifyCb        func(netlink.Event)
 	logger          *slog.Logger
 	state           linkState
+	netConnected    bool
 }
 
 type Config struct {
 	Firmware string
 	CLM      string
-	Logger   *slog.Logger
 }
 
 func (d *Device) Init(cfg Config) (err error) {
 	d.lock()
 	defer d.unlock()
-	d.logger = cfg.Logger
 	d.info("Init:start")
 	start := time.Now()
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
@@ -196,21 +197,6 @@ func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	d.lock()
 	defer d.unlock()
 	return d.set_iovar2("gpioout", whd.IF_STA, val0, val1)
-}
-
-// RecvEthHandle sets handler for receiving Ethernet pkt
-// If set to nil then incoming packets are ignored.
-func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
-	d.lock()
-	defer d.unlock()
-	d.rcvEth = handler
-}
-
-// SendEth sends an Ethernet packet over the current interface.
-func (d *Device) SendEth(pkt []byte) error {
-	d.lock()
-	defer d.unlock()
-	return d.tx(pkt)
 }
 
 // status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
