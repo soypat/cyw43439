@@ -30,7 +30,7 @@ func main() {
 		}
 	}()
 	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelDebug - 2, // Go lower (Debug-1) to see more verbosity on wifi device.
+		Level: slog.LevelDebug - 1, // Go lower (Debug-1) to see more verbosity on wifi device.
 	}))
 
 	time.Sleep(2 * time.Second)
@@ -109,6 +109,9 @@ func ForeverTCPListenEcho(socket *stacks.TCPConn, addr netip.AddrPort) error {
 		err := socket.OpenListenTCP(addr.Port(), iss)
 		if err != nil {
 			return err
+		}
+		for socket.State().IsPreestablished() {
+			time.Sleep(5 * time.Millisecond)
 		}
 		for {
 			n, err := socket.Read(buf[:])
