@@ -102,7 +102,7 @@ func (d *Device) initBus() error {
 
 	got, err := d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
 
-	d.debug("current bus ctl" + hex32(val) + "writing:" + hex32(setupValue) + " got:" + hex32(got))
+	d.debug("current bus ctl", slog.Uint64("val", uint64(val)), slog.Uint64("got", uint64(got)))
 	if err != nil || got != whd.TEST_PATTERN {
 		return errjoin(errors.New("spi RO test failed:"+hex32(got)), err)
 	}
@@ -296,16 +296,14 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	if addr%4 != 0 {
 		return errors.New("addr must be 4-byte aligned")
 	}
+	d.debug("bp_write", slog.Uint64("addr", uint64(addr)))
+
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	// var buf [maxTxSize]byte
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
-	if d.logenabled(slog.LevelDebug) {
-		d.debug("bp_write", slog.Uint64("addr", uint64(addr)))
-	}
-
-	// buf := d._iovarBuf[:maxTxSize/4+1]
-	var buf [maxTxSize/4 + 1]uint32 // TODO(soypat): heapalloc replace.
+	buf := d._iovarBuf[:maxTxSize/4+1]
+	// var buf [maxTxSize/4 + 1]uint32 // TODO(soypat): heapalloc replace.
 	buf8 := unsafeAsSlice[uint32, byte](buf[:])
 	for err == nil && len(data) > 0 {
 		// Calculate address and length of next write to ensure transfer doesn't cross a window boundary.

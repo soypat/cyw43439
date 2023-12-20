@@ -9,8 +9,6 @@ import (
 )
 
 const (
-	enableDeviceLog = true
-
 	// currentLevel decides which log levels are printed.
 	// A higher currentLevel means less logs (less verbose).
 	defaultLevel slog.Level = levelTrace + 1
@@ -63,7 +61,7 @@ func (d *Device) logattrs(level slog.Level, msg string, attrs ...slog.Attr) {
 		runtime.ReadMemStats(&memstats)
 		if memstats.TotalAlloc != lastAllocs {
 			print("[ALLOC] inc=", int64(memstats.TotalAlloc)-int64(lastAllocs))
-			print(" tot=", memstats.TotalAlloc)
+			print(" tot=", memstats.TotalAlloc, " cyw43439")
 			println()
 		}
 		if level == levelTrace {

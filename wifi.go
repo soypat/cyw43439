@@ -118,6 +118,7 @@ func (d *Device) hwaddr() net.HardwareAddr {
 }
 
 func (d *Device) MACAs6() [6]byte {
+	d.trace("MACAs6:call")
 	return d.mac
 }
 
