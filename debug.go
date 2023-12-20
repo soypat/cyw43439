@@ -14,7 +14,6 @@ const (
 	defaultLevel slog.Level = levelTrace + 1
 	levelTrace   slog.Level = slog.LevelDebug - 1
 	deviceLevel  slog.Level = slog.LevelDebug - 1
-	// dblogattrs decides whether to print key-value log attributes.
 
 	// heapAllocDebugging enables heap allocation debugging. So Prints do not use the heap.
 	heapAllocDebugging = false

@@ -30,7 +30,7 @@ func main() {
 		}
 	}()
 	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
+		Level: slog.LevelDebug - 2, // Go lower (Debug-1) to see more verbosity on wifi device.
 	}))
 
 	time.Sleep(2 * time.Second)
@@ -38,7 +38,7 @@ func main() {
 	logger.Debug("starting program")
 	dev := cyw43439.NewPicoWDevice()
 	cfg := cyw43439.DefaultWifiConfig()
-	cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
+	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
 	err := dev.Init(cfg)
 	if err != nil {
 		panic(err)
@@ -90,7 +90,7 @@ func main() {
 	const socketBuf = 256
 	const listenPort = 1234
 	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
-	socket, err := stacks.NewTCPSocket(stack, stacks.TCPSocketConfig{TxBufSize: socketBuf, RxBufSize: socketBuf})
+	socket, err := stacks.NewTCPConn(stack, stacks.TCPConnConfig{TxBufSize: socketBuf, RxBufSize: socketBuf})
 	if err != nil {
 		panic("socket create:" + err.Error())
 	}
@@ -101,7 +101,7 @@ func main() {
 	}
 }
 
-func ForeverTCPListenEcho(socket *stacks.TCPSocket, addr netip.AddrPort) error {
+func ForeverTCPListenEcho(socket *stacks.TCPConn, addr netip.AddrPort) error {
 	var iss seqs.Value = 100
 	var buf [512]byte
 	for {
