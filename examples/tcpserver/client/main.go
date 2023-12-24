@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strconv"
 	"time"
 )
 
@@ -23,21 +24,30 @@ func main() {
 	dd := make([]byte, 1024)
 	go func() {
 		for {
-			time.Sleep(time.Second)
+			time.Sleep(time.Second / 100)
 			n, err := conn.Read(dd)
 			if err != nil {
 				fmt.Println("rerr", err.Error())
 			}
 			if n > 0 {
-				fmt.Printf("read %q\n", string(dd[:n]))
+				fmt.Printf("%s", string(dd[:n]))
 			}
 		}
 	}()
+	baseMessage := []byte("hello ")
+	i := 0
 	for {
-		_, err = conn.Write([]byte("hello"))
+
+		i++
+		msg := strconv.AppendInt(baseMessage, int64(i), 10)
+		if i%13 == 0 {
+			// msg = append(msg, ' ') // Add some entropy to length of message for stress testing.
+		}
+		msg = append(msg, '\n')
+		_, err = conn.Write(msg)
 		if err != nil {
 			fmt.Println("werr", err.Error())
 		}
-		time.Sleep(time.Second)
+		time.Sleep(time.Second / 100)
 	}
 }

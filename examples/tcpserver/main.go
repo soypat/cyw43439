@@ -30,7 +30,7 @@ func main() {
 		}
 	}()
 	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelDebug - 1, // Go lower (Debug-1) to see more verbosity on wifi device.
+		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
 	}))
 
 	time.Sleep(2 * time.Second)
