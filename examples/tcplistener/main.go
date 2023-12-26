@@ -18,7 +18,9 @@ import (
 const (
 	MTU         = cyw43439.MTU // CY43439 permits 2030 bytes of ethernet frame.
 	tcpbufsize  = 512          // MTU - ethhdr - iphdr - tcphdr
-	connTimeout = 2 * time.Second
+	connTimeout = 5 * time.Second
+	// Can help prevent stalling connections from blocking control the more connections you have.
+	maxconns = 3
 )
 
 var (
@@ -70,6 +72,7 @@ func main() {
 	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
 		RequestedAddr: netip.AddrFrom4([4]byte{192, 168, 1, 69}),
 		Xid:           0x12345678,
+		Hostname:      "tinygo-pico",
 	})
 	if err != nil {
 		panic("dhcp failed: " + err.Error())
@@ -86,7 +89,7 @@ func main() {
 	const listenPort = 1234
 	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
 	listener, err := stacks.NewTCPListener(stack, stacks.TCPListenerConfig{
-		MaxConnections: 3,
+		MaxConnections: maxconns,
 		ConnTxBufSize:  tcpbufsize,
 		ConnRxBufSize:  tcpbufsize,
 	})
@@ -134,7 +137,6 @@ func main() {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-
 }
 
 func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {

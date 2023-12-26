@@ -12,7 +12,8 @@ import (
 
 const (
 	// Edit to match server's listening TCP addr:port
-	server = "192.168.1.145:1234"
+	server        = "192.168.1.120:1234"
+	messageperiod = time.Second / 100
 )
 
 func main() {
@@ -31,7 +32,7 @@ func pushDataWhileOpen(conn net.Conn) {
 	dd := make([]byte, 1024)
 	go func() {
 		for {
-			time.Sleep(time.Second / 100)
+			time.Sleep(10 * time.Millisecond)
 			n, err := conn.Read(dd)
 			if isCloseErr(err) {
 				conn.Close()
@@ -62,7 +63,7 @@ func pushDataWhileOpen(conn net.Conn) {
 		if err != nil {
 			fmt.Println("werr", err.Error())
 		}
-		time.Sleep(time.Second / 100)
+		time.Sleep(messageperiod)
 	}
 }
 

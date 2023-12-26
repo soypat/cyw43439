@@ -10,7 +10,7 @@ import (
 
 const (
 	// Edit to match server's listening TCP addr:port
-	server = "192.168.1.145:1234"
+	server = "192.168.1.120:1234"
 )
 
 func main() {
