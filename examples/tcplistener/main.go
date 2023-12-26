@@ -5,17 +5,23 @@ import (
 	"machine"
 	"net"
 	"net/netip"
+	"os"
 	"time"
 
 	"log/slog"
 
 	"github.com/soypat/cyw43439"
-	"github.com/soypat/seqs"
 	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
 
-const MTU = cyw43439.MTU // CY43439 permits 2030 bytes of ethernet frame.
+const (
+	MTU         = cyw43439.MTU // CY43439 permits 2030 bytes of ethernet frame.
+	tcpbufsize  = 512          // MTU - ethhdr - iphdr - tcphdr
+	connTimeout = 5 * time.Second
+	// Can help prevent stalling connections from blocking control the more connections you have.
+	maxconns = 3
+)
 
 var (
 	lastRx, lastTx time.Time
@@ -23,19 +29,11 @@ var (
 )
 
 func main() {
-	defer func() {
-		println("program finished")
-		if a := recover(); a != nil {
-			println("panic:", a)
-		}
-	}()
 	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
 	}))
-
 	time.Sleep(2 * time.Second)
-	println("starting program")
-	logger.Debug("starting program")
+	logger.Info("starting program")
 	dev := cyw43439.NewPicoWDevice()
 	cfg := cyw43439.DefaultWifiConfig()
 	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
@@ -50,11 +48,11 @@ func main() {
 		if err == nil {
 			break
 		}
-		println("wifi join failed:", err.Error())
+		logger.Error("wifi join faled", slog.String("err", err.Error()))
 		time.Sleep(5 * time.Second)
 	}
 	mac := dev.MACAs6()
-	println("\n\n\nMAC:", net.HardwareAddr(mac[:]).String())
+	logger.Info("wifi join success!", slog.String("mac", net.HardwareAddr(mac[:]).String()))
 
 	stack := stacks.NewPortStack(stacks.PortStackConfig{
 		MAC:             mac,
@@ -80,57 +78,64 @@ func main() {
 		panic("dhcp failed: " + err.Error())
 	}
 	for !dhcpClient.Done() {
-		println("dhcp ongoing...")
+		logger.Info("DHCP ongoing...")
 		time.Sleep(time.Second / 2)
 	}
 	ip := dhcpClient.Offer()
-	println("DHCP complete IP:", ip.String())
+	logger.Info("DHCP complete", slog.String("ip", ip.String()))
 	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
 
 	// Start TCP server.
-	const socketBuf = 256
 	const listenPort = 1234
 	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
-	socket, err := stacks.NewTCPConn(stack, stacks.TCPConnConfig{TxBufSize: socketBuf, RxBufSize: socketBuf})
+	listener, err := stacks.NewTCPListener(stack, stacks.TCPListenerConfig{
+		MaxConnections: maxconns,
+		ConnTxBufSize:  tcpbufsize,
+		ConnRxBufSize:  tcpbufsize,
+	})
 	if err != nil {
-		panic("socket create:" + err.Error())
+		panic("listener create:" + err.Error())
 	}
-	println("start listening on:", listenAddr.String())
-	err = ForeverTCPListenEcho(socket, listenAddr)
+	err = listener.StartListening(listenPort)
 	if err != nil {
-		panic("socket listen:" + err.Error())
+		panic("listener start:" + err.Error())
 	}
-}
-
-func ForeverTCPListenEcho(socket *stacks.TCPConn, addr netip.AddrPort) error {
-	var iss seqs.Value = 100
 	var buf [512]byte
+	logger.Info("listening", slog.String("addr", listenAddr.String()))
 	for {
-		iss += 200
-		err := socket.OpenListenTCP(addr.Port(), iss)
+		conn, err := listener.Accept()
 		if err != nil {
-			return err
+			logger.Error("listener accept:", slog.String("err", err.Error()))
+			time.Sleep(time.Second)
+			continue
 		}
-		for socket.State().IsPreestablished() {
-			time.Sleep(5 * time.Millisecond)
+		logger.Info("new connection", slog.String("remote", conn.RemoteAddr().String()))
+		err = conn.SetDeadline(time.Now().Add(connTimeout))
+		if err != nil {
+			logger.Error("conn set deadline:", slog.String("err", err.Error()))
+			continue
 		}
 		for {
-			n, err := socket.Read(buf[:])
-			if errors.Is(err, net.ErrClosed) {
+			n, err := conn.Read(buf[:])
+			if err != nil {
+				if !errors.Is(err, os.ErrDeadlineExceeded) {
+					logger.Error("conn read:", slog.String("err", err.Error()))
+				}
 				break
 			}
-			if n == 0 {
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
-			_, err = socket.Write(buf[:n])
+			_, err = conn.Write(buf[:n])
 			if err != nil {
-				return err
+				if !errors.Is(err, os.ErrDeadlineExceeded) {
+					logger.Error("conn write:", slog.String("err", err.Error()))
+				}
+				break
 			}
 		}
-		socket.Close()
-		socket.FlushOutputBuffer()
-		time.Sleep(time.Second)
+		err = conn.Close()
+		if err != nil {
+			logger.Error("conn close:", slog.String("err", err.Error()))
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
