@@ -74,6 +74,7 @@ func main() {
 	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
 		RequestedAddr: netip.AddrFrom4([4]byte{192, 168, 1, 69}),
 		Xid:           0x12345678,
+		Hostname:      "tinygo-pico",
 	})
 	if err != nil {
 		panic("dhcp failed: " + err.Error())
