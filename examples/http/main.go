@@ -26,11 +26,13 @@ var webPage []byte
 // as an excercise to the reader.
 func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.RequestHeader) {
 	uri := string(req.RequestURI())
+	resp.SetConnectionClose()
 	if uri != "/" {
-		return // Ignore all requests that are not for the root path.
+		resp.SetStatusCode(404)
+		respWriter.Write(resp.Header())
+		return
 	}
 	println("got request:", string(req.Method()), "@", uri)
-	resp.SetConnectionClose()
 	resp.SetContentType("text/html")
 	resp.SetContentLength(len(webPage))
 	respWriter.Write(resp.Header())
