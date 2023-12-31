@@ -24,13 +24,17 @@ var webPage []byte
 
 // This is our HTTP hander. It handles ALL incoming requests. Path routing is left
 // as an excercise to the reader.
-func HTTPHandler(conn io.Writer, resp *httpx.ResponseHeader, req *httpx.RequestHeader) {
-	println("got request:", string(req.Method()), "@", string(req.RequestURI()))
+func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.RequestHeader) {
+	uri := string(req.RequestURI())
+	if uri != "/" {
+		return // Ignore all requests that are not for the root path.
+	}
+	println("got request:", string(req.Method()), "@", uri)
 	resp.SetConnectionClose()
 	resp.SetContentType("text/html")
 	resp.SetContentLength(len(webPage))
-	conn.Write(resp.Header())
-	conn.Write(webPage)
+	respWriter.Write(resp.Header())
+	respWriter.Write(webPage)
 }
 
 func main() {
