@@ -28,11 +28,12 @@ func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.Re
 	uri := string(req.RequestURI())
 	resp.SetConnectionClose()
 	if uri != "/" {
+		println("Path not found:", uri)
 		resp.SetStatusCode(404)
 		respWriter.Write(resp.Header())
 		return
 	}
-	println("got request:", string(req.Method()), "@", uri)
+	println("Got webpage request!")
 	resp.SetContentType("text/html")
 	resp.SetContentLength(len(webPage))
 	respWriter.Write(resp.Header())
@@ -85,8 +86,9 @@ func main() {
 			conn.Close()
 			continue
 		}
+		resp.Reset()
 		HTTPHandler(conn, &resp, &req)
-		time.Sleep(100 * time.Millisecond)
+		// time.Sleep(100 * time.Millisecond)
 		conn.Close()
 	}
 }
