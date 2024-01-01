@@ -42,6 +42,9 @@ func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.Re
 
 func main() {
 	stack, err := setupDHCPStack(hostname, netip.AddrFrom4([4]byte{192, 168, 1, 4}))
+	if err != nil {
+		panic("setup DHCP:" + err.Error())
+	}
 	// Start TCP server.
 	const listenPort = 1234
 	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
