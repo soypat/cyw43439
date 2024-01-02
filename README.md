@@ -1,15 +1,25 @@
 # cyw43439
 Driver for the Wifi+bluetooth integrated circuit on the pico.
 
-Run DHCP example:
+## Examples
+To run the blinky example:
 ```shell
-tinygo flash -target=pico -opt=1 -stack-size=8kb -size=short -monitor  ./examples/dhcp/
+tinygo flash -target=pico -stack-size=8kb -monitor  ./examples/blinky
 ```
 
-Run TCP server example:
-```shell
-tinygo flash -target=pico -opt=1 -stack-size=8kb -size=short -monitor  ./examples/tcpserver/
-```
+| To run Wifi examples you must first set your wifi credentials: |
+|---|
+
+1. Clone this repository
+
+2. Rename [`examples/common/secrets.go.template`](examples/common/secrets.go.template) to have the `.go` extension and edit the contents with `ssid` and `pass` strings set to your WIFI SSID and Password, respecively. If `pass` is not set then an open network is assumed.
+
+3. Run any of the examples in the [`examples`](./examples) directory
+
+    Example of how to run the DHCP example:
+    ```shell
+    tinygo flash -target=pico -stack-size=8kb -monitor  ./examples/dhcp
+    ```
 
 
 ## Contributions

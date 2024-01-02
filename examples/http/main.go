@@ -4,15 +4,19 @@ import (
 	"bufio"
 	"io"
 	"log/slog"
+	"machine"
 	"net/netip"
 	"time"
 
 	_ "embed"
 
+	"github.com/soypat/cyw43439/examples/common"
 	"github.com/soypat/seqs/httpx"
 	"github.com/soypat/seqs/stacks"
 )
 
+const connTimeout = 3 * time.Second
+const maxconns = 3
 const tcpbufsize = 1024 // MTU - ethhdr - iphdr - tcphdr
 const hostname = "http-pico"
 
@@ -41,7 +45,18 @@ func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.Re
 }
 
 func main() {
-	stack, err := setupDHCPStack(hostname, netip.AddrFrom4([4]byte{192, 168, 1, 4}))
+	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	_, stack, _, err := common.SetupWithDHCP(common.Config{
+		Hostname: "TCP-pico",
+		Logger:   logger,
+		TCPPorts: 1,
+	})
+	if err != nil {
+		panic("setup DHCP:" + err.Error())
+	}
 	// Start TCP server.
 	const listenPort = 1234
 	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)

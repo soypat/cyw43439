@@ -9,84 +9,30 @@ import (
 
 	"log/slog"
 
-	"github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439/examples/common"
 	"github.com/soypat/seqs"
-	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
 
-const MTU = cyw43439.MTU // CY43439 permits 2030 bytes of ethernet frame.
-
 var (
-	lastRx, lastTx time.Time
-	logger         *slog.Logger
+	logger *slog.Logger
 )
 
 func main() {
-	defer func() {
-		println("program finished")
-		if a := recover(); a != nil {
-			println("panic:", a)
-		}
-	}()
 	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
 	}))
 
 	time.Sleep(2 * time.Second)
 	println("starting program")
-	logger.Debug("starting program")
-	dev := cyw43439.NewPicoWDevice()
-	cfg := cyw43439.DefaultWifiConfig()
-	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
-	err := dev.Init(cfg)
-	if err != nil {
-		panic(err)
-	}
-
-	for {
-		// Set ssid/pass in secrets.go
-		err = dev.JoinWPA2(ssid, pass)
-		if err == nil {
-			break
-		}
-		println("wifi join failed:", err.Error())
-		time.Sleep(5 * time.Second)
-	}
-	mac := dev.MACAs6()
-	println("\n\n\nMAC:", net.HardwareAddr(mac[:]).String())
-
-	stack := stacks.NewPortStack(stacks.PortStackConfig{
-		MAC:             mac,
-		MaxOpenPortsUDP: 1,
-		MaxOpenPortsTCP: 1,
-		MTU:             MTU,
-		Logger:          logger,
-	})
-
-	dev.RecvEthHandle(stack.RecvEth)
-
-	// Begin asynchronous packet handling.
-	go NICLoop(dev, stack)
-
-	// Perform DHCP request.
-	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
-	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
-		RequestedAddr: netip.AddrFrom4([4]byte{192, 168, 1, 69}),
-		Xid:           0x12345678,
-		Hostname:      "tinygo-pico",
+	_, stack, _, err := common.SetupWithDHCP(common.Config{
+		Hostname: "TCP-pico",
+		Logger:   logger,
+		TCPPorts: 1,
 	})
 	if err != nil {
-		panic("dhcp failed: " + err.Error())
+		panic("in dhcp setup:" + err.Error())
 	}
-	for !dhcpClient.Done() {
-		println("dhcp ongoing...")
-		time.Sleep(time.Second / 2)
-	}
-	ip := dhcpClient.Offer()
-	println("DHCP complete IP:", ip.String())
-	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
-
 	// Start TCP server.
 	const socketBuf = 256
 	const listenPort = 1234
@@ -131,80 +77,5 @@ func ForeverTCPListenEcho(socket *stacks.TCPConn, addr netip.AddrPort) error {
 		socket.Close()
 		socket.FlushOutputBuffer()
 		time.Sleep(time.Second)
-	}
-}
-
-func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
-	// Maximum number of packets to queue before sending them.
-	const (
-		queueSize                = 4
-		maxRetriesBeforeDropping = 3
-	)
-	var queue [queueSize][MTU]byte
-	var lenBuf [queueSize]int
-	var retries [queueSize]int
-	markSent := func(i int) {
-		queue[i] = [MTU]byte{} // Not really necessary.
-		lenBuf[i] = 0
-		retries[i] = 0
-	}
-	for {
-		stallRx := true
-		// Poll for incoming packets.
-		for i := 0; i < 1; i++ {
-			gotPacket, err := dev.TryPoll()
-			if err != nil {
-				println("poll error:", err.Error())
-			}
-			if !gotPacket {
-				break
-			}
-			stallRx = false
-		}
-
-		// Queue packets to be sent.
-		for i := range queue {
-			if retries[i] != 0 {
-				continue // Packet currently queued for retransmission.
-			}
-			var err error
-			buf := queue[i][:]
-			lenBuf[i], err = Stack.HandleEth(buf[:])
-			if err != nil {
-				println("stack error n(should be 0)=", lenBuf[i], "err=", err.Error())
-				lenBuf[i] = 0
-				continue
-			}
-			if lenBuf[i] == 0 {
-				break
-			}
-		}
-		stallTx := lenBuf == [queueSize]int{}
-		if stallTx {
-			if stallRx {
-				// Avoid busy waiting when both Rx and Tx stall.
-				time.Sleep(51 * time.Millisecond)
-			}
-			continue
-		}
-
-		// Send queued packets.
-		for i := range queue {
-			n := lenBuf[i]
-			if n <= 0 {
-				continue
-			}
-			err := dev.SendEth(queue[i][:n])
-			if err != nil {
-				// Queue packet for retransmission.
-				retries[i]++
-				if retries[i] > maxRetriesBeforeDropping {
-					markSent(i)
-					println("dropped outgoing packet:", err.Error())
-				}
-			} else {
-				markSent(i)
-			}
-		}
 	}
 }

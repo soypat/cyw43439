@@ -1,44 +1,59 @@
-package main
+package common
 
 import (
-	"machine"
+	"errors"
+	"io"
+	"log/slog"
 	"net"
 	"net/netip"
 	"time"
-
-	"log/slog"
 
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/stacks"
 )
 
-const (
-	MTU         = cyw43439.MTU // CY43439 permits 2030 bytes of ethernet frame.
-	connTimeout = 5 * time.Second
-	// Can help prevent stalling connections from blocking control the more connections you have.
-	maxconns = 3
-)
+const mtu = cyw43439.MTU
 
-var (
-	lastRx, lastTx time.Time
-	logger         *slog.Logger
-)
+type Config struct {
+	Hostname    string
+	RequestedIP string
+	Logger      *slog.Logger
+	UDPPorts    uint16
+	TCPPorts    uint16
+}
 
-func setupDHCPStack(hostname string, requestedAddr netip.Addr) (*stacks.PortStack, error) {
-	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
-	}))
-	time.Sleep(2 * time.Second)
-	logger.Info("starting program")
-	dev := cyw43439.NewPicoWDevice()
-	cfg := cyw43439.DefaultWifiConfig()
-	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
-	err := dev.Init(cfg)
-	if err != nil {
-		panic(err)
+func SetupWithDHCP(cfg Config) (*stacks.DHCPClient, *stacks.PortStack, *cyw43439.Device, error) {
+	cfg.UDPPorts++ // Add extra UDP port for DHCP client.
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{
+			Level: slog.Level(127), // Make temporary logger that does no logging.
+		}))
+	}
+	var err error
+	var reqAddr netip.Addr
+	if cfg.RequestedIP != "" {
+		reqAddr, err = netip.ParseAddr(cfg.RequestedIP)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
+	dev := cyw43439.NewPicoWDevice()
+	wificfg := cyw43439.DefaultWifiConfig()
+	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
+	logger.Info("initializing pico W device...")
+	err = dev.Init(wificfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if len(pass) == 0 {
+		logger.Info("joining open network:", slog.String("ssid", ssid))
+	} else {
+		logger.Info("joining WPA secure network", slog.String("ssid", ssid), slog.Int("passlen", len(pass)))
+	}
 	for {
 		// Set ssid/pass in secrets.go
 		err = dev.JoinWPA2(ssid, pass)
@@ -53,48 +68,67 @@ func setupDHCPStack(hostname string, requestedAddr netip.Addr) (*stacks.PortStac
 
 	stack := stacks.NewPortStack(stacks.PortStackConfig{
 		MAC:             mac,
-		MaxOpenPortsUDP: 1,
-		MaxOpenPortsTCP: 1,
-		MTU:             MTU,
+		MaxOpenPortsUDP: int(cfg.UDPPorts),
+		MaxOpenPortsTCP: int(cfg.TCPPorts),
+		MTU:             mtu,
 		Logger:          logger,
 	})
 
 	dev.RecvEthHandle(stack.RecvEth)
 
 	// Begin asynchronous packet handling.
-	go NICLoop(dev, stack)
+	go nicLoop(dev, stack)
 
 	// Perform DHCP request.
 	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
 	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
-		RequestedAddr: netip.AddrFrom4([4]byte{192, 168, 1, 69}),
+		RequestedAddr: reqAddr,
 		Xid:           0x12345678,
-		Hostname:      hostname,
+		Hostname:      cfg.Hostname,
 	})
 	if err != nil {
-		panic("dhcp failed: " + err.Error())
+		return nil, stack, dev, err
 	}
-	for !dhcpClient.Done() {
+	i := 0
+	for !dhcpClient.IsDone() {
+		i++
 		logger.Info("DHCP ongoing...")
 		time.Sleep(time.Second / 2)
+		if i > 10 {
+			if !reqAddr.IsValid() {
+				return dhcpClient, stack, dev, errors.New("DHCP did not complete and no static IP was requested")
+			}
+			logger.Info("DHCP did not complete, assigning static IP", slog.String("ip", cfg.RequestedIP))
+			stack.SetAddr(reqAddr)
+			return dhcpClient, stack, dev, nil
+		}
 	}
 	ip := dhcpClient.Offer()
-	logger.Info("DHCP complete", slog.String("ip", ip.String()))
+	logger.Info("DHCP complete",
+		slog.Uint64("cidrbits", uint64(dhcpClient.CIDRBits())),
+		slog.String("ourIP", ip.String()),
+		slog.String("dns", dhcpClient.DNSServer().String()),
+		slog.String("broadcast", dhcpClient.BroadcastAddr().String()),
+		slog.String("router", dhcpClient.Router().String()),
+		slog.String("dhcp", dhcpClient.DHCPServer().String()),
+		slog.String("hostname", string(dhcpClient.Hostname())),
+	)
+
 	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
-	return stack, nil
+	return dhcpClient, stack, dev, nil
 }
 
-func NICLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
+func nicLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 	// Maximum number of packets to queue before sending them.
 	const (
-		queueSize                = 4
+		queueSize                = 3
 		maxRetriesBeforeDropping = 3
 	)
-	var queue [queueSize][MTU]byte
+	var queue [queueSize][mtu]byte
 	var lenBuf [queueSize]int
 	var retries [queueSize]int
 	markSent := func(i int) {
-		queue[i] = [MTU]byte{} // Not really necessary.
+		queue[i] = [mtu]byte{} // Not really necessary.
 		lenBuf[i] = 0
 		retries[i] = 0
 	}

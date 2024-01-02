@@ -4,6 +4,8 @@ github.com/soypat/seqs v0.0.0-20231227221645-4af6191c297f h1:JHUZWCmTPSdFGyVcryl
 github.com/soypat/seqs v0.0.0-20231227221645-4af6191c297f/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
 github.com/soypat/seqs v0.0.0-20231231162340-289e517f61b8 h1:DtmmvFltD0tUT4ZeYvXwz+aUXa7DXs+ZLNwdW+pfHkI=
 github.com/soypat/seqs v0.0.0-20231231162340-289e517f61b8/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
+github.com/soypat/seqs v0.0.0-20240102160337-3e239c93350c h1:1A6HGL7qrlqfI5/ZkZIHycxQQ7AJkdOV8/QNPlT0zzU=
+github.com/soypat/seqs v0.0.0-20240102160337-3e239c93350c/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
 github.com/tinygo-org/pio v0.0.0-20231216154340-cd888eb58899 h1:/DyaXDEWMqoVUVEJVJIlNk1bXTbFs8s3Q4GdPInSKTQ=
 github.com/tinygo-org/pio v0.0.0-20231216154340-cd888eb58899/go.mod h1:LU7Dw00NJ+N86QkeTGjMLNkYcEYMor6wTDpTCu0EaH8=
 golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691 h1:/yRP+0AN7mf5DkD3BAI6TOFnd51gEoDEb8o35jIFtgw=
