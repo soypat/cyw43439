@@ -1,38 +1,50 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pico W website</title>
-    <style>
-        body {
-            font-family: 'Arial', sans-serif;
-            background-color: #f4f4f4;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-        }
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Pico W website</title>
+	<style>
+		body {
+			font-family: 'Arial', sans-serif;
+			background-color: #f4f4f4;
+			margin: 0;
+			padding: 0;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			height: 100vh;
+		}
 
-        .container {
-            text-align: center;
-        }
+		.container {
+			text-align: center;
+		}
 
-        h1 {
-            color: #333;
-        }
+		h1 {
+			color: #333;
+		}
 
-        p {
-            color: #666;
-        }
-    </style>
+		p {
+			color: #666;
+		}
+	</style>
 </head>
 <body>
-    <div class="container">
-        <h1>Pico W Website example!</h1>
-        <p>This is a simple example of a static HTML page with minimal styling.</p>
-    </div>
+	<div class="container">
+		<button id="toggleButton">Toggle LED</button>
+		<h1>Pico W Website example!</h1>
+		<p>This is a simple example of a static HTML page with minimal styling.</p>
+	</div>
+	<script>
+		function addClickRequester(elementId, requestUri) {
+			document.getElementById(elementId).addEventListener('click', function() {
+				var xhr = new XMLHttpRequest();
+				xhr.open('GET', requestUri, true);
+				xhr.onload = function() { if (xhr.status === 200) console.log('Request successful!'); };
+				xhr.send();
+			});
+		}
+		addClickRequester('toggleButton', '/toggle-led');
+	</script>
 </body>
 </html>

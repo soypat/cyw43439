@@ -10,6 +10,7 @@ import (
 
 	_ "embed"
 
+	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/common"
 	"github.com/soypat/seqs/httpx"
 	"github.com/soypat/seqs/stacks"
@@ -17,31 +18,43 @@ import (
 
 const connTimeout = 3 * time.Second
 const maxconns = 3
-const tcpbufsize = 1024 // MTU - ethhdr - iphdr - tcphdr
+const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
 const hostname = "http-pico"
 
-// We embed the html file in the binary so that we can edit
-// index.html with pretty syntax highlighting.
-//
-//go:embed index.html
-var webPage []byte
+var (
+	// We embed the html file in the binary so that we can edit
+	// index.html with pretty syntax highlighting.
+	//
+	//go:embed index.html
+	webPage      []byte
+	dev          *cyw43439.Device
+	lastLedState bool
+)
 
 // This is our HTTP hander. It handles ALL incoming requests. Path routing is left
 // as an excercise to the reader.
 func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.RequestHeader) {
 	uri := string(req.RequestURI())
 	resp.SetConnectionClose()
-	if uri != "/" {
+	switch uri {
+	case "/":
+		println("Got webpage request!")
+		resp.SetContentType("text/html")
+		resp.SetContentLength(len(webPage))
+		respWriter.Write(resp.Header())
+		respWriter.Write(webPage)
+
+	case "/toggle-led":
+		println("Got toggle led request!")
+		respWriter.Write(resp.Header())
+		lastLedState = !lastLedState
+		dev.GPIOSet(0, lastLedState)
+
+	default:
 		println("Path not found:", uri)
 		resp.SetStatusCode(404)
 		respWriter.Write(resp.Header())
-		return
 	}
-	println("Got webpage request!")
-	resp.SetContentType("text/html")
-	resp.SetContentLength(len(webPage))
-	respWriter.Write(resp.Header())
-	respWriter.Write(webPage)
 }
 
 func main() {
@@ -49,11 +62,12 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	_, stack, _, err := common.SetupWithDHCP(common.Config{
+	_, stack, devlocal, err := common.SetupWithDHCP(common.Config{
 		Hostname: "TCP-pico",
 		Logger:   logger,
 		TCPPorts: 1,
 	})
+	dev = devlocal
 	if err != nil {
 		panic("setup DHCP:" + err.Error())
 	}
