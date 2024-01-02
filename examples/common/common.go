@@ -40,15 +40,20 @@ func SetupWithDHCP(cfg Config) (*stacks.DHCPClient, *stacks.PortStack, *cyw43439
 		}
 	}
 
-	logger.Info("starting program")
 	dev := cyw43439.NewPicoWDevice()
 	wificfg := cyw43439.DefaultWifiConfig()
 	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
+	logger.Info("initializing pico W device...")
 	err = dev.Init(wificfg)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
+	if len(pass) == 0 {
+		logger.Info("joining open network:", slog.String("ssid", ssid))
+	} else {
+		logger.Info("joining WPA secure network", slog.String("ssid", ssid), slog.Int("passlen", len(pass)))
+	}
 	for {
 		// Set ssid/pass in secrets.go
 		err = dev.JoinWPA2(ssid, pass)
