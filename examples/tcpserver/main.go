@@ -25,7 +25,7 @@ func main() {
 
 	time.Sleep(2 * time.Second)
 	println("starting program")
-	_, stack, _, err := common.SetupWithDHCP(common.Config{
+	_, stack, _, err := common.SetupWithDHCP(common.SetupConfig{
 		Hostname: "TCP-pico",
 		Logger:   logger,
 		TCPPorts: 1,

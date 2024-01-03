@@ -10,20 +10,25 @@ import (
 
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/seqs/eth/dhcp"
+	"github.com/soypat/seqs/eth/dns"
 	"github.com/soypat/seqs/stacks"
 )
 
 const mtu = cyw43439.MTU
 
-type Config struct {
-	Hostname    string
+type SetupConfig struct {
+	// DHCP requested hostname.
+	Hostname string
+	// DHCP requested IP address. On failing to find DHCP server is used as static IP.
 	RequestedIP string
 	Logger      *slog.Logger
-	UDPPorts    uint16
-	TCPPorts    uint16
+	// Number of UDP ports to open for the stack. (we'll actually open one more than this for DHCP)
+	UDPPorts uint16
+	// Number of TCP ports to open for the stack.
+	TCPPorts uint16
 }
 
-func SetupWithDHCP(cfg Config) (*stacks.DHCPClient, *stacks.PortStack, *cyw43439.Device, error) {
+func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw43439.Device, error) {
 	cfg.UDPPorts++ // Add extra UDP port for DHCP client.
 	logger := cfg.Logger
 	if logger == nil {
@@ -116,6 +121,120 @@ func SetupWithDHCP(cfg Config) (*stacks.DHCPClient, *stacks.PortStack, *cyw43439
 
 	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
 	return dhcpClient, stack, dev, nil
+}
+
+// ResolveHardwareAddr obtains the hardware address of the given IP address.
+func ResolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error) {
+	if !ip.IsValid() {
+		return [6]byte{}, errors.New("invalid ip")
+	}
+	arpc := stack.ARP()
+	arpc.Abort() // Remove any previous ARP requests.
+	err := arpc.BeginResolve(ip)
+	if err != nil {
+		return [6]byte{}, err
+	}
+	time.Sleep(4 * time.Millisecond)
+	retries := 20 // ARP exchanges should be fast, don't wait too long for them.
+	for !arpc.IsDone() && retries > 0 {
+		retries--
+		if retries == 0 {
+			return [6]byte{}, errors.New("arp timed out")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, hw, err := arpc.ResultAs6()
+	return hw, err
+}
+
+type Resolver struct {
+	stack     *stacks.PortStack
+	dns       *stacks.DNSClient
+	dhcp      *stacks.DHCPClient
+	dnsaddr   netip.Addr
+	dnshwaddr [6]byte
+}
+
+func NewResolver(stack *stacks.PortStack, dhcp *stacks.DHCPClient) (*Resolver, error) {
+	dnsc := stacks.NewDNSClient(stack, dns.ClientPort)
+	dnsaddr := dhcp.DNSServer()
+	if !dnsaddr.IsValid() {
+		return nil, errors.New("dns addr obtained via DHCP not valid")
+	}
+	return &Resolver{
+		stack:   stack,
+		dhcp:    dhcp,
+		dns:     dnsc,
+		dnsaddr: dnsaddr,
+	}, nil
+}
+
+func (r *Resolver) LookupNetIP(host string) ([]netip.Addr, error) {
+	name, err := dns.NewName(host)
+	if err != nil {
+		return nil, err
+	}
+	err = r.updateDNSHWAddr()
+	if err != nil {
+		return nil, err
+	}
+
+	err = r.dns.StartResolve(r.dnsConfig(name))
+	if err != nil {
+		return nil, err
+	}
+	time.Sleep(5 * time.Millisecond)
+	retries := 100
+
+	for retries > 0 {
+		done, _ := r.dns.IsDone()
+		if done {
+			break
+		}
+		retries--
+		time.Sleep(20 * time.Millisecond)
+	}
+	done, rcode := r.dns.IsDone()
+	if !done && retries == 0 {
+		return nil, errors.New("dns lookup timed out")
+	} else if rcode != dns.RCodeSuccess {
+		return nil, errors.New("dns lookup failed:" + rcode.String())
+	}
+	answers := r.dns.Answers()
+	if len(answers) == 0 {
+		return nil, errors.New("no dns answers")
+	}
+	var addrs []netip.Addr
+	for i := range answers {
+		data := answers[i].RawData()
+		if len(data) == 4 {
+			addrs = append(addrs, netip.AddrFrom4([4]byte(data)))
+		}
+	}
+	if len(addrs) == 0 {
+		return nil, errors.New("no ipv4 dns answers")
+	}
+	return addrs, nil
+}
+
+func (r *Resolver) updateDNSHWAddr() (err error) {
+	r.dnshwaddr, err = ResolveHardwareAddr(r.stack, r.dnsaddr)
+	return err
+}
+
+func (r *Resolver) dnsConfig(name dns.Name) stacks.DNSResolveConfig {
+	return stacks.DNSResolveConfig{
+		Questions: []dns.Question{
+			{
+				Name:  name,
+				Type:  dns.TypeA,
+				Class: dns.ClassINET,
+			},
+		},
+		DNSAddr:         r.dnsaddr,
+		DNSHWAddr:       r.dnshwaddr,
+		EnableRecursion: false,
+	}
 }
 
 func nicLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {

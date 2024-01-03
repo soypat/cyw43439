@@ -17,7 +17,7 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
-	client, _, _, err := common.SetupWithDHCP(common.Config{
+	client, _, _, err := common.SetupWithDHCP(common.SetupConfig{
 		Hostname:    "DHCP-pico",
 		Logger:      logger,
 		RequestedIP: "192.168.1.145",

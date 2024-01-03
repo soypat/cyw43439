@@ -62,7 +62,7 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	_, stack, devlocal, err := common.SetupWithDHCP(common.Config{
+	_, stack, devlocal, err := common.SetupWithDHCP(common.SetupConfig{
 		Hostname: "TCP-pico",
 		Logger:   logger,
 		TCPPorts: 1,

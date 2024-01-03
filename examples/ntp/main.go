@@ -3,7 +3,6 @@ package main
 import (
 	"log/slog"
 	"machine"
-	"net/netip"
 	"time"
 
 	_ "embed"
@@ -18,23 +17,39 @@ import (
 const hostname = "ntp-pico"
 
 // Run `dig pool.ntp.org` to get a list of NTP servers.
-var ntpAddr = netip.AddrFrom4([4]byte{200, 11, 116, 10})
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: slog.LevelDebug,
 	}))
-	_, stack, _, err := common.SetupWithDHCP(common.Config{
+	time.Sleep(100 * time.Millisecond)
+	dhcpc, stack, _, err := common.SetupWithDHCP(common.SetupConfig{
 		Hostname:    hostname,
 		RequestedIP: "192.168.1.145",
 		Logger:      logger,
-		UDPPorts:    1,
+		UDPPorts:    2,
 	})
 	if err != nil {
-		panic("listener create:" + err.Error())
+		panic("setup failed:" + err.Error())
 	}
+
+	routerhw, err := common.ResolveHardwareAddr(stack, dhcpc.Router())
+	if err != nil {
+		panic("router hwaddr resolving:" + err.Error())
+	}
+
+	resolver, err := common.NewResolver(stack, dhcpc)
+	if err != nil {
+		panic("resolver create:" + err.Error())
+	}
+	addrs, err := resolver.LookupNetIP("pool.ntp.org")
+	if err != nil {
+		panic("DNS lookup failed:" + err.Error())
+	}
+
+	ntpaddr := addrs[0]
 	ntpc := stacks.NewNTPClient(stack, ntp.ClientPort)
-	err = ntpc.BeginDefaultRequest(ntpAddr)
+	err = ntpc.BeginDefaultRequest(routerhw, ntpaddr)
 	if err != nil {
 		panic("NTP create:" + err.Error())
 	}
