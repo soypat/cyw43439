@@ -20,7 +20,7 @@ func main() {
 	client, _, _, err := common.SetupWithDHCP(common.SetupConfig{
 		Hostname:    "DHCP-pico",
 		Logger:      logger,
-		RequestedIP: "192.168.1.145",
+		RequestedIP: "10.94.2.0",
 		UDPPorts:    1,
 	})
 	if !client.IsDone() {

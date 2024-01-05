@@ -88,7 +88,7 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 	dhcpClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
 	err = dhcpClient.BeginRequest(stacks.DHCPRequestConfig{
 		RequestedAddr: reqAddr,
-		Xid:           0x12345678,
+		Xid:           uint32(time.Now().Nanosecond()),
 		Hostname:      cfg.Hostname,
 	})
 	if err != nil {
@@ -99,7 +99,7 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 		i++
 		logger.Info("DHCP ongoing...")
 		time.Sleep(time.Second / 2)
-		if i > 10 {
+		if i > 15 {
 			if !reqAddr.IsValid() {
 				return dhcpClient, stack, dev, errors.New("DHCP did not complete and no static IP was requested")
 			}

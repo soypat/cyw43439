@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/soypat/saleae v0.0.0-20230402180913-3584b7515dae
-	github.com/soypat/seqs v0.0.0-20240103014723-e19e87ff2ab8
+	github.com/soypat/seqs v0.0.0-20240105140328-9642c34895e4
 	github.com/tinygo-org/pio v0.0.0-20231216154340-cd888eb58899
 	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691
 )
