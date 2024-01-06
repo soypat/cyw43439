@@ -114,9 +114,13 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 		slog.String("ourIP", ip.String()),
 		slog.String("dns", dhcpClient.DNSServer().String()),
 		slog.String("broadcast", dhcpClient.BroadcastAddr().String()),
+		slog.String("gateway", dhcpClient.Gateway().String()),
 		slog.String("router", dhcpClient.Router().String()),
 		slog.String("dhcp", dhcpClient.DHCPServer().String()),
 		slog.String("hostname", string(dhcpClient.Hostname())),
+		slog.Duration("lease", dhcpClient.IPLeaseTime()),
+		slog.Duration("renewal", dhcpClient.RenewalTime()),
+		slog.Duration("rebinding", dhcpClient.RebindingTime()),
 	)
 
 	stack.SetAddr(ip) // It's important to set the IP address after DHCP completes.
@@ -233,7 +237,7 @@ func (r *Resolver) dnsConfig(name dns.Name) stacks.DNSResolveConfig {
 		},
 		DNSAddr:         r.dnsaddr,
 		DNSHWAddr:       r.dnshwaddr,
-		EnableRecursion: false,
+		EnableRecursion: true,
 	}
 }
 

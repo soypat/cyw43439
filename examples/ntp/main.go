@@ -57,6 +57,6 @@ func main() {
 		time.Sleep(time.Second)
 		println("still ntping")
 	}
-	now := time.Now()
-	print("ntp done oldtime=", now.String(), " newtime=", now.Add(ntpc.Offset()).String())
+	now := ntp.BaseTime().Add(ntpc.Offset()) // Will stop working sometime in 2036.
+	print("ntp done newtime=", now.String())
 }
