@@ -21,6 +21,15 @@ tinygo flash -target=pico -stack-size=8kb -monitor  ./examples/blinky
     tinygo flash -target=pico -stack-size=8kb -monitor  ./examples/dhcp
     ```
 
+### Debugging and heap allocations
+The examples use the [`soypat/seqs` networking stack library](https://github.com/soypat/seqs/). One can enable heap debugging by using the `debugheaplog` build tag:
+
+Example:
+ ```shell
+tinygo flash -target=pico -stack-size=8kb -monitor -tags=debugheaplog  ./examples/dhcp
+```
+This will use a simpler logger implementation within the `seqs` package that avoids all allocations and will also log heap increments on lines starting with the `[ALLOC]` text.
+
 
 ## Contributions
 PRs welcome! Please read most recent developments on [this issue](https://github.com/tinygo-org/tinygo/issues/2947) before contributing.
