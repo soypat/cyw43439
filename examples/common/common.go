@@ -108,11 +108,16 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 			return dhcpClient, stack, dev, nil
 		}
 	}
+	var primaryDNS netip.Addr
+	dnsServers := dhcpClient.DNSServers()
+	if len(dnsServers) > 0 {
+		primaryDNS = dnsServers[0]
+	}
 	ip := dhcpClient.Offer()
 	logger.Info("DHCP complete",
 		slog.Uint64("cidrbits", uint64(dhcpClient.CIDRBits())),
 		slog.String("ourIP", ip.String()),
-		slog.String("dns", dhcpClient.DNSServer().String()),
+		slog.String("dns", primaryDNS.String()),
 		slog.String("broadcast", dhcpClient.BroadcastAddr().String()),
 		slog.String("gateway", dhcpClient.Gateway().String()),
 		slog.String("router", dhcpClient.Router().String()),
@@ -161,15 +166,15 @@ type Resolver struct {
 
 func NewResolver(stack *stacks.PortStack, dhcp *stacks.DHCPClient) (*Resolver, error) {
 	dnsc := stacks.NewDNSClient(stack, dns.ClientPort)
-	dnsaddr := dhcp.DNSServer()
-	if !dnsaddr.IsValid() {
+	dnsaddrs := dhcp.DNSServers()
+	if len(dnsaddrs) > 0 && !dnsaddrs[0].IsValid() {
 		return nil, errors.New("dns addr obtained via DHCP not valid")
 	}
 	return &Resolver{
 		stack:   stack,
 		dhcp:    dhcp,
 		dns:     dnsc,
-		dnsaddr: dnsaddr,
+		dnsaddr: dnsaddrs[0],
 	}, nil
 }
 
