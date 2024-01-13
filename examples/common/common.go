@@ -49,11 +49,12 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 	wificfg := cyw43439.DefaultWifiConfig()
 	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
 	logger.Info("initializing pico W device...")
+	devInitTime := time.Now()
 	err = dev.Init(wificfg)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
+	logger.Info("cyw43439:Init", slog.Duration("duration", time.Since(devInitTime)))
 	if len(pass) == 0 {
 		logger.Info("joining open network:", slog.String("ssid", ssid))
 	} else {
