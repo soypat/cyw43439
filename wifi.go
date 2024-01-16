@@ -14,13 +14,21 @@ import (
 	"github.com/soypat/cyw43439/whd"
 )
 
+var (
+	errJoinAuth     = errors.New("join:auth failed")
+	errJoinSetSSID  = errors.New("join:SET_SSID failed")
+	errJoinWaitSSID = errors.New("join:wait for ssid")
+	errJoinGeneric  = errors.New("join:failed")
+)
+
 func (d *Device) initControl(clm string) error {
 	// reference: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/control.rs#L35
 	d.debug("initControl", slog.Int("clm_len", len(clm)))
 	const chunkSize = 1024
 	remaining := clm
 	offset := 0
-	buf8 := unsafeAsSlice[uint32, uint8](d._iovarBuf[:])[:chunkSize+20]
+
+	buf8 := u32AsU8(d._iovarBuf[:])[:chunkSize+20]
 
 	for len(remaining) > 0 {
 		chunk := remaining[:min(len(remaining), chunkSize)]
@@ -159,16 +167,18 @@ func (d *Device) wait_for_join(ssid string) (err error) {
 	if err != nil {
 		return err
 	}
-
 	// Poll for async events.
 	deadline := time.Now().Add(10 * time.Second)
-	d.state = linkStateDown
-	for time.Until(deadline) > 0 && d.state == linkStateDown && d.state != linkStateUpWaitForSSID {
+	keepGoing := true
+	for keepGoing {
 		time.Sleep(270 * time.Millisecond)
 		err = d.check_status(d._sendIoctlBuf[:])
 		if err != nil {
 			return err
 		}
+		// Keep trying until we get a link up/auth failed/timeout.
+		keepGoing = d.state == linkStateDown && d.state != linkStateUpWaitForSSID &&
+			time.Until(deadline) > 0
 	}
 	switch d.state {
 	case linkStateUp:
@@ -177,14 +187,17 @@ func (d *Device) wait_for_join(ssid string) (err error) {
 		d.eventmask.Enable(whd.EvJOIN)
 		d.eventmask.Enable(whd.EvDISASSOC)
 		d.eventmask.Enable(whd.EvDEAUTH)
-		return nil
+
 	case linkStateAuthFailed:
-		return errors.New("auth failed")
+		err = errJoinAuth
 	case linkStateFailed:
-		return errors.New("SET_SSID failed")
+		err = errJoinSetSSID
+	case linkStateUpWaitForSSID:
+		err = errJoinWaitSSID
 	default:
-		return errors.New("join failed")
+		err = errJoinGeneric
 	}
+	return err
 }
 
 type passphraseInfo struct {
@@ -240,7 +253,7 @@ func (d *Device) setSSID(ssid string) error {
 
 	var buf [36]byte
 	info.put(_busOrder, buf[:])
-
+	d.state = linkStateDown
 	return d.doIoctlSet(whd.WLC_SET_SSID, whd.IF_STA, buf[:])
 }
 
