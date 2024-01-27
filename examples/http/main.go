@@ -72,7 +72,7 @@ func main() {
 		panic("setup DHCP:" + err.Error())
 	}
 	// Start TCP server.
-	const listenPort = 1234
+	const listenPort = 80
 	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
 	listener, err := stacks.NewTCPListener(stack, stacks.TCPListenerConfig{
 		MaxConnections: maxconns,
