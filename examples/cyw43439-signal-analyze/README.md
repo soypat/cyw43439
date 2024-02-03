@@ -7,7 +7,7 @@ so they can be analyzed by a logic analyzer, such as a Saleae or Digital Analog 
 
 To flash a Pico W with the program:
 ```sh
-tinygo flash -target=pico -tags=cy43nopio examples/cyw43439-signal-analyze
+tinygo flash -target=pico -tags=cy43nopio ./examples/cyw43439-signal-analyze
 ```
 
 The mocked signals will be observable on pins defined by:
