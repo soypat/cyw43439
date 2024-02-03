@@ -1,4 +1,4 @@
-//go:build pico && !cy43nopio
+//go:build !cy43nopio
 
 package cyw43439
 
