@@ -52,7 +52,7 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 	devInitTime := time.Now()
 	err = dev.Init(wificfg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, errors.New("wifi init failed:" + err.Error())
 	}
 	logger.Info("cyw43439:Init", slog.Duration("duration", time.Since(devInitTime)))
 	if len(pass) == 0 {
@@ -93,7 +93,7 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 		Hostname:      cfg.Hostname,
 	})
 	if err != nil {
-		return nil, stack, dev, err
+		return nil, stack, dev, errors.New("dhcp begin request:" + err.Error())
 	}
 	i := 0
 	for !dhcpClient.IsDone() {
