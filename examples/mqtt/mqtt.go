@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	logger   *slog.Logger
-	clientID = []byte("tinygo-pico")
+	logger        *slog.Logger
+	loggerHandler *slog.TextHandler
+	clientID      = []byte("tinygo-pico")
 )
 
 const (
@@ -26,9 +27,10 @@ const (
 )
 
 func main() {
-	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+	loggerHandler = slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
-	}))
+	})
+	logger = slog.New(loggerHandler)
 
 	time.Sleep(2 * time.Second)
 	println("starting program")
@@ -69,11 +71,14 @@ func main() {
 		panic("socket dial:" + err.Error())
 	}
 	retries := 50
-	for socket.State() != seqs.StateListen && retries > 0 {
+	for socket.State() != seqs.StateEstablished && retries > 0 {
 		time.Sleep(100 * time.Millisecond)
 		retries--
 	}
 	if retries == 0 {
+		logger.Info("socket:listen->established",
+			slog.String("state", socket.State().String()),
+		)
 		panic("socket listen failed")
 	}
 
