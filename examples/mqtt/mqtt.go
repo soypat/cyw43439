@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"machine"
@@ -18,6 +17,11 @@ var (
 	logger        *slog.Logger
 	loggerHandler *slog.TextHandler
 	clientID      = []byte("tinygo-pico")
+	pubFlags, _   = mqtt.NewPublishFlags(mqtt.QoS0, false, false)
+	pubVar        = mqtt.VariablesPublish{
+		TopicName:        []byte("tinygo-pico-test"),
+		PacketIdentifier: 0x12,
+	}
 )
 
 const (
@@ -66,22 +70,6 @@ func main() {
 		panic("socket create:" + err.Error())
 	}
 
-	err = socket.OpenDialTCP(ourPort, routerhw, serverAddr, 0x123456)
-	if err != nil {
-		panic("socket dial:" + err.Error())
-	}
-	retries := 50
-	for socket.State() != seqs.StateEstablished && retries > 0 {
-		time.Sleep(100 * time.Millisecond)
-		retries--
-	}
-	if retries == 0 {
-		logger.Info("socket:listen->established",
-			slog.String("state", socket.State().String()),
-		)
-		panic("socket listen failed")
-	}
-
 	cfg := mqtt.ClientConfig{
 		Decoder: mqtt.DecoderNoAlloc{UserBuffer: make([]byte, 4096)},
 		OnPub: func(pubHead mqtt.Header, varPub mqtt.VariablesPublish, r io.Reader) error {
@@ -89,15 +77,67 @@ func main() {
 			return nil
 		},
 	}
-
-	socket.SetDeadline(time.Now().Add(5 * time.Second))
-
 	var varconn mqtt.VariablesConnect
 	varconn.SetDefaultMQTT(clientID)
 	client := mqtt.NewClient(cfg)
-	err = client.Connect(context.Background(), socket, &varconn)
-	if err != nil {
-		panic("mqtt connect:" + err.Error())
+
+	closeConn := func() {
+		logger.Info("socket:close-connection", slog.String("state", socket.State().String()))
+		socket.FlushOutputBuffer()
+		socket.Close()
+		for !socket.State().IsClosed() {
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
-	logger.Info("connected to mqtt server")
+	// Connection loop for TCP+MQTT.
+	for {
+		logger.Info("socket:listen")
+		err = socket.OpenDialTCP(ourPort, routerhw, serverAddr, 0x123456)
+		if err != nil {
+			panic("socket dial:" + err.Error())
+		}
+		retries := 50
+		for socket.State() != seqs.StateEstablished && retries > 0 {
+			time.Sleep(100 * time.Millisecond)
+			retries--
+		}
+		if retries == 0 {
+			logger.Info("socket:no-establish")
+			closeConn()
+			continue
+		}
+
+		// We start MQTT connect with a deadline on the socket.
+		logger.Info("mqtt:start-connecting")
+		socket.SetDeadline(time.Now().Add(5 * time.Second))
+		err = client.StartConnect(socket, &varconn)
+		if err != nil {
+			logger.Error("mqtt:start-connect-failed", slog.String("reason", err.Error()))
+			closeConn()
+			continue
+		}
+		retries = 50
+		for retries > 0 && !client.IsConnected() {
+			time.Sleep(100 * time.Millisecond)
+			retries--
+		}
+		if !client.IsConnected() {
+			logger.Error("mqtt:connect-failed", slog.Any("reason", client.Err()))
+			closeConn()
+			continue
+		}
+
+		for client.IsConnected() {
+			socket.SetDeadline(time.Now().Add(5 * time.Second))
+			pubVar.PacketIdentifier++
+			err = client.PublishPayload(pubFlags, pubVar, []byte("hello world"))
+			if err != nil {
+				logger.Error("mqtt:publish-failed", slog.Any("reason", err))
+			}
+			logger.Info("published message", slog.Uint64("packetID", uint64(pubVar.PacketIdentifier)))
+			time.Sleep(5 * time.Second)
+		}
+		logger.Error("mqtt:disconnected", slog.Any("reason", client.Err()))
+		closeConn()
+	}
 }
