@@ -17,6 +17,8 @@ import (
 
 const connTimeout = 5 * time.Second
 const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
+// Set this address to the server's address.
+// You can run the server example in this same directory to test this client.
 const serverAddrStr = "192.168.0.44:8080"
 const ourHostname = "tinygo-http-client"
 
@@ -66,6 +68,8 @@ func main() {
 		}
 	}
 
+	// Here we create the HTTP request and generate the bytes. The Header method
+	// returns the raw header bytes as should be sent over the wire.
 	var req httpx.RequestHeader
 	req.SetRequestURI("/")
 	req.SetMethod("GET")
