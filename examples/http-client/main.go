@@ -3,12 +3,12 @@ package main
 import (
 	"log/slog"
 	"machine"
+	"math/rand"
 	"net/netip"
 	"time"
 
 	_ "embed"
 
-	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/common"
 	"github.com/soypat/seqs"
 	"github.com/soypat/seqs/httpx"
@@ -17,54 +17,42 @@ import (
 
 const connTimeout = 5 * time.Second
 const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
-const hostname = "http-client-pico"
-const serverHostname = "httpbin.org"
-const serverURI = "http://" + serverHostname + "/get" // Testing GET method.
-
-var (
-	dev *cyw43439.Device
-)
+const serverAddrStr = "192.168.0.44:8080"
+const ourHostname = "tinygo-http-client"
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 
-	dhcpc, stack, devlocal, err := common.SetupWithDHCP(common.SetupConfig{
-		Hostname: hostname,
+	_, stack, _, err := common.SetupWithDHCP(common.SetupConfig{
+		Hostname: ourHostname,
 		Logger:   logger,
 		TCPPorts: 1, // For HTTP over TCP.
 		UDPPorts: 1, // For DNS.
 	})
-	dev = devlocal
+	start := time.Now()
 	if err != nil {
 		panic("setup DHCP:" + err.Error())
 	}
-
-	// Resolver router's hardware address:
-	routerhw, err := common.ResolveHardwareAddr(stack, dhcpc.Router())
+	svAddr, err := netip.ParseAddrPort(serverAddrStr)
+	if err != nil {
+		panic("parsing server address:" + err.Error())
+	}
+	// Resolver router's hardware address to dial outside our network to internet.
+	routerhw, err := common.ResolveHardwareAddr(stack, svAddr.Addr())
 	if err != nil {
 		panic("router hwaddr resolving:" + err.Error())
 	}
 
-	// Resolver the server's IP address:
-	resolver, err := common.NewResolver(stack, dhcpc)
-	if err != nil {
-		panic("resolver create:" + err.Error())
-	}
-	addrs, err := resolver.LookupNetIP(serverHostname)
-	if err != nil {
-		panic("DNS lookup failed:" + err.Error())
-	}
-	serverAddr := netip.AddrPortFrom(addrs[0], 80)
-
+	rng := rand.New(rand.NewSource(int64(time.Now().Sub(start))))
 	// Start TCP server.
-	const clientPort = 80
-	clientAddr := netip.AddrPortFrom(stack.Addr(), clientPort)
+	clientAddr := netip.AddrPortFrom(stack.Addr(), uint16(rng.Intn(65535-1024)+1024))
 	conn, err := stacks.NewTCPConn(stack, stacks.TCPConnConfig{
 		TxBufSize: tcpbufsize,
 		RxBufSize: tcpbufsize,
 	})
+
 	if err != nil {
 		panic("conn create:" + err.Error())
 	}
@@ -79,22 +67,23 @@ func main() {
 	}
 
 	var req httpx.RequestHeader
-	req.SetRequestURI(serverURI)
+	req.SetRequestURI("/")
 	req.SetMethod("GET")
+	req.SetHost(svAddr.Addr().String())
 	reqbytes := req.Header()
 
 	logger.Info("tcp:ready",
 		slog.String("clientaddr", clientAddr.String()),
-		slog.String("serveraddr", serverAddr.String()),
+		slog.String("serveraddr", serverAddrStr),
 	)
 	rxBuf := make([]byte, 4096)
 	for {
 		time.Sleep(5 * time.Second)
-		slog.Info("dialing", slog.String("serveraddr", serverAddr.String()))
+		slog.Info("dialing", slog.String("serveraddr", serverAddrStr))
 
 		// Make sure to timeout the connection if it takes too long.
 		conn.SetDeadline(time.Now().Add(connTimeout))
-		err = conn.OpenDialTCP(clientAddr.Port(), routerhw, serverAddr, 0x123456)
+		err = conn.OpenDialTCP(clientAddr.Port(), routerhw, svAddr, seqs.Value(rng.Intn(65535-1024)+1024))
 		if err != nil {
 			closeConn("opening TCP: " + err.Error())
 			continue
@@ -126,7 +115,9 @@ func main() {
 			closeConn("no response")
 			continue
 		}
-		logger.Info("response", slog.String("response", string(rxBuf[:n])))
+		println("got HTTP response!")
+		println(string(rxBuf[:n]))
 		closeConn("done")
+		return // exit program.
 	}
 }
