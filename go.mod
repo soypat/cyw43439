@@ -8,5 +8,3 @@ require (
 	github.com/tinygo-org/pio v0.0.0-20231216154340-cd888eb58899
 	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691
 )
-
-require github.com/soypat/natiu-mqtt v0.5.1 // indirect
