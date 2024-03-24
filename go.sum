@@ -1,3 +1,5 @@
+github.com/soypat/natiu-mqtt v0.5.1 h1:rwaDmlvjzD2+3MCOjMZc4QEkDkNwDzbct2TJbpz+TPc=
+github.com/soypat/natiu-mqtt v0.5.1/go.mod h1:xEta+cwop9izVCW7xOx2W+ct9PRMqr0gNVkvBPnQTc4=
 github.com/soypat/saleae v0.0.0-20230402180913-3584b7515dae h1:cOw342W+mYwRaahnxdhRVITGkGTTWqwy7AblKv0iQxM=
 github.com/soypat/saleae v0.0.0-20230402180913-3584b7515dae/go.mod h1:9SV+w6E9YK/BePxdxYGXthkrRztHJCQlojWOjAxW3M4=
 github.com/soypat/seqs v0.0.0-20240315041335-3dd1de606d2f h1:lONveayNmHEWUmDxfGnqd3Ww8/1QhQpwBoEXNyWZuBI=
