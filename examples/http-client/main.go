@@ -72,6 +72,8 @@ func main() {
 	// returns the raw header bytes as should be sent over the wire.
 	var req httpx.RequestHeader
 	req.SetRequestURI("/")
+	// If you need a Post request change "GET" to "POST" and then add the
+	// post data to reqbytes: `postReq := append(reqbytes, postData...)` and send postReq over TCP.
 	req.SetMethod("GET")
 	req.SetHost(svAddr.Addr().String())
 	reqbytes := req.Header()
