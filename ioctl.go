@@ -90,6 +90,9 @@ func (d *Device) has_credit() bool {
 const mtuPrefix = 2 + whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
 const MTU = 2048 - mtuPrefix
 
+// MTU returns the maximum transmission unit for the device.
+func (d *Device) MTU() int { return MTU }
+
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
 	if !d.IsLinkUp() {
@@ -303,9 +306,9 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 	return err
 }
 
-// TryPoll attempts to read a packet from the device. Returns true if a packet
-// was read, false if no packet was available.
-func (d *Device) TryPoll() (gotPacket bool, err error) {
+// PollOne attempts to receives one Ethernet packet and returns true if
+// an Ethernet packet was received by the registered callback, false otherwise.
+func (d *Device) PollOne() (gotEthernetPacket bool, err error) {
 	d.lock()
 	defer d.unlock()
 	_, cmd, err := d.tryPoll(d._rxBuf[:])

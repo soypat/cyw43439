@@ -125,9 +125,10 @@ func (d *Device) hwaddr() net.HardwareAddr {
 	return net.HardwareAddr(d.mac[:6])
 }
 
-func (d *Device) MACAs6() [6]byte {
-	d.trace("MACAs6:call")
-	return d.mac
+// HardwareAddr6 returns the MAC/EUI-48 address as a 6-byte array.
+func (d *Device) HardwareAddr6() ([6]byte, error) {
+	d.trace("HardwareAddr6:call")
+	return d.mac, nil
 }
 
 func (d *Device) set_power_management(mode powerManagementMode) error {
