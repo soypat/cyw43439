@@ -1,4 +1,4 @@
-//go:build cy43nopio
+//go:build cy43nopio || !rp2040
 
 package cyw43439
 
