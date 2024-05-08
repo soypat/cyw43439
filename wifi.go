@@ -125,11 +125,6 @@ func (d *Device) hwaddr() net.HardwareAddr {
 	return net.HardwareAddr(d.mac[:6])
 }
 
-func (d *Device) MACAs6() [6]byte {
-	d.trace("MACAs6:call")
-	return d.mac
-}
-
 func (d *Device) set_power_management(mode powerManagementMode) error {
 	d.debug("set_power_management", slog.String("mode", mode.String()))
 	if !mode.IsValid() {

@@ -2,8 +2,8 @@ github.com/soypat/natiu-mqtt v0.5.1 h1:rwaDmlvjzD2+3MCOjMZc4QEkDkNwDzbct2TJbpz+T
 github.com/soypat/natiu-mqtt v0.5.1/go.mod h1:xEta+cwop9izVCW7xOx2W+ct9PRMqr0gNVkvBPnQTc4=
 github.com/soypat/saleae v0.0.0-20230402180913-3584b7515dae h1:cOw342W+mYwRaahnxdhRVITGkGTTWqwy7AblKv0iQxM=
 github.com/soypat/saleae v0.0.0-20230402180913-3584b7515dae/go.mod h1:9SV+w6E9YK/BePxdxYGXthkrRztHJCQlojWOjAxW3M4=
-github.com/soypat/seqs v0.0.0-20240315041335-3dd1de606d2f h1:lONveayNmHEWUmDxfGnqd3Ww8/1QhQpwBoEXNyWZuBI=
-github.com/soypat/seqs v0.0.0-20240315041335-3dd1de606d2f/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
+github.com/soypat/seqs v0.0.0-20240430175138-8b6dcdb5a416 h1:fN5nKTixCj/Nhmrh+DZd86AJXFqXsvWh52vfT9452HQ=
+github.com/soypat/seqs v0.0.0-20240430175138-8b6dcdb5a416/go.mod h1:oCVCNGCHMKoBj97Zp9znLbQ1nHxpkmOY9X+UAGzOxc8=
 github.com/tinygo-org/pio v0.0.0-20231216154340-cd888eb58899 h1:/DyaXDEWMqoVUVEJVJIlNk1bXTbFs8s3Q4GdPInSKTQ=
 github.com/tinygo-org/pio v0.0.0-20231216154340-cd888eb58899/go.mod h1:LU7Dw00NJ+N86QkeTGjMLNkYcEYMor6wTDpTCu0EaH8=
 golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691 h1:/yRP+0AN7mf5DkD3BAI6TOFnd51gEoDEb8o35jIFtgw=

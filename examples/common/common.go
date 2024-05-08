@@ -69,7 +69,7 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 		logger.Error("wifi join faled", slog.String("err", err.Error()))
 		time.Sleep(5 * time.Second)
 	}
-	mac := dev.MACAs6()
+	mac, _ := dev.HardwareAddr6()
 	logger.Info("wifi join success!", slog.String("mac", net.HardwareAddr(mac[:]).String()))
 
 	stack := stacks.NewPortStack(stacks.PortStackConfig{
@@ -96,7 +96,7 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 		return nil, stack, dev, errors.New("dhcp begin request:" + err.Error())
 	}
 	i := 0
-	for !dhcpClient.IsDone() {
+	for dhcpClient.State() != dhcp.StateBound {
 		i++
 		logger.Info("DHCP ongoing...")
 		time.Sleep(time.Second / 2)
@@ -145,13 +145,16 @@ func ResolveHardwareAddr(stack *stacks.PortStack, ip netip.Addr) ([6]byte, error
 		return [6]byte{}, err
 	}
 	time.Sleep(4 * time.Millisecond)
-	retries := 20 // ARP exchanges should be fast, don't wait too long for them.
+	// ARP exchanges should be fast, don't wait too long for them.
+	const timeout = time.Second
+	const maxretries = 20
+	retries := maxretries
 	for !arpc.IsDone() && retries > 0 {
 		retries--
 		if retries == 0 {
 			return [6]byte{}, errors.New("arp timed out")
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(timeout / maxretries)
 	}
 	_, hw, err := arpc.ResultAs6()
 	return hw, err
@@ -265,7 +268,7 @@ func nicLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 		stallRx := true
 		// Poll for incoming packets.
 		for i := 0; i < 1; i++ {
-			gotPacket, err := dev.TryPoll()
+			gotPacket, err := dev.PollOne()
 			if err != nil {
 				println("poll error:", err.Error())
 			}
