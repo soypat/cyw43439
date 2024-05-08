@@ -52,6 +52,8 @@ func (d *Device) SendEth(pkt []byte) error {
 
 // NetFlags returns the current network flags for the device.
 func (d *Device) NetFlags() (flags net.Flags) {
+	d.lock()
+	defer d.unlock()
 	// Define net.Flags locally since not all Tinygo versions have them fully defined.
 	const (
 		FlagUp           net.Flags = 1 << iota // interface is administratively up
