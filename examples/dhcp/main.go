@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/soypat/cyw43439/examples/common"
+	"github.com/soypat/seqs/eth/dhcp"
 )
 
 // Setup Wifi Password and SSID in common/secrets.go
@@ -23,7 +24,7 @@ func main() {
 		RequestedIP: "10.94.2.0",
 		UDPPorts:    1,
 	})
-	if !client.IsDone() {
+	if client.State() != dhcp.StateBound {
 		println("DHCP did not complete succesfully")
 	}
 	if err != nil {

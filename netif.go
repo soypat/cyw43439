@@ -20,7 +20,6 @@ func (d *Device) HardwareAddr6() ([6]byte, error) {
 	if d.mac == [6]byte{} {
 		return [6]byte{}, errors.New("hardware address not acquired")
 	}
-	d.MACAs6()
 	return d.mac, nil
 }
 
