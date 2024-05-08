@@ -198,21 +198,6 @@ func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	return d.set_iovar2("gpioout", whd.IF_STA, val0, val1)
 }
 
-// RecvEthHandle sets handler for receiving Ethernet pkt
-// If set to nil then incoming packets are ignored.
-func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
-	d.lock()
-	defer d.unlock()
-	d.rcvEth = handler
-}
-
-// SendEth sends an Ethernet packet over the current interface.
-func (d *Device) SendEth(pkt []byte) error {
-	d.lock()
-	defer d.unlock()
-	return d.tx(pkt)
-}
-
 // status gets gSPI last bus status or reads it from the device if it's stale, for some definition of stale.
 func (d *Device) status() Status {
 	// TODO(soypat): Are we sure we don't want to re-acquire status if it's been very long?

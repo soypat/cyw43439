@@ -303,18 +303,6 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 	return err
 }
 
-// TryPoll attempts to read a packet from the device. Returns true if a packet
-// was read, false if no packet was available.
-func (d *Device) TryPoll() (gotPacket bool, err error) {
-	d.lock()
-	defer d.unlock()
-	_, cmd, err := d.tryPoll(d._rxBuf[:])
-	if err == errNoF2Avail {
-		return false, nil
-	}
-	return err == nil && cmd == whd.CONTROL_HEADER, err
-}
-
 // poll services any F2 packets.
 //
 // This is the moral equivalent of an ISR to service hw interrupts.  In this
