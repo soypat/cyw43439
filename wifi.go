@@ -21,7 +21,7 @@ var (
 	errJoinGeneric  = errors.New("join:failed")
 )
 
-func (d *Device) initControl(clm string) error {
+func (d *Device) clmLoad(clm string) error {
 	// reference: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/control.rs#L35
 	d.debug("initControl", slog.Int("clm_len", len(clm)))
 	const chunkSize = 1024
@@ -59,9 +59,23 @@ func (d *Device) initControl(clm string) error {
 	d.debug("clmload:done")
 	v, err := d.get_iovar("clmload_status", whd.IF_STA)
 	if v != 0 || err != nil {
-		// return errjoin(errors.New("clmload_status failed"), err)
+		return errjoin(errors.New("clmload_status failed"), err)
+	}
+	return nil
+}
+
+func (d *Device) initControl(clm string) error {
+	if d.bt_mode_enabled() {
+		err := d.bt_init(btFW)
+		if err != nil {
+			return errors.New("cyw bt init failed: " + err.Error())
+		}
 	}
 
+	err := d.clmLoad(clm)
+	if err != nil {
+		return err
+	}
 	// Disable tx gloming which transfers multiple packets in one request.
 	// 'glom' is short for "conglomerate" which means "gather together into
 	// a compact mass".
@@ -72,52 +86,55 @@ func (d *Device) initControl(clm string) error {
 
 	d.get_iovar_n("cur_etheraddr", whd.IF_STA, d.mac[:6])
 	d.debug("MAC", slog.String("mac", d.hwaddr().String()))
+	if d.mode&modeWifi != 0 {
+		countryInfo := whd.CountryInfo("XX", 0)
+		d.set_iovar_n("country", whd.IF_STA, countryInfo[:])
 
-	countryInfo := whd.CountryInfo("XX", 0)
-	d.set_iovar_n("country", whd.IF_STA, countryInfo[:])
+		// set country takes some time, next ioctls fail if we don't wait.
+		time.Sleep(100 * time.Millisecond)
 
-	// set country takes some time, next ioctls fail if we don't wait.
-	time.Sleep(100 * time.Millisecond)
+		// Set Antenna to chip antenna.
+		d.set_ioctl(whd.WLC_SET_ANTDIV, whd.IF_STA, 0)
 
-	// Set Antenna to chip antenna.
-	d.set_ioctl(whd.WLC_SET_ANTDIV, whd.IF_STA, 0)
+		d.set_iovar("bus:txglom", whd.IF_STA, 0)
+		time.Sleep(100 * time.Millisecond)
 
-	d.set_iovar("bus:txglom", whd.IF_STA, 0)
-	time.Sleep(100 * time.Millisecond)
+		d.set_iovar("ampdu_ba_wsize", whd.IF_STA, 8)
+		time.Sleep(100 * time.Millisecond)
 
-	d.set_iovar("ampdu_ba_wsize", whd.IF_STA, 8)
-	time.Sleep(100 * time.Millisecond)
+		d.set_iovar("ampdu_mpdu", whd.IF_STA, 4)
+		time.Sleep(100 * time.Millisecond)
 
-	d.set_iovar("ampdu_mpdu", whd.IF_STA, 4)
-	time.Sleep(100 * time.Millisecond)
+		// Ignore uninteresting/spammy events.
+		var evts eventMask
+		for i := range evts.events {
+			evts.events[i] = 0xff
+		}
+		evts.Disable(whd.EvRADIO)
+		evts.Disable(whd.EvIF)
+		evts.Disable(whd.EvPROBREQ_MSG)
+		evts.Disable(whd.EvPROBREQ_MSG_RX)
+		evts.Disable(whd.EvPROBRESP_MSG)
+		evts.Disable(whd.EvROAM)
+		buf := make([]byte, evts.Size())
+		evts.Put(buf)
+		d.set_iovar_n("bsscfg:event_msgs", whd.IF_STA, buf)
 
-	// Ignore uninteresting/spammy events.
-	var evts eventMask
-	for i := range evts.events {
-		evts.events[i] = 0xff
+		time.Sleep(100 * time.Millisecond)
+
+		// Set wifi up.
+		d.doIoctlSet(whd.WLC_UP, whd.IF_STA, nil)
+
+		time.Sleep(100 * time.Millisecond)
+
+		d.set_ioctl(whd.WLC_SET_GMODE, whd.IF_STA, 1) // Set GMODE=auto
+		d.set_ioctl(whd.WLC_SET_BAND, whd.IF_STA, 0)  // Set BAND=any
+
+		time.Sleep(100 * time.Millisecond)
 	}
-	evts.Disable(whd.EvRADIO)
-	evts.Disable(whd.EvIF)
-	evts.Disable(whd.EvPROBREQ_MSG)
-	evts.Disable(whd.EvPROBREQ_MSG_RX)
-	evts.Disable(whd.EvPROBRESP_MSG)
-	evts.Disable(whd.EvROAM)
-	buf := make([]byte, evts.Size())
-	evts.Put(buf)
-	d.set_iovar_n("bsscfg:event_msgs", whd.IF_STA, buf)
-
-	time.Sleep(100 * time.Millisecond)
-
-	// Set wifi up.
-	d.doIoctlSet(whd.WLC_UP, whd.IF_STA, nil)
-
-	time.Sleep(100 * time.Millisecond)
-
-	d.set_ioctl(whd.WLC_SET_GMODE, whd.IF_STA, 1) // Set GMODE=auto
-	d.set_ioctl(whd.WLC_SET_BAND, whd.IF_STA, 0)  // Set BAND=any
-
-	time.Sleep(100 * time.Millisecond)
-
+	if modeBluetooth&d.mode != 0 {
+		// TODO: flash bt firmware here?
+	}
 	return nil
 }
 

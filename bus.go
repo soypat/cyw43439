@@ -54,9 +54,9 @@ func (d *spibus) Status() Status {
 	return Status(d.spi.LastStatus())
 }
 
-func (d *Device) initBus() error {
+func (d *Device) initBus(mode opMode) (err error) {
 	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/bus.rs#L51
-	d.Reset()
+	d.reset()
 	retries := 128
 	for {
 		got := d.read32_swapped(FuncBus, whd.SPI_READ_TEST_REGISTER)
@@ -92,7 +92,7 @@ func (d *Device) initBus() error {
 		// NOTE: embassy uses little endian words and StatusEnablePos.
 		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | (0 << EndianessBigPos) |
 			(1 << InterruptPolPos) | (1 << WakeUpPos) |
-			(1 << InterruptWithStatusPos) | (1 << StatusEnablePos)
+			(1 << InterruptWithStatusPos) | (1 << StatusEnablePos) | (0x4 << (ResponseDelayPos))
 	)
 	val := d.read32_swapped(FuncBus, 0)
 
@@ -100,7 +100,7 @@ func (d *Device) initBus() error {
 	got8, _ := d.read8(FuncBus, whd.SPI_BUS_CONTROL)
 	d.debug("read back bus ctl", slog.Uint64("got", uint64(got8)))
 
-	got, err := d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
+	got, err = d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
 
 	d.debug("current bus ctl", slog.Uint64("val", uint64(val)), slog.Uint64("got", uint64(got)))
 	if err != nil || got != whd.TEST_PATTERN {
@@ -111,6 +111,25 @@ func (d *Device) initBus() error {
 	if err != nil || got != RWTestPattern {
 		return errjoin(errors.New("spi RW test failed:"+hex32(got)), err)
 	}
+	// Bus Read/write operations validated. Proceed to configure what remains of bus.
+
+	err = d.write8(FuncBus, whd.SPI_RESP_DELAY_F1, whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE)
+	if err != nil {
+		return err
+	}
+
+	// Make sure interrupt bits are clear. TODO Is this necessary?
+	const irqclr = irqDATA_UNAVAILABLE | irqCOMMAND_ERROR | irqDATA_ERROR | irqF1_OVERFLOW
+	d.write8(FuncBus, whd.SPI_INTERRUPT_REGISTER, uint8(irqclr))
+
+	// Enable selection of interrupts.
+	const defaultIrqSet = irqF2_F3_FIFO_RD_UNDERFLOW | irqF2_F3_FIFO_WR_OVERFLOW |
+		irqCOMMAND_ERROR | irqDATA_ERROR | irqF2_PACKET_AVAILABLE | irqF1_OVERFLOW
+	irqSet := uint16(defaultIrqSet)
+	if d.bt_mode_enabled() {
+		irqSet |= uint16(irqF1_INTR)
+	}
+	d.write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, irqSet)
 	return nil
 }
 
