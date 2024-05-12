@@ -64,6 +64,11 @@ type Config struct {
 	Firmware string
 	CLM      string
 	Logger   *slog.Logger
+	// EnableBluetooth set to true enables
+	// bluetooth functionality on the CYW43439.
+	// The Firmware field passed in must contain the
+	// bluetooth firmware as well for this to work.
+	EnableBluetooth bool
 }
 
 func (d *Device) Init(cfg Config) (err error) {
@@ -180,7 +185,7 @@ func (d *Device) Init(cfg Config) (err error) {
 		return err
 	}
 
-	err = d.set_power_management(PowerSave)
+	err = d.set_power_management(pmPowerSave)
 	d.state = linkStateDown
 	d.info("Init:done", slog.Duration("took", time.Since(start)))
 	return err

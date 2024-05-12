@@ -59,7 +59,7 @@ func (d *Device) initBus() error {
 	d.Reset()
 	retries := 128
 	for {
-		got := d.read32_swapped(whd.SPI_READ_TEST_REGISTER)
+		got := d.read32_swapped(FuncBus, whd.SPI_READ_TEST_REGISTER)
 		if got == whd.TEST_PATTERN {
 			break
 		} else if retries <= 0 {
@@ -69,8 +69,8 @@ func (d *Device) initBus() error {
 	}
 	const RWTestPattern = 0x12345678
 	const spiRegTestRW = 0x18
-	d.write32_swapped(spiRegTestRW, RWTestPattern)
-	got := d.read32_swapped(spiRegTestRW)
+	d.write32_swapped(FuncBus, spiRegTestRW, RWTestPattern)
+	got := d.read32_swapped(FuncBus, spiRegTestRW)
 	if got != RWTestPattern {
 		return errors.New("spi test failed:" + hex32(got) + " wanted " + hex32(RWTestPattern))
 	}
@@ -94,9 +94,9 @@ func (d *Device) initBus() error {
 			(1 << InterruptPolPos) | (1 << WakeUpPos) |
 			(1 << InterruptWithStatusPos) | (1 << StatusEnablePos)
 	)
-	val := d.read32_swapped(0)
+	val := d.read32_swapped(FuncBus, 0)
 
-	d.write32_swapped(whd.SPI_BUS_CONTROL, setupValue)
+	d.write32_swapped(FuncBus, whd.SPI_BUS_CONTROL, setupValue)
 	got8, _ := d.read8(FuncBus, whd.SPI_BUS_CONTROL)
 	d.debug("read back bus ctl", slog.Uint64("got", uint64(got8)))
 
@@ -450,15 +450,15 @@ func (d *Device) readn(fn Function, addr, size uint32) (result uint32, err error
 	return buf[padding], err
 }
 
-func (d *Device) read32_swapped(addr uint32) uint32 {
-	cmd := cmd_word(false, true, FuncBus, addr, 4)
+func (d *Device) read32_swapped(fn Function, addr uint32) uint32 {
+	cmd := cmd_word(false, true, fn, addr, 4)
 	cmd = swap16(cmd)
 	buf := d.rwBuf[:1]
 	d.spi.cmd_read(cmd, buf)
 	return swap16(buf[0])
 }
-func (d *Device) write32_swapped(addr uint32, value uint32) {
-	cmd := cmd_word(true, true, FuncBus, addr, 4)
+func (d *Device) write32_swapped(fn Function, addr uint32, value uint32) {
+	cmd := cmd_word(true, true, fn, addr, 4)
 	d.rwBuf = [2]uint32{swap16(value), 0}
 	d.spi.cmd_write(swap16(cmd), d.rwBuf[:1])
 }
