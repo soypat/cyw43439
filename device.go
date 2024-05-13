@@ -319,6 +319,7 @@ func (d *Device) reset() {
 	d.state = 0
 	d.ioctlID = 0
 	d.sdpcmSeq = 0
+	d.sdpcmSeqMax = 1
 }
 
 func (d *Device) getInterrupts() Interrupts {
