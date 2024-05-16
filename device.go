@@ -71,6 +71,7 @@ type Device struct {
 	log             logstate
 	mode            opMode
 	btaddr          uint32
+	b2hReadPtr      uint32
 	h2bWritePtr     uint32
 	backplaneWindow uint32
 	ioctlID         uint16

@@ -2,7 +2,9 @@ package cyw43439
 
 import (
 	"errors"
+	"io"
 	"log/slog"
+	"runtime"
 	"time"
 
 	"github.com/soypat/cyw43439/whd"
@@ -19,19 +21,44 @@ var (
 	errBTWatermark            = errors.New("bt watermark set failed")
 )
 
-// SendHCI sends a HCI packet over the CYW43439's interface. Used for bluetooth.
-func (d *Device) SendHCI(b []byte) error {
-	d.lock()
-	defer d.unlock()
-
-	return d.hci_write(b)
+type deviceHCI struct {
+	dev *Device
 }
 
-// RecvHCIHandle registers the incoming HCI packet handler. Used for bluetooth.
-func (d *Device) RecvHCIHandle(callback func([]byte) error) {
+func (d *deviceHCI) Read(b []byte) (int, error) {
+	return d.dev.ReadHCI(b)
+}
+
+func (d *deviceHCI) Write(b []byte) (int, error) {
+	return d.dev.WriteHCI(b)
+}
+
+// HCIReaderWriter returns a io.ReadWriter interface which wraps the HCIWrite and HCIRead methods.
+func (d *Device) HCIReaderWriter() (io.ReadWriter, error) {
+	if !d.bt_mode_enabled() {
+		return nil, errors.New("need to enable bluetooth in Init to use HCI interface")
+	}
+	return &deviceHCI{
+		dev: d,
+	}, nil
+}
+
+// WriteHCI sends a HCI packet over the CYW43439's interface. Used for bluetooth.
+func (d *Device) WriteHCI(b []byte) (int, error) {
 	d.lock()
 	defer d.unlock()
-	d.rcvHCI = callback
+	err := d.hci_write(b)
+	if err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
+// WriteHCI reads from HCI ring buffer internal to the CYW43439. Used for bluetooth.
+func (d *Device) ReadHCI(b []byte) (int, error) {
+	d.lock()
+	defer d.unlock()
+	return d.hci_read(b)
 }
 
 func (d *Device) bt_mode_enabled() bool {
@@ -153,8 +180,67 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 	return nil
 }
 
-func (d *Device) hci_set_read_handler(fn func(b []byte) error) {
+func (d *Device) hci_read(b []byte) (int, error) {
+	err := d.hci_read_ringbuf(b[:4])
+	if err != nil {
+		return 0, err
+	}
+	length := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16
+	roundedlen := align(length, 4)
+	err = d.hci_read_ringbuf(b[4:][:roundedlen])
+	if err != nil {
+		return 0, err
+	}
+	n := int(4 + length)
+	err = d.bt_toggle_intr()
+	if err != nil {
+		return n, err
+	}
+	err = d.bt_bus_release()
+	if err != nil {
+		return n, err
+	}
+	return n, nil
+}
 
+func (d *Device) hci_read_ringbuf(buf []byte) error {
+	if len(buf)%4 != 0 {
+		return errUnalignedBuffer
+	}
+
+	for {
+		newPtr, err := d.bp_read32(d.btaddr + whd.BTSDIO_OFFSET_BT2HOST_IN)
+		if err != nil {
+			return err
+		}
+		available := int((d.b2hReadPtr - newPtr) % whd.BTSDIO_FWBUF_SIZE)
+		if available > len(buf) {
+			break
+		}
+		runtime.Gosched()
+	}
+
+	addr := d.btaddr + whd.BTSDIO_OFFSET_HOST_READ_BUF + d.b2hReadPtr
+	if int(d.b2hReadPtr)+len(buf) > whd.BTSDIO_FWBUF_SIZE {
+		n := whd.BTSDIO_FWBUF_SIZE - d.b2hReadPtr
+		err := d.bp_read(addr, buf[:n])
+		if err != nil {
+			return err
+		}
+		addr = d.btaddr + whd.BTSDIO_OFFSET_HOST_READ_BUF
+		err = d.bp_read(addr, buf[n:])
+		if err != nil {
+			return err
+		}
+	} else {
+		err := d.bp_read(addr, buf)
+		if err != nil {
+			return err
+		}
+	}
+
+	d.b2hReadPtr = (d.b2hReadPtr + uint32(len(buf))) % whd.BTSDIO_FWBUF_SIZE
+	return d.bp_write32(d.btaddr+whd.BTSDIO_OFFSET_BT2HOST_OUT, d.b2hReadPtr)
 }
 
 func (d *Device) hci_write(b []byte) error {
