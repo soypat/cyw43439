@@ -6,6 +6,10 @@ import _ "embed"
 // when developing.
 
 var (
+	//go:embed firmware/43439A0_clmbt.bin
+	embassyFWclm string
+	//go:embed firmware/43439A0bt.bin
+	embassyFWbt string
 	//go:embed firmware/43439A0_clm.bin
 	clmFW string
 	//go:embed firmware/43439A0.bin

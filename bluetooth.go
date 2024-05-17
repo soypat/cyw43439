@@ -25,6 +25,10 @@ type deviceHCI struct {
 	dev *Device
 }
 
+func (d *deviceHCI) Buffered() int {
+	return d.dev.BufferedHCI()
+}
+
 func (d *deviceHCI) Read(b []byte) (int, error) {
 	return d.dev.ReadHCI(b)
 }
@@ -33,7 +37,7 @@ func (d *deviceHCI) Write(b []byte) (int, error) {
 	return d.dev.WriteHCI(b)
 }
 
-// HCIReaderWriter returns a io.ReadWriter interface which wraps the HCIWrite and HCIRead methods.
+// HCIReaderWriter returns a io.ReadWriter interface which wraps the BufferedHCI, WriteHCI and ReadHCI methods.
 func (d *Device) HCIReaderWriter() (io.ReadWriter, error) {
 	if !d.bt_mode_enabled() {
 		return nil, errors.New("need to enable bluetooth in Init to use HCI interface")
@@ -41,6 +45,14 @@ func (d *Device) HCIReaderWriter() (io.ReadWriter, error) {
 	return &deviceHCI{
 		dev: d,
 	}, nil
+}
+
+// BufferedHCI returns amounts of HCI bytes stored inside CYW43439 internal ring buffer.
+func (d *Device) BufferedHCI() int {
+	d.lock()
+	defer d.unlock()
+	n32, _ := d.hci_buffered()
+	return int(n32)
 }
 
 // WriteHCI sends a HCI packet over the CYW43439's interface. Used for bluetooth.
@@ -118,7 +130,7 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 	hfd := hexFileData{
 		addrmode: whd.BTFW_ADDR_MODE_EXTENDED,
 	}
-	var auxbuf [4]byte
+	var memoryValueBytes [4]byte
 	for {
 		numFwBytes := bt_read_firmware_patch_line(btfwCB, &hfd)
 		if numFwBytes == 0 {
@@ -133,36 +145,48 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 			paddedDstStartAddr := aligndown(dstStartAddr, 4)
 			memoryValue, _ := d.bp_read32(paddedDstStartAddr)
 
-			_busOrder.PutUint32(auxbuf[:], memoryValue)
+			_busOrder.PutUint32(memoryValueBytes[:], memoryValue)
 			for i := 0; i < int(numPadBytes); i++ {
-				alignedDataBuffer[alignedDataBufferIdx] = auxbuf[i]
+				alignedDataBuffer[alignedDataBufferIdx] = memoryValueBytes[i]
+				alignedDataBufferIdx++
+			}
+			// Copy firmware bytes after the padding bytes.
+			for i := 0; i < int(numFwBytes); i++ {
+				alignedDataBuffer[alignedDataBufferIdx] = fwBytes[i]
 				alignedDataBufferIdx++
 			}
 
 			dstStartAddr = paddedDstStartAddr
+		} else {
+			// Directly copy fw_bytes into aligned_data_buffer if no start padding is required
+			for i := 0; i < int(numFwBytes); i++ {
+				alignedDataBuffer[alignedDataBufferIdx] = fwBytes[i]
+				alignedDataBufferIdx++
+			}
 		}
-		// Copy firmware bytes after padding bytes.
-		alignedDataBufferIdx += uint32(copy(alignedDataBuffer[alignedDataBufferIdx:], fwBytes))
 
+		// pad end.
 		dstEndAddr := dstStartAddr + alignedDataBufferIdx
 		if !isaligned(dstEndAddr, 4) {
 			offset := dstEndAddr % 4
 			numPadBytesEnd := 4 - offset
 			paddedDstEndAddr := aligndown(dstEndAddr, 4)
 			memoryValue, _ := d.bp_read32(paddedDstEndAddr)
-			_busOrder.PutUint32(auxbuf[:], memoryValue)
+			_busOrder.PutUint32(memoryValueBytes[:], memoryValue)
 			for i := offset; i < 4; i++ {
-				alignedDataBuffer[alignedDataBufferIdx] = auxbuf[i]
+				alignedDataBuffer[alignedDataBufferIdx] = memoryValueBytes[i]
 				alignedDataBufferIdx++
 			}
 			dstEndAddr += numPadBytesEnd
 		}
+
 		bufferToWrite := alignedDataBuffer[0:alignedDataBufferIdx]
 		if dstStartAddr%4 != 0 || dstEndAddr%4 != 0 || alignedDataBufferIdx%4 != 0 {
 			return errors.New("unaligned BT firmware bug")
 		}
+
 		const chunksize = 64 // Is writing in 64 byte chunks needed?
-		numChunks := align(alignedDataBufferIdx, 64)
+		numChunks := alignedDataBufferIdx/64 + b2u32(alignedDataBufferIdx%64 != 0)
 		for i := uint32(0); i < numChunks; i += chunksize {
 			offset := i * chunksize
 			end := (i + 1) * chunksize
@@ -180,18 +204,22 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 	return nil
 }
 
+func (d *Device) hci_buffered() (uint32, error) {
+	buf := u32AsU8(d._iovarBuf[:])
+	err := d.hci_read_ringbuf(buf[:4])
+	if err != nil {
+		return 0, err
+	}
+	length := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16
+	return align(length, 4) + 4, nil
+}
+
 func (d *Device) hci_read(b []byte) (int, error) {
-	err := d.hci_read_ringbuf(b[:4])
+	n32, err := d.hci_buffered()
 	if err != nil {
 		return 0, err
 	}
-	length := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16
-	roundedlen := align(length, 4)
-	err = d.hci_read_ringbuf(b[4:][:roundedlen])
-	if err != nil {
-		return 0, err
-	}
-	n := int(4 + length)
+	n := int(n32)
 	err = d.bt_toggle_intr()
 	if err != nil {
 		return n, err
@@ -247,7 +275,7 @@ func (d *Device) hci_write(b []byte) error {
 	d.trace("hci_write:start")
 	buflen := len(b)
 	alignBuflen := align(uint32(buflen), 4)
-	if buflen <= int(alignBuflen) {
+	if buflen != int(alignBuflen) {
 		return errUnalignedBuffer
 	}
 	cmdlen := buflen + 3 - 4 // Add 3 bytes for SDIO header (revise)

@@ -36,7 +36,9 @@ func (d *Device) debug(msg string, attrs ...slog.Attr) {
 }
 
 func (d *Device) trace(msg string, attrs ...slog.Attr) {
-	d.logattrs(levelTrace, msg, attrs...)
+	if d.traceenabled { // Special case for trace since so common. Might save a few nanoseconds.
+		d.logattrs(levelTrace, msg, attrs...)
+	}
 }
 
 func (d *Device) logenabled(level slog.Level) bool {

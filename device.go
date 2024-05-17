@@ -1,6 +1,7 @@
 package cyw43439
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"sync"
@@ -40,8 +41,8 @@ type outputPin func(bool)
 
 func DefaultBluetoothConfig() Config {
 	return Config{
-		Firmware: btFW,
-		CLM:      clmFW,
+		Firmware: embassyFWbt,
+		CLM:      embassyFWclm,
 		mode:     modeBluetooth,
 	}
 }
@@ -91,6 +92,7 @@ type Device struct {
 	rcvEth          func([]byte) error
 	rcvHCI          func([]byte) error
 	logger          *slog.Logger
+	traceenabled    bool
 	state           linkState
 }
 
@@ -113,6 +115,8 @@ func (d *Device) Init(cfg Config) (err error) {
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	d.mode = cfg.mode
 	d.logger = cfg.Logger
+	d.traceenabled = d.logger != nil && d.logger.Handler().Enabled(context.Background(), levelTrace)
+
 	d.backplaneWindow = 0xaaaa_aaaa
 
 	err = d.initBus(cfg.mode)
@@ -195,7 +199,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	d.debug("core up")
 
 	// Wait until HT clock is available, takes about 29ms.
-	deadline := time.Now().Add(35 * time.Millisecond)
+	deadline := time.Now().Add(1000 * time.Millisecond)
 	for {
 		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
 		if got&0x80 != 0 {
