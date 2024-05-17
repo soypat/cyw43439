@@ -1,6 +1,6 @@
 module github.com/soypat/cyw43439
 
-go 1.21
+go 1.20
 
 require (
 	github.com/soypat/natiu-mqtt v0.5.1
