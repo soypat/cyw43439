@@ -83,7 +83,7 @@ type Device struct {
 	// uint32 buffers to ensure alignment of buffers.
 	rwBuf         [2]uint32        // rwBuf used for read* and write* functions.
 	_sendIoctlBuf [2048 / 4]uint32 // _sendIoctlBuf used only in sendIoctl and tx.
-	_iovarBuf     [2048 / 4]uint32 // _iovarBuf used in get_iovar* and set_iovar* calls.
+	_iovarBuf     [2048 / 4]uint32 // _iovarBuf used in get_iovar*, set_iovar* and write_backplane calls.
 	_rxBuf        [2048 / 4]uint32 // Used in check_status->rx calls and handle_irq.
 	// We define headers in the Device struct to alleviate stack growth. Also used along with _sendIoctlBuf
 	lastSDPCMHeader whd.SDPCMHeader
@@ -92,7 +92,7 @@ type Device struct {
 	rcvEth          func([]byte) error
 	rcvHCI          func([]byte) error
 	logger          *slog.Logger
-	traceenabled    bool
+	_traceenabled   bool
 	state           linkState
 }
 
@@ -117,7 +117,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	start := time.Now()
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	d.logger = cfg.Logger
-	d.traceenabled = d.logger != nil && d.logger.Handler().Enabled(context.Background(), levelTrace)
+	d._traceenabled = d.logger != nil && d.logger.Handler().Enabled(context.Background(), levelTrace)
 
 	d.backplaneWindow = 0xaaaa_aaaa
 

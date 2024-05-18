@@ -97,6 +97,7 @@ func (d *Device) bt_init(firmware string) error {
 	if err != nil {
 		return err
 	}
+	d.trace("bt:firmware-upload-finished")
 	err = d.bt_wait_ready()
 	if err != nil {
 		return err
@@ -122,8 +123,9 @@ func (d *Device) bt_init(firmware string) error {
 
 func (d *Device) bt_upload_firmware(firmware string) error {
 	versionlength := firmware[0]
-	d.trace("bt_init:start", slog.String("fwversion", firmware[:versionlength]))
-	// Skip version + 1 extra byte as per cybt_shared_bus_driver.c
+	_version := firmware[1:versionlength]
+	d.trace("bt_init:start", slog.String("fwversion", _version), slog.Int("versionlen", int(versionlength)))
+	// Skip version + length byte + 1 extra byte as per cybt_shared_bus_driver.c
 	firmware = firmware[versionlength+2:]
 	// buffers
 	rawbuffer := u32AsU8(d._sendIoctlBuf[:])
@@ -449,10 +451,10 @@ func bt_read_firmware_patch_line(cbFirmware string, hfd *hexFileData) (uint32, s
 		lineType := nxtLineStart[0]
 		nxtLineStart = nxtLineStart[1:]
 		if numBytes == 0 {
-			println("no bytes found")
 			break
 		}
 		copy(hfd.ds[:numBytes], nxtLineStart[:numBytes])
+		nxtLineStart = nxtLineStart[numBytes:]
 		switch lineType {
 		case whd.BTFW_HEX_LINE_TYPE_EXTENDED_ADDRESS:
 			hfd.hiaddr = uint16(hfd.ds[0])<<8 | uint16(hfd.ds[1])

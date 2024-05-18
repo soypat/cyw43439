@@ -36,7 +36,7 @@ func (d *Device) debug(msg string, attrs ...slog.Attr) {
 }
 
 func (d *Device) trace(msg string, attrs ...slog.Attr) {
-	if d.traceenabled { // Special case for trace since so common. Might save a few nanoseconds.
+	if d._traceenabled { // Special case for trace since so common. Might save a few nanoseconds.
 		d.logattrs(levelTrace, msg, attrs...)
 	}
 }

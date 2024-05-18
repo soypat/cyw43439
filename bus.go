@@ -316,7 +316,7 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	if addr%4 != 0 {
 		return errors.New("addr must be 4-byte aligned")
 	}
-	d.debug("bp_write", slog.Uint64("addr", uint64(addr)))
+	d.debug("bp_write", slog.Uint64("addr", uint64(addr)), slog.Int("len", len(data)))
 
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	// var buf [maxTxSize]byte
