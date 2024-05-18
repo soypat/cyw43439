@@ -272,7 +272,6 @@ func (d *Device) hci_read_ringbuf(buf []byte) error {
 			return err
 		}
 	}
-
 	d.b2hReadPtr = (d.b2hReadPtr + uint32(len(buf))) % whd.BTSDIO_FWBUF_SIZE
 	return d.bp_write32(d.btaddr+whd.BTSDIO_OFFSET_BT2HOST_OUT, d.b2hReadPtr)
 }
@@ -331,18 +330,20 @@ func (d *Device) bt_wait_awake() error {
 	return nil
 }
 
-func (d *Device) bt_wait_ctrl_bits(bits uint32, timeout_ms int) error {
+func (d *Device) bt_wait_ctrl_bits(bits uint32, timeout_ms int) (err error) {
 	d.trace("bt_wait_ctrl_bits:start", slog.Uint64("bits", uint64(bits)))
-	for i := 0; i < timeout_ms; i++ {
-		val, err := d.bp_read32(whd.BT_CTRL_REG_ADDR)
+	var val uint32
+	for i := 0; i < timeout_ms/4+3; i++ {
+		val, err = d.bp_read32(whd.BT_CTRL_REG_ADDR)
 		if err != nil {
 			return err
 		}
 		if val&bits != 0 {
 			return nil
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(4 * time.Millisecond)
 	}
+	d.logerr("bt:ctrl-timeout", slog.Uint64("got", uint64(val)), slog.Uint64("want", uint64(bits)))
 	return errTimeout
 }
 
