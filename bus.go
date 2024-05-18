@@ -57,6 +57,7 @@ func (d *spibus) Status() Status {
 func (d *Device) initBus(mode opMode) (err error) {
 	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/bus.rs#L51
 	d.reset()
+	d.mode = mode
 	retries := 128
 	for {
 		got := d.read32_swapped(FuncBus, whd.SPI_READ_TEST_REGISTER)

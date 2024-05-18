@@ -17,11 +17,19 @@ func main() {
 		panic(err)
 	}
 	for {
-		dev.GPIOSet(0, true)
-		println("LED ON")
+		err = dev.GPIOSet(0, true)
+		if err != nil {
+			println("err", err.Error())
+		} else {
+			println("LED ON")
+		}
 		time.Sleep(500 * time.Millisecond)
-		dev.GPIOSet(0, false)
-		println("LED OFF")
+		err = dev.GPIOSet(0, false)
+		if err != nil {
+			println("err", err.Error())
+		} else {
+			println("LED OFF")
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 }

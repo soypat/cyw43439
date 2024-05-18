@@ -311,10 +311,10 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 // TODO get real hw interrupts working and ditch polling
 func (d *Device) irqPoll() {
 	for {
-		d.lock()
+		d.acquire(0)
 		d.log_read()
 		d.handle_irq(d._rxBuf[:])
-		d.unlock()
+		d.release()
 		// Avoid busy waiting on idle.  Trade off here is time sleeping
 		// is time added to receive latency.
 		time.Sleep(10 * time.Millisecond)

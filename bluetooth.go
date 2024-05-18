@@ -49,17 +49,23 @@ func (d *Device) HCIReaderWriter() (io.ReadWriter, error) {
 
 // BufferedHCI returns amounts of HCI bytes stored inside CYW43439 internal ring buffer.
 func (d *Device) BufferedHCI() int {
-	d.lock()
-	defer d.unlock()
+	err := d.acquire(modeBluetooth)
+	defer d.release()
+	if err != nil {
+		return 0
+	}
 	n32, _ := d.hci_buffered()
 	return int(n32)
 }
 
 // WriteHCI sends a HCI packet over the CYW43439's interface. Used for bluetooth.
 func (d *Device) WriteHCI(b []byte) (int, error) {
-	d.lock()
-	defer d.unlock()
-	err := d.hci_write(b)
+	err := d.acquire(modeBluetooth)
+	defer d.release()
+	if err != nil {
+		return 0, err
+	}
+	err = d.hci_write(b)
 	if err != nil {
 		return 0, err
 	}
@@ -68,8 +74,11 @@ func (d *Device) WriteHCI(b []byte) (int, error) {
 
 // WriteHCI reads from HCI ring buffer internal to the CYW43439. Used for bluetooth.
 func (d *Device) ReadHCI(b []byte) (int, error) {
-	d.lock()
-	defer d.unlock()
+	err := d.acquire(modeBluetooth)
+	defer d.release()
+	if err != nil {
+		return 0, err
+	}
 	return d.hci_read(b)
 }
 
@@ -112,15 +121,8 @@ func (d *Device) bt_init(firmware string) error {
 }
 
 func (d *Device) bt_upload_firmware(firmware string) error {
-	d.trace("bt_init:start")
 	versionlength := firmware[0]
-	if versionlength > 8 {
-		return errors.New("invalid version length")
-	}
-	var version uint32
-	for i := 0; i < int(versionlength); i++ {
-		version |= uint32(firmware[i]) << i
-	}
+	d.trace("bt_init:start", slog.String("fwversion", firmware[:versionlength]))
 	// Skip version + 1 extra byte as per cybt_shared_bus_driver.c
 	firmware = firmware[versionlength+2:]
 	// buffers
@@ -132,10 +134,12 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 	}
 	var memoryValueBytes [4]byte
 	for {
-		numFwBytes := bt_read_firmware_patch_line(btfwCB, &hfd)
+		var numFwBytes uint32
+		numFwBytes, btfwCB = bt_read_firmware_patch_line(btfwCB, &hfd)
 		if numFwBytes == 0 {
 			break
 		}
+		d.trace("BTpatch", slog.Int("addrmode", int(hfd.addrmode)), slog.Uint64("len", uint64(numFwBytes)))
 		fwBytes := hfd.ds[:numFwBytes]
 		dstStartAddr := hfd.dstAddr + whd.CYW_BT_BASE_ADDRESS
 		var alignedDataBufferIdx uint32
@@ -432,7 +436,7 @@ type hexFileData struct {
 }
 
 // bt_read_firmware_patch_line reads firmware addressing scheme into hfd and returns the patch line length stored into hfd.
-func bt_read_firmware_patch_line(cbFirmware string, hfd *hexFileData) uint32 {
+func bt_read_firmware_patch_line(cbFirmware string, hfd *hexFileData) (uint32, string) {
 	var absBaseAddr32 uint32
 	nxtLineStart := cbFirmware
 	for {
@@ -445,6 +449,7 @@ func bt_read_firmware_patch_line(cbFirmware string, hfd *hexFileData) uint32 {
 		lineType := nxtLineStart[0]
 		nxtLineStart = nxtLineStart[1:]
 		if numBytes == 0 {
+			println("no bytes found")
 			break
 		}
 		copy(hfd.ds[:numBytes], nxtLineStart[:numBytes])
@@ -472,10 +477,11 @@ func bt_read_firmware_patch_line(cbFirmware string, hfd *hexFileData) uint32 {
 			case whd.BTFW_ADDR_MODE_LINEAR32:
 				hfd.dstAddr += absBaseAddr32
 			}
-			return uint32(numBytes)
+			return uint32(numBytes), nxtLineStart
 		default:
+			println("skip line")
 			// Skip other line types.
 		}
 	}
-	return 0
+	return 0, ""
 }

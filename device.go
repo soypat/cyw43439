@@ -20,7 +20,7 @@ import (
 type opMode uint32
 
 const (
-	_ opMode = 1 << iota
+	modeInit opMode = 1 << iota
 	modeWifi
 	modeBluetooth
 )
@@ -43,7 +43,7 @@ func DefaultBluetoothConfig() Config {
 	return Config{
 		Firmware: embassyFWbt,
 		CLM:      embassyFWclm,
-		mode:     modeBluetooth,
+		mode:     modeInit | modeBluetooth,
 	}
 }
 
@@ -51,7 +51,7 @@ func DefaultWifiBluetoothConfig() Config {
 	return Config{
 		Firmware: wifibtFW,
 		CLM:      clmFW,
-		mode:     modeWifi | modeBluetooth,
+		mode:     modeInit | modeWifi | modeBluetooth,
 	}
 }
 
@@ -59,7 +59,7 @@ func DefaultWifiConfig() Config {
 	return Config{
 		Firmware: wifiFW2,
 		CLM:      clmFW,
-		mode:     modeWifi,
+		mode:     modeInit | modeWifi,
 	}
 }
 
@@ -108,12 +108,14 @@ func (d *Device) Init(cfg Config) (err error) {
 	if cfg.mode&(modeBluetooth|modeWifi) == 0 {
 		return errors.New("no operation mode selected")
 	}
-	d.lock()
-	defer d.unlock()
+	err = d.acquire(0)
+	defer d.release()
+	if err != nil {
+		return err
+	}
 	d.info("Init:start")
 	start := time.Now()
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
-	d.mode = cfg.mode
 	d.logger = cfg.Logger
 	d.traceenabled = d.logger != nil && d.logger.Handler().Enabled(context.Background(), levelTrace)
 
@@ -286,8 +288,11 @@ func (d *Device) GPIOSet(wlGPIO uint8, value bool) (err error) {
 	}
 	val0 := uint32(1) << wlGPIO
 	val1 := b2u32(value) << wlGPIO
-	d.lock()
-	defer d.unlock()
+	err = d.acquire(modeInit)
+	defer d.release()
+	if err != nil {
+		return err
+	}
 	return d.set_iovar2("gpioout", whd.IF_STA, val0, val1)
 }
 
@@ -309,9 +314,9 @@ func (d *Device) status() Status {
 // and waiting the suggested amount of time for SPI bus to initialize.
 // To use Device again Init should be called after a Reset.
 func (d *Device) Reset() {
-	d.lock()
+	d.acquire(0)
 	d.reset()
-	d.unlock()
+	d.release()
 }
 
 func (d *Device) reset() {
@@ -335,8 +340,19 @@ func (d *Device) getInterrupts() Interrupts {
 	return Interrupts(irq)
 }
 
-func (d *Device) lock()   { d.mu.Lock() }
-func (d *Device) unlock() { d.mu.Unlock() }
+func (d *Device) acquire(mode opMode) error {
+	d.mu.Lock()
+	if mode != 0 && d.mode == 0 {
+		return errors.New("device uninitialized")
+	} else if mode&d.mode != mode {
+		return errors.New("device mode uninitialized")
+	}
+	return nil
+}
+
+func (d *Device) release() {
+	d.mu.Unlock()
+}
 
 // align rounds `val` up to nearest multiple of `align`. `align` must be a power of 2.
 func align[T constraints.Unsigned](val, align T) T {

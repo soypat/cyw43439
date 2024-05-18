@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log/slog"
+	"machine"
 	"time"
 
 	"github.com/soypat/cyw43439"
@@ -9,7 +11,11 @@ import (
 func main() {
 	time.Sleep(time.Second)
 	dev := cyw43439.NewPicoWDevice()
-	err := dev.Init(cyw43439.DefaultBluetoothConfig())
+	cfg := cyw43439.DefaultBluetoothConfig()
+	cfg.Logger = slog.New(slog.NewTextHandler(machine.USBCDC, &slog.HandlerOptions{
+		Level: slog.LevelDebug - 2,
+	}))
+	err := dev.Init(cfg)
 	if err != nil {
 		panic("dev Init:" + err.Error())
 	}

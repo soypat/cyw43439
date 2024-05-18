@@ -303,9 +303,11 @@ func (d *Device) IsLinkUp() bool {
 }
 
 func (d *Device) JoinWPA2(ssid, pass string) error {
-	d.lock()
-	defer d.unlock()
-
+	err := d.acquire(modeWifi)
+	defer d.release()
+	if err != nil {
+		return err
+	}
 	if ssid != "" && pass == "" {
 		return d.join_open(ssid)
 	}
@@ -352,8 +354,11 @@ func (d *Device) JoinWPA2(ssid, pass string) error {
 }
 
 func (d *Device) StartAP(ssid, pass string, channel uint8) error {
-	d.lock()
-	defer d.unlock()
+	err := d.acquire(modeWifi)
+	defer d.release()
+	if err != nil {
+		return err
+	}
 
 	security := whd.CYW43_AUTH_OPEN
 	if pass != "" {
