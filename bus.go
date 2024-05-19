@@ -277,7 +277,6 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	alignedLen := align(uint32(len(data)), 4)
 	data = data[:alignedLen]
-	// buf := d._iovarBuf[:maxTxSize/4+1]
 	var buf [maxTxSize/4 + 1]uint32 // TODO: heapalloc replace.
 	buf8 := unsafeAsSlice[uint32, byte](buf[:])
 	for len(data) > 0 {
@@ -314,7 +313,7 @@ func (d *Device) bp_writestring(addr uint32, data string) error {
 
 func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	if addr%4 != 0 {
-		return errors.New("addr must be 4-byte aligned")
+		return errUnalignedBuffer
 	}
 	d.debug("bp_write", slog.Uint64("addr", uint64(addr)), slog.Int("len", len(data)))
 

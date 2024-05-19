@@ -193,13 +193,14 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 
 		const chunksize = 64 // Is writing in 64 byte chunks needed?
 		numChunks := alignedDataBufferIdx/64 + b2u32(alignedDataBufferIdx%64 != 0)
-		for i := uint32(0); i < numChunks; i += chunksize {
+		for i := uint32(0); i < numChunks; i++ {
 			offset := i * chunksize
 			end := (i + 1) * chunksize
 			if end > alignedDataBufferIdx {
 				end = alignedDataBufferIdx
 			}
 			chunk := bufferToWrite[offset:end]
+			// d.trace("chunk-write", slog.Uint64("idx", uint64(i)), slog.Uint64("offset", uint64(offset)), slog.Uint64("end", uint64(end)), slog.Uint64("len", uint64(end-offset)))
 			err := d.bp_write(dstStartAddr+offset, chunk)
 			if err != nil {
 				return err
@@ -211,7 +212,7 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 }
 
 func (d *Device) hci_buffered() (uint32, error) {
-	buf := u32AsU8(d._iovarBuf[:])
+	buf := u32AsU8(d._rxBuf[:])
 	err := d.hci_read_ringbuf(buf[:4])
 	if err != nil {
 		return 0, err
@@ -482,9 +483,8 @@ func bt_read_firmware_patch_line(cbFirmware string, hfd *hexFileData) (uint32, s
 			}
 			return uint32(numBytes), nxtLineStart
 		default:
-			println("skip line")
-			// Skip other line types.
+			// println("skip line type", lineType)
 		}
 	}
-	return 0, ""
+	return 0, nxtLineStart
 }
