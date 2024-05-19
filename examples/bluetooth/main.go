@@ -19,9 +19,30 @@ func main() {
 	if err != nil {
 		panic("dev Init:" + err.Error())
 	}
-	n, err := dev.WriteHCI([]byte{0x1, 0x2, 0x3, 0x4})
+	const maxRead = 1024 * 4
+	buf := make([]byte, maxRead)
+
+	n, err := dev.WriteHCI(buf[:4])
 	if err != nil {
 		panic("writeHCI:" + err.Error())
 	}
 	println("wrote", n, "bytes over HCI")
+	for {
+		if dev.BufferedHCI() == 0 {
+			println("no data buffered on HCI interface")
+			time.Sleep(time.Second)
+			continue
+		}
+		avail := dev.BufferedHCI()
+		if avail > len(buf) {
+			println("short buffer available=", avail, " buflen=", len(buf))
+			time.Sleep(time.Second)
+			continue
+		}
+		n, err = dev.ReadHCI(buf[:avail])
+		if err != nil {
+			panic("readHCI:" + err.Error())
+		}
+		println("read", n, "bytes over HCI", string(buf[:n]))
+	}
 }

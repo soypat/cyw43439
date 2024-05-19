@@ -143,7 +143,7 @@ func (Int Interrupts) String() (s string) {
 }
 
 func GetCLM(firmware []byte) []byte {
-	clmAddr := align(uint32(len(firmware)), 512)
+	clmAddr := alignup(uint32(len(firmware)), 512)
 	if uint32(cap(firmware)) < clmAddr+clmLen {
 		panic("firmware slice too small for CLM")
 	}

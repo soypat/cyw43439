@@ -275,7 +275,7 @@ func (d *Device) wlan_write(data []uint32, plen uint32) (err error) {
 func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 	// d.trace("bp_read:start")
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
-	alignedLen := align(uint32(len(data)), 4)
+	alignedLen := alignup(uint32(len(data)), 4)
 	data = data[:alignedLen]
 	var buf [maxTxSize/4 + 1]uint32 // TODO: heapalloc replace.
 	buf8 := unsafeAsSlice[uint32, byte](buf[:])
@@ -307,7 +307,7 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 
 // bp_writestring exists to leverage static string data which is always put in flash.
 func (d *Device) bp_writestring(addr uint32, data string) error {
-	slice := unsafe.Slice(unsafe.StringData(data), align(uint32(len(data)), 4))
+	slice := unsafe.Slice(unsafe.StringData(data), alignup(uint32(len(data)), 4))
 	return d.bp_write(addr, slice[:len(data)])
 }
 
@@ -319,7 +319,7 @@ func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	// var buf [maxTxSize]byte
-	alignedLen := align(uint32(len(data)), 4)
+	alignedLen := alignup(uint32(len(data)), 4)
 	data = data[:alignedLen]
 	buf := d._iovarBuf[:maxTxSize/4+1]
 	// var buf [maxTxSize/4 + 1]uint32 // TODO(soypat): heapalloc replace.
@@ -511,7 +511,7 @@ func unsafeAsSlice[F, T constraints.Unsigned](buf []F) []T {
 		panic("unaligned pointer")
 	}
 	// i.e: byte->uint32, expands slice.
-	return unsafe.Slice((*T)(ptr), align(uint32(len(buf)/div), uint32(div)))
+	return unsafe.Slice((*T)(ptr), alignup(uint32(len(buf)/div), uint32(div)))
 }
 
 //go:inline

@@ -179,7 +179,7 @@ func (d *Device) Init(cfg Config) (err error) {
 
 	// Load NVRAM
 	const chipRAMSize = 512 * 1024
-	nvramLen := align(uint32(len(nvram43439)), 4)
+	nvramLen := alignup(uint32(len(nvram43439)), 4)
 	d.debug("flashing nvram")
 	err = d.bp_writestring(ramAddr+chipRAMSize-4-nvramLen, nvram43439)
 	if err != nil {
@@ -354,8 +354,8 @@ func (d *Device) release() {
 	d.mu.Unlock()
 }
 
-// align rounds `val` up to nearest multiple of `align`. `align` must be a power of 2.
-func align[T constraints.Unsigned](val, align T) T {
+// alignup rounds `val` up to nearest multiple of `alignup`. `alignup` must be a power of 2.
+func alignup[T constraints.Unsigned](val, align T) T {
 	return (val + align - 1) &^ (align - 1)
 }
 

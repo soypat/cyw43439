@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"runtime"
+	"math"
 	"time"
 
 	"github.com/soypat/cyw43439/whd"
@@ -212,75 +212,97 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 }
 
 func (d *Device) hci_buffered() (uint32, error) {
-	buf := u32AsU8(d._rxBuf[:])
-	err := d.hci_read_ringbuf(buf[:4])
+	newPtr, err := d.bp_read32(d.btaddr + whd.BTSDIO_OFFSET_BT2HOST_IN)
 	if err != nil {
 		return 0, err
 	}
-	length := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16
-	return align(length, 4) + 4, nil
+	available := (d.b2hReadPtr - newPtr) % whd.BTSDIO_FWBUF_SIZE
+	return available, nil
 }
 
 func (d *Device) hci_read(b []byte) (int, error) {
-	n32, err := d.hci_buffered()
+	// Calculate length of HCI packet.
+	err := d.hci_read_ringbuf(b[:4], true)
 	if err != nil {
 		return 0, err
 	}
-	n := int(n32)
+	length := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16
+	roundedLen := int(alignup(length, 4))
+	if int(roundedLen) > len(b) {
+		return 0, io.ErrShortBuffer
+	}
+	err = d.hci_read_ringbuf(b[4:roundedLen], true)
+	if err != nil {
+		return 0, err
+	}
+	// Release bus.
 	err = d.bt_toggle_intr()
 	if err != nil {
-		return n, err
+		return roundedLen, err
 	}
 	err = d.bt_bus_release()
 	if err != nil {
-		return n, err
+		return roundedLen, err
 	}
-	return n, nil
+	return roundedLen, nil
 }
 
-func (d *Device) hci_read_ringbuf(buf []byte) error {
-	if len(buf)%4 != 0 {
-		return errUnalignedBuffer
-	}
-
+// hci_wait_read_buffered blocks until there are at least n bytes ready to read.
+func (d *Device) hci_wait_read_buffered(n int) error {
 	for {
-		newPtr, err := d.bp_read32(d.btaddr + whd.BTSDIO_OFFSET_BT2HOST_IN)
-		if err != nil {
+		// Block on no data available.
+		available, err := d.hci_buffered()
+		if int(available) < n {
+			break
+		} else if err != nil {
 			return err
 		}
-		available := int((d.b2hReadPtr - newPtr) % whd.BTSDIO_FWBUF_SIZE)
-		if available > len(buf) {
-			break
-		}
-		runtime.Gosched()
+		time.Sleep(time.Millisecond)
+	}
+	return nil
+}
+
+// hci_read_ringbuf fills the entire contents of buf with the first contents of
+// the ring buffer. It advances the pointer of the ring buffer len(buf) on successful read.
+func (d *Device) hci_read_ringbuf(buf []byte, advancePtr bool) error {
+	if len(buf)%4 != 0 || len(buf) > math.MaxInt32 {
+		return errUnalignedBuffer
+	}
+	err := d.hci_wait_read_buffered(len(buf))
+	if err != nil {
+		return err
 	}
 
 	addr := d.btaddr + whd.BTSDIO_OFFSET_HOST_READ_BUF + d.b2hReadPtr
-	if int(d.b2hReadPtr)+len(buf) > whd.BTSDIO_FWBUF_SIZE {
+	if d.b2hReadPtr+uint32(len(buf)) > whd.BTSDIO_FWBUF_SIZE {
+		// Special case: Wrap around of ring-buffer.
 		n := whd.BTSDIO_FWBUF_SIZE - d.b2hReadPtr
-		err := d.bp_read(addr, buf[:n])
-		if err != nil {
-			return err
-		}
-		addr = d.btaddr + whd.BTSDIO_OFFSET_HOST_READ_BUF
-		err = d.bp_read(addr, buf[n:])
-		if err != nil {
-			return err
+		err = d.bp_read(addr, buf[:n])
+		if err == nil {
+			addr = d.btaddr + whd.BTSDIO_OFFSET_HOST_READ_BUF
+			err = d.bp_read(addr, buf[n:])
 		}
 	} else {
-		err := d.bp_read(addr, buf)
+		err = d.bp_read(addr, buf[:])
+	}
+	if err != nil {
+		return err
+	}
+	d.b2hReadPtr = (d.b2hReadPtr + uint32(len(buf))) % whd.BTSDIO_FWBUF_SIZE
+	if advancePtr {
+		err = d.bp_write32(d.btaddr+whd.BTSDIO_OFFSET_BT2HOST_OUT, d.b2hReadPtr)
 		if err != nil {
 			return err
 		}
 	}
-	d.b2hReadPtr = (d.b2hReadPtr + uint32(len(buf))) % whd.BTSDIO_FWBUF_SIZE
-	return d.bp_write32(d.btaddr+whd.BTSDIO_OFFSET_BT2HOST_OUT, d.b2hReadPtr)
+
+	return nil
 }
 
 func (d *Device) hci_write(b []byte) error {
 	d.trace("hci_write:start")
 	buflen := len(b)
-	alignBuflen := align(uint32(buflen), 4)
+	alignBuflen := alignup(uint32(buflen), 4)
 	if buflen != int(alignBuflen) {
 		return errUnalignedBuffer
 	}
