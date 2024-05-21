@@ -232,6 +232,7 @@ func (d *Device) hci_buffered() (uint32, error) {
 	buffered := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16
 	buffered += 4 // Add HCI header.
 	d.debug("hci_buffered", slog.Uint64("buffered", uint64(buffered)))
+	d.hci_ringbuf_debug()
 	return buffered, nil
 }
 
@@ -333,6 +334,18 @@ func (d *Device) hci_advance_read_ringbuf(n uint32) error {
 		d.b2hReadPtr = newPtr
 	}
 	return err
+}
+
+func (d *Device) hci_ringbuf_debug() (h2btio_bt2hio [4]uint32) {
+	buf8 := u32AsU8(h2btio_bt2hio[:])
+	d.bp_read(d.btaddr+whd.BTSDIO_OFFSET_HOST2BT_IN, buf8)
+	d.trace("hci_ringbuf_debug",
+		slog.Uint64("h2bt_in", uint64(h2btio_bt2hio[0])),
+		slog.Uint64("h2bt_out", uint64(h2btio_bt2hio[1])),
+		slog.Uint64("bt2h_in", uint64(h2btio_bt2hio[2])),
+		slog.Uint64("h2bt_out", uint64(h2btio_bt2hio[3])),
+	)
+	return h2btio_bt2hio
 }
 
 func (d *Device) hci_write(b []byte) error {
