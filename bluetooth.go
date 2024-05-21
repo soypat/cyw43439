@@ -212,23 +212,39 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 }
 
 func (d *Device) hci_buffered() (uint32, error) {
+	d.trace("hci_buffered")
+	// Check if buffer contains data.
 	newPtr, err := d.bp_read32(d.btaddr + whd.BTSDIO_OFFSET_BT2HOST_IN)
 	if err != nil {
 		return 0, err
 	}
 	available := (d.b2hReadPtr - newPtr) % whd.BTSDIO_FWBUF_SIZE
-	return available, nil
+	if available < 4 {
+		return 0, nil
+	}
+	// Read the HCI packet without advancing buffer.
+	// This is done since ring buffer sometimes returns a spurious large number.
+	buf := u32AsU8(d._rxBuf[:])
+	err = d.hci_raw_read_ringbuf(buf[:4])
+	if err != nil {
+		return 0, err
+	}
+	buffered := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16
+	buffered += 4 // Add HCI header.
+	d.debug("hci_buffered", slog.Uint64("buffered", uint64(buffered)))
+	return buffered, nil
 }
 
 func (d *Device) hci_read(b []byte) (int, error) {
+	d.trace("hci_read", slog.Int("inputlen", len(b)))
 	// Calculate length of HCI packet.
 	err := d.hci_read_ringbuf(b[:4], true)
 	if err != nil {
 		return 0, err
 	}
 	length := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16
-	roundedLen := int(alignup(length, 4))
-	if int(roundedLen) > len(b) {
+	roundedLen := int(alignup(length, 4)) + 4
+	if roundedLen > len(b) {
 		return 0, io.ErrShortBuffer
 	}
 	err = d.hci_read_ringbuf(b[4:roundedLen], true)
@@ -249,15 +265,16 @@ func (d *Device) hci_read(b []byte) (int, error) {
 
 // hci_wait_read_buffered blocks until there are at least n bytes ready to read.
 func (d *Device) hci_wait_read_buffered(n int) error {
+	d.trace("hci_wait_read_buffered", slog.Int("n", n))
 	for {
 		// Block on no data available.
 		available, err := d.hci_buffered()
-		if int(available) < n {
+		if int(available) >= n {
 			break
 		} else if err != nil {
 			return err
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(time.Second)
 	}
 	return nil
 }
@@ -265,6 +282,7 @@ func (d *Device) hci_wait_read_buffered(n int) error {
 // hci_read_ringbuf fills the entire contents of buf with the first contents of
 // the ring buffer. It advances the pointer of the ring buffer len(buf) on successful read.
 func (d *Device) hci_read_ringbuf(buf []byte, advancePtr bool) error {
+	d.trace("hci_read_ringbuf", slog.Int("len", len(buf)), slog.Bool("advptr", advancePtr))
 	if len(buf)%4 != 0 || len(buf) > math.MaxInt32 {
 		return errUnalignedBuffer
 	}
@@ -272,7 +290,20 @@ func (d *Device) hci_read_ringbuf(buf []byte, advancePtr bool) error {
 	if err != nil {
 		return err
 	}
+	err = d.hci_raw_read_ringbuf(buf)
+	if err != nil {
+		return err
+	}
+	if advancePtr {
+		return d.hci_advance_read_ringbuf(uint32(len(buf)))
+	}
+	return nil
+}
 
+// hci_raw_read_ringbuf reads the next len(buf) bytes into the buffer without checking for validity of bytes.
+// Does not advance ringbuffer pointer.
+func (d *Device) hci_raw_read_ringbuf(buf []byte) (err error) {
+	d.trace("hci_raw_read_ringbuf")
 	addr := d.btaddr + whd.BTSDIO_OFFSET_HOST_READ_BUF + d.b2hReadPtr
 	if d.b2hReadPtr+uint32(len(buf)) > whd.BTSDIO_FWBUF_SIZE {
 		// Special case: Wrap around of ring-buffer.
@@ -285,18 +316,23 @@ func (d *Device) hci_read_ringbuf(buf []byte, advancePtr bool) error {
 	} else {
 		err = d.bp_read(addr, buf[:])
 	}
-	if err != nil {
-		return err
-	}
-	d.b2hReadPtr = (d.b2hReadPtr + uint32(len(buf))) % whd.BTSDIO_FWBUF_SIZE
-	if advancePtr {
-		err = d.bp_write32(d.btaddr+whd.BTSDIO_OFFSET_BT2HOST_OUT, d.b2hReadPtr)
-		if err != nil {
-			return err
-		}
-	}
+	return err
+}
 
-	return nil
+// hci_advance_read_ringbuf advances the CYW43439's internal ring buffer read pointer, a.k.a offset.
+func (d *Device) hci_advance_read_ringbuf(n uint32) error {
+	newPtr := (d.b2hReadPtr + n) % whd.BTSDIO_FWBUF_SIZE
+	err := d.bp_write32(d.btaddr+whd.BTSDIO_OFFSET_BT2HOST_OUT, newPtr)
+	d.trace("hci_advance_read_ringbuf",
+		slog.Uint64("newptr", uint64(newPtr)),
+		slog.Uint64("oldptr", uint64(d.b2hReadPtr)),
+		slog.Uint64("n", uint64(n)),
+		slog.Bool("err", err != nil),
+	)
+	if err == nil {
+		d.b2hReadPtr = newPtr
+	}
+	return err
 }
 
 func (d *Device) hci_write(b []byte) error {

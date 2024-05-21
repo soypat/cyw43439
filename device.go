@@ -157,11 +157,11 @@ func (d *Device) Init(cfg Config) (err error) {
 	if err != nil {
 		return err
 	}
-	err = d.core_disable(whd.CORE_SOCRAM) // TODO:is this needed if we reset right after?
+	err = d.core_disable(whd.CORE_SOCSRAM) // TODO:is this needed if we reset right after?
 	if err != nil {
 		return err
 	}
-	err = d.core_reset(whd.CORE_SOCRAM, false)
+	err = d.core_reset(whd.CORE_SOCSRAM, false)
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	d.debug("core up")
 
 	// Wait until HT clock is available, takes about 29ms.
-	deadline := time.Now().Add(1000 * time.Millisecond)
+	deadline := time.Now().Add(100 * time.Millisecond)
 	for {
 		got, _ := d.read8(FuncBackplane, whd.SDIO_CHIP_CLOCK_CSR)
 		if got&0x80 != 0 {

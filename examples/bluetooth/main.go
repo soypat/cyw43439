@@ -28,6 +28,7 @@ func main() {
 	}
 	println("wrote", n, "bytes over HCI")
 	for {
+		time.Sleep(700 * time.Millisecond)
 		if dev.BufferedHCI() == 0 {
 			println("no data buffered on HCI interface")
 			time.Sleep(time.Second)
@@ -39,10 +40,17 @@ func main() {
 			time.Sleep(time.Second)
 			continue
 		}
-		n, err = dev.ReadHCI(buf[:avail])
+		println("avail=", avail)
+		n, err = dev.ReadHCI(buf[:roundBuflen(avail)])
 		if err != nil {
 			panic("readHCI:" + err.Error())
 		}
 		println("read", n, "bytes over HCI", string(buf[:n]))
 	}
+}
+
+// CYW43439 read buffer must be of length multiple of 4.
+func roundBuflen(len int) int {
+	const alignment = 4
+	return (len + alignment - 1) &^ (alignment - 1)
 }

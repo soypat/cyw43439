@@ -201,7 +201,7 @@ func coreaddress(coreID uint8) (v uint32) {
 	switch coreID {
 	case whd.CORE_WLAN_ARM:
 		v = whd.WRAPPER_REGISTER_OFFSET + whd.WLAN_ARMCM3_BASE_ADDRESS
-	case whd.CORE_SOCRAM:
+	case whd.CORE_SOCSRAM:
 		v = whd.WRAPPER_REGISTER_OFFSET + whd.SOCSRAM_BASE_ADDRESS
 	default:
 		panic("bad core id")
