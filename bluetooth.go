@@ -343,7 +343,7 @@ func (d *Device) hci_ringbuf_debug() (h2btio_bt2hio [4]uint32) {
 		slog.Uint64("h2bt_in", uint64(h2btio_bt2hio[0])),
 		slog.Uint64("h2bt_out", uint64(h2btio_bt2hio[1])),
 		slog.Uint64("bt2h_in", uint64(h2btio_bt2hio[2])),
-		slog.Uint64("h2bt_out", uint64(h2btio_bt2hio[3])),
+		slog.Uint64("bt2h_out", uint64(h2btio_bt2hio[3])),
 	)
 	return h2btio_bt2hio
 }
