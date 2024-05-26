@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	errUnalignedBuffer        = errors.New("cyw: unaligned buffer")
+	errUnalignedBuffer        = errors.New("cyw: buffer must be of length multiple of 4")
 	errHCIPacketTooLarge      = errors.New("cyw: hci packet too large")
 	errBTWakeTimeout          = errors.New("cyw: bt wake timeout")
 	errBTReadyTimeout         = errors.New("cyw: bt ready timeout")
@@ -34,6 +34,14 @@ func (d *deviceHCI) Read(b []byte) (int, error) {
 }
 
 func (d *deviceHCI) Write(b []byte) (int, error) {
+	// if len(b)%4 != 0 && len(b) < len(d.buf4) {
+	// 	// Ensure length 4 on buffer to WriteHCI.
+	// 	d.mu.Lock()
+	// 	copy(d.buf4[:], b)
+	// 	n, err := d.dev.WriteHCI(d.buf4[:alignup(uint(len(b)), 4)])
+	// 	d.mu.Unlock()
+	// 	return n, err
+	// }
 	return d.dev.WriteHCI(b)
 }
 
@@ -79,7 +87,8 @@ func (d *Device) ReadHCI(b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return d.hci_read(b)
+	n, err := d.hci_read(b)
+	return int(n), err
 }
 
 func (d *Device) bt_mode_enabled() bool {
@@ -211,19 +220,24 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 	return nil
 }
 
-func (d *Device) hci_buffered() (uint32, error) {
-	d.trace("hci_buffered")
-	// Check if buffer contains data.
+// hci_available_ringbuf what does this function return? Total bytes to end of ringbuffer??
+func (d *Device) hci_available_ringbuf() (uint32, error) {
 	newPtr, err := d.bp_read32(d.btaddr + whd.BTSDIO_OFFSET_BT2HOST_IN)
 	if err != nil {
 		return 0, err
 	}
 	available := (d.b2hReadPtr - newPtr) % whd.BTSDIO_FWBUF_SIZE
+	d.trace("hci_available_ringbuf", slog.Uint64("available", uint64(available)))
+	return available, nil
+}
+
+func (d *Device) hci_buffered() (uint32, error) {
+	// Check if buffer contains data.
+	available, err := d.hci_available_ringbuf()
 	if available < 4 {
 		return 0, nil
 	}
 	// Read the HCI packet without advancing buffer.
-	// This is done since ring buffer sometimes returns a spurious large number.
 	buf := u32AsU8(d._rxBuf[:])
 	err = d.hci_raw_read_ringbuf(buf[:4])
 	if err != nil {
@@ -231,37 +245,40 @@ func (d *Device) hci_buffered() (uint32, error) {
 	}
 	buffered := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16
 	buffered += 4 // Add HCI header.
-	d.debug("hci_buffered", slog.Uint64("buffered", uint64(buffered)))
+	d.debug("hci_buffered", slog.Uint64("buffered", uint64(buffered)), slog.Uint64("avail", uint64(available)))
 	d.hci_ringbuf_debug()
 	return buffered, nil
 }
 
-func (d *Device) hci_read(b []byte) (int, error) {
+func (d *Device) hci_read(b []byte) (uint32, error) {
 	d.trace("hci_read", slog.Int("inputlen", len(b)))
 	// Calculate length of HCI packet.
-	err := d.hci_read_ringbuf(b[:4], true)
+	err := d.hci_read_ringbuf(b[:4], false)
 	if err != nil {
 		return 0, err
 	}
 	length := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16
-	roundedLen := int(alignup(length, 4)) + 4
-	if roundedLen > len(b) {
+	hciLength := length + 4
+	roundedLength := alignup(hciLength, 4)
+	if len(b) < int(roundedLength) {
+		println("short buffer: length=", length, "hcilen", hciLength, "rlen", roundedLength, "buflen", len(b))
 		return 0, io.ErrShortBuffer
 	}
-	err = d.hci_read_ringbuf(b[4:roundedLen], true)
+	err = d.hci_read_ringbuf(b[:roundedLength], true)
 	if err != nil {
 		return 0, err
 	}
+
 	// Release bus.
 	err = d.bt_toggle_intr()
 	if err != nil {
-		return roundedLen, err
+		return hciLength, err
 	}
 	err = d.bt_bus_release()
 	if err != nil {
-		return roundedLen, err
+		return hciLength, err
 	}
-	return roundedLen, nil
+	return hciLength, nil
 }
 
 // hci_wait_read_buffered blocks until there are at least n bytes ready to read.
@@ -269,7 +286,7 @@ func (d *Device) hci_wait_read_buffered(n int) error {
 	d.trace("hci_wait_read_buffered", slog.Int("n", n))
 	for {
 		// Block on no data available.
-		available, err := d.hci_buffered()
+		available, err := d.hci_available_ringbuf()
 		if int(available) >= n {
 			break
 		} else if err != nil {
@@ -296,7 +313,7 @@ func (d *Device) hci_read_ringbuf(buf []byte, advancePtr bool) error {
 		return err
 	}
 	if advancePtr {
-		return d.hci_advance_read_ringbuf(uint32(len(buf)))
+		return d.hci_advance_read_ringbuf_ptr(uint32(len(buf)))
 	}
 	return nil
 }
@@ -320,8 +337,8 @@ func (d *Device) hci_raw_read_ringbuf(buf []byte) (err error) {
 	return err
 }
 
-// hci_advance_read_ringbuf advances the CYW43439's internal ring buffer read pointer, a.k.a offset.
-func (d *Device) hci_advance_read_ringbuf(n uint32) error {
+// hci_advance_read_ringbuf_ptr advances the CYW43439's internal ring buffer read pointer, a.k.a offset.
+func (d *Device) hci_advance_read_ringbuf_ptr(n uint32) error {
 	newPtr := (d.b2hReadPtr + n) % whd.BTSDIO_FWBUF_SIZE
 	err := d.bp_write32(d.btaddr+whd.BTSDIO_OFFSET_BT2HOST_OUT, newPtr)
 	d.trace("hci_advance_read_ringbuf",
@@ -349,7 +366,7 @@ func (d *Device) hci_ringbuf_debug() (h2btio_bt2hio [4]uint32) {
 }
 
 func (d *Device) hci_write(b []byte) error {
-	d.trace("hci_write:start")
+	d.trace("hci_write:start", slog.Int("len", len(b)))
 	buflen := len(b)
 	alignBuflen := alignup(uint32(buflen), 4)
 	if buflen != int(alignBuflen) {
@@ -357,7 +374,7 @@ func (d *Device) hci_write(b []byte) error {
 	}
 	cmdlen := buflen + 3 - 4 // Add 3 bytes for SDIO header (revise)
 
-	bufWithCmd := u32AsU8(d._sendIoctlBuf[:256/4])
+	bufWithCmd := u32AsU8(d._sendIoctlBuf[:])[:256]
 	if buflen > len(bufWithCmd)-3 {
 		return errHCIPacketTooLarge
 	}
