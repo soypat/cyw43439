@@ -88,7 +88,17 @@ func (d *Device) ReadHCI(b []byte) (int, error) {
 		return 0, err
 	}
 	n, err := d.hci_read(b)
-	return int(n), err
+	if err != nil {
+		return 0, err
+	}
+
+	// remove SDIO header
+	if n < 4 {
+		return 0, io.ErrShortBuffer
+	}
+
+	copy(b, b[3:])
+	return int(n - 3), nil
 }
 
 func (d *Device) bt_mode_enabled() bool {
@@ -367,15 +377,16 @@ func (d *Device) hci_ringbuf_debug() (h2btio_bt2hio [4]uint32) {
 
 func (d *Device) hci_write(b []byte) error {
 	d.trace("hci_write:start", slog.Int("len", len(b)))
-	buflen := len(b)
-	alignBuflen := alignup(uint32(buflen), 4)
-	if buflen != int(alignBuflen) {
-		return errUnalignedBuffer
-	}
-	cmdlen := buflen + 3 - 4 // Add 3 bytes for SDIO header (revise)
+
+	// in BTSDIO, cmdlen does not include header length
+	// https://github.com/raspberrypi/pico-sdk/blob/master/src/rp2_common/pico_cyw43_driver/cybt_shared_bus/cybt_shared_bus.c#L343
+	cmdlen := len(b)
+
+	// Align buffer to 4 bytes, plus 3 bytes for SDIO header.
+	alignBuflen := alignup(uint32(cmdlen)+3, 4)
 
 	bufWithCmd := u32AsU8(d._sendIoctlBuf[:])[:256]
-	if buflen > len(bufWithCmd)-3 {
+	if cmdlen > len(bufWithCmd)-3 {
 		return errHCIPacketTooLarge
 	}
 	bufWithCmd[0] = byte(cmdlen)
