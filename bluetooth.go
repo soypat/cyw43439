@@ -93,12 +93,12 @@ func (d *Device) ReadHCI(b []byte) (int, error) {
 	}
 
 	// remove SDIO header
-	if n < 4 {
+	if len(b) < 4 {
 		return 0, io.ErrShortBuffer
 	}
 
 	copy(b, b[3:])
-	return int(n - 3), nil
+	return int(n), nil
 }
 
 func (d *Device) bt_mode_enabled() bool {
@@ -268,7 +268,7 @@ func (d *Device) hci_read(b []byte) (uint32, error) {
 		return 0, err
 	}
 	length := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16
-	hciLength := length + 4
+	hciLength := length + 4 // Add 3 bytes for SDIO header, plus 1 for packet type
 	roundedLength := alignup(hciLength, 4)
 	if len(b) < int(roundedLength) {
 		println("short buffer: length=", length, "hcilen", hciLength, "rlen", roundedLength, "buflen", len(b))
@@ -282,13 +282,13 @@ func (d *Device) hci_read(b []byte) (uint32, error) {
 	// Release bus.
 	err = d.bt_toggle_intr()
 	if err != nil {
-		return hciLength, err
+		return length, err
 	}
 	err = d.bt_bus_release()
 	if err != nil {
-		return hciLength, err
+		return length, err
 	}
-	return hciLength, nil
+	return length, nil
 }
 
 // hci_wait_read_buffered blocks until there are at least n bytes ready to read.
@@ -382,8 +382,8 @@ func (d *Device) hci_write(b []byte) error {
 	// https://github.com/raspberrypi/pico-sdk/blob/master/src/rp2_common/pico_cyw43_driver/cybt_shared_bus/cybt_shared_bus.c#L343
 	cmdlen := len(b)
 
-	// Align buffer to 4 bytes, plus 3 bytes for SDIO header.
-	alignBuflen := alignup(uint32(cmdlen)+3, 4)
+	// Align buffer to 4 bytes, plus 4 bytes for SDIO header.
+	alignBuflen := alignup(uint32(cmdlen)+4, 4)
 
 	bufWithCmd := u32AsU8(d._sendIoctlBuf[:])[:256]
 	if cmdlen > len(bufWithCmd)-3 {
