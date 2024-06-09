@@ -54,12 +54,13 @@ func (d *spibus) Status() Status {
 	return Status(d.spi.LastStatus())
 }
 
-func (d *Device) initBus() error {
+func (d *Device) initBus(mode opMode) (err error) {
 	// https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/bus.rs#L51
-	d.Reset()
+	d.reset()
+	d.mode = mode
 	retries := 128
 	for {
-		got := d.read32_swapped(whd.SPI_READ_TEST_REGISTER)
+		got := d.read32_swapped(FuncBus, whd.SPI_READ_TEST_REGISTER)
 		if got == whd.TEST_PATTERN {
 			break
 		} else if retries <= 0 {
@@ -69,8 +70,8 @@ func (d *Device) initBus() error {
 	}
 	const RWTestPattern = 0x12345678
 	const spiRegTestRW = 0x18
-	d.write32_swapped(spiRegTestRW, RWTestPattern)
-	got := d.read32_swapped(spiRegTestRW)
+	d.write32_swapped(FuncBus, spiRegTestRW, RWTestPattern)
+	got := d.read32_swapped(FuncBus, spiRegTestRW)
 	if got != RWTestPattern {
 		return errors.New("spi test failed:" + hex32(got) + " wanted " + hex32(RWTestPattern))
 	}
@@ -92,15 +93,15 @@ func (d *Device) initBus() error {
 		// NOTE: embassy uses little endian words and StatusEnablePos.
 		setupValue = (1 << WordLengthPos) | (1 << HiSpeedModePos) | (0 << EndianessBigPos) |
 			(1 << InterruptPolPos) | (1 << WakeUpPos) |
-			(1 << InterruptWithStatusPos) | (1 << StatusEnablePos)
+			(1 << InterruptWithStatusPos) | (1 << StatusEnablePos) | (0x4 << (ResponseDelayPos))
 	)
-	val := d.read32_swapped(0)
+	val := d.read32_swapped(FuncBus, 0)
 
-	d.write32_swapped(whd.SPI_BUS_CONTROL, setupValue)
+	d.write32_swapped(FuncBus, whd.SPI_BUS_CONTROL, setupValue)
 	got8, _ := d.read8(FuncBus, whd.SPI_BUS_CONTROL)
 	d.debug("read back bus ctl", slog.Uint64("got", uint64(got8)))
 
-	got, err := d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
+	got, err = d.read32(FuncBus, whd.SPI_READ_TEST_REGISTER)
 
 	d.debug("current bus ctl", slog.Uint64("val", uint64(val)), slog.Uint64("got", uint64(got)))
 	if err != nil || got != whd.TEST_PATTERN {
@@ -111,6 +112,25 @@ func (d *Device) initBus() error {
 	if err != nil || got != RWTestPattern {
 		return errjoin(errors.New("spi RW test failed:"+hex32(got)), err)
 	}
+	// Bus Read/write operations validated. Proceed to configure what remains of bus.
+
+	err = d.write8(FuncBus, whd.SPI_RESP_DELAY_F1, whd.BUS_SPI_BACKPLANE_READ_PADD_SIZE)
+	if err != nil {
+		return err
+	}
+
+	// Make sure interrupt bits are clear. TODO Is this necessary?
+	const irqclr = irqDATA_UNAVAILABLE | irqCOMMAND_ERROR | irqDATA_ERROR | irqF1_OVERFLOW
+	d.write8(FuncBus, whd.SPI_INTERRUPT_REGISTER, uint8(irqclr))
+
+	// Enable selection of interrupts.
+	const defaultIrqSet = irqF2_F3_FIFO_RD_UNDERFLOW | irqF2_F3_FIFO_WR_OVERFLOW |
+		irqCOMMAND_ERROR | irqDATA_ERROR | irqF2_PACKET_AVAILABLE | irqF1_OVERFLOW
+	irqSet := uint16(defaultIrqSet)
+	if d.bt_mode_enabled() {
+		irqSet |= uint16(irqF1_INTR)
+	}
+	d.write16(FuncBus, whd.SPI_INTERRUPT_REGISTER, irqSet)
 	return nil
 }
 
@@ -181,7 +201,7 @@ func coreaddress(coreID uint8) (v uint32) {
 	switch coreID {
 	case whd.CORE_WLAN_ARM:
 		v = whd.WRAPPER_REGISTER_OFFSET + whd.WLAN_ARMCM3_BASE_ADDRESS
-	case whd.CORE_SOCRAM:
+	case whd.CORE_SOCSRAM:
 		v = whd.WRAPPER_REGISTER_OFFSET + whd.SOCSRAM_BASE_ADDRESS
 	default:
 		panic("bad core id")
@@ -255,9 +275,8 @@ func (d *Device) wlan_write(data []uint32, plen uint32) (err error) {
 func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 	// d.trace("bp_read:start")
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
-	alignedLen := align(uint32(len(data)), 4)
+	alignedLen := alignup(uint32(len(data)), 4)
 	data = data[:alignedLen]
-	// buf := d._iovarBuf[:maxTxSize/4+1]
 	var buf [maxTxSize/4 + 1]uint32 // TODO: heapalloc replace.
 	buf8 := unsafeAsSlice[uint32, byte](buf[:])
 	for len(data) > 0 {
@@ -288,19 +307,19 @@ func (d *Device) bp_read(addr uint32, data []byte) (err error) {
 
 // bp_writestring exists to leverage static string data which is always put in flash.
 func (d *Device) bp_writestring(addr uint32, data string) error {
-	slice := unsafe.Slice(unsafe.StringData(data), align(uint32(len(data)), 4))
+	slice := unsafe.Slice(unsafe.StringData(data), alignup(uint32(len(data)), 4))
 	return d.bp_write(addr, slice[:len(data)])
 }
 
 func (d *Device) bp_write(addr uint32, data []byte) (err error) {
 	if addr%4 != 0 {
-		return errors.New("addr must be 4-byte aligned")
+		return errUnalignedBuffer
 	}
-	d.debug("bp_write", slog.Uint64("addr", uint64(addr)))
+	d.debug("bp_write", slog.Uint64("addr", uint64(addr)), slog.Int("len", len(data)))
 
 	const maxTxSize = whd.BUS_SPI_MAX_BACKPLANE_TRANSFER_SIZE
 	// var buf [maxTxSize]byte
-	alignedLen := align(uint32(len(data)), 4)
+	alignedLen := alignup(uint32(len(data)), 4)
 	data = data[:alignedLen]
 	buf := d._iovarBuf[:maxTxSize/4+1]
 	// var buf [maxTxSize/4 + 1]uint32 // TODO(soypat): heapalloc replace.
@@ -450,15 +469,15 @@ func (d *Device) readn(fn Function, addr, size uint32) (result uint32, err error
 	return buf[padding], err
 }
 
-func (d *Device) read32_swapped(addr uint32) uint32 {
-	cmd := cmd_word(false, true, FuncBus, addr, 4)
+func (d *Device) read32_swapped(fn Function, addr uint32) uint32 {
+	cmd := cmd_word(false, true, fn, addr, 4)
 	cmd = swap16(cmd)
 	buf := d.rwBuf[:1]
 	d.spi.cmd_read(cmd, buf)
 	return swap16(buf[0])
 }
-func (d *Device) write32_swapped(addr uint32, value uint32) {
-	cmd := cmd_word(true, true, FuncBus, addr, 4)
+func (d *Device) write32_swapped(fn Function, addr uint32, value uint32) {
+	cmd := cmd_word(true, true, fn, addr, 4)
 	d.rwBuf = [2]uint32{swap16(value), 0}
 	d.spi.cmd_write(swap16(cmd), d.rwBuf[:1])
 }
@@ -492,7 +511,7 @@ func unsafeAsSlice[F, T constraints.Unsigned](buf []F) []T {
 		panic("unaligned pointer")
 	}
 	// i.e: byte->uint32, expands slice.
-	return unsafe.Slice((*T)(ptr), align(uint32(len(buf)/div), uint32(div)))
+	return unsafe.Slice((*T)(ptr), alignup(uint32(len(buf)/div), uint32(div)))
 }
 
 //go:inline

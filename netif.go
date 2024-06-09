@@ -2,6 +2,7 @@ package cyw43439
 
 import (
 	"errors"
+	"log/slog"
 	"net"
 
 	"github.com/soypat/cyw43439/whd"
@@ -15,8 +16,11 @@ func (d *Device) MTU() int { return MTU }
 //
 // [MAC address]: https://en.wikipedia.org/wiki/MAC_address
 func (d *Device) HardwareAddr6() ([6]byte, error) {
-	d.lock()
-	defer d.unlock()
+	err := d.acquire(modeWifi)
+	defer d.release()
+	if err != nil {
+		return [6]byte{}, err
+	}
 	if d.mac == [6]byte{} {
 		return [6]byte{}, errors.New("hardware address not acquired")
 	}
@@ -26,8 +30,11 @@ func (d *Device) HardwareAddr6() ([6]byte, error) {
 // PollOne attempts to read a packet from the device. Returns true if a packet
 // was read, false if no packet was available.
 func (d *Device) PollOne() (bool, error) {
-	d.lock()
-	defer d.unlock()
+	err := d.acquire(modeWifi)
+	defer d.release()
+	if err != nil {
+		return false, err
+	}
 	_, cmd, err := d.tryPoll(d._rxBuf[:])
 	if err == errNoF2Avail {
 		return false, nil
@@ -38,22 +45,31 @@ func (d *Device) PollOne() (bool, error) {
 // RecvEthHandle sets handler for receiving Ethernet pkt
 // If set to nil then incoming packets are ignored.
 func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
-	d.lock()
-	defer d.unlock()
+	err := d.acquire(modeWifi)
+	defer d.release()
+	if err != nil {
+		d.logerr("cyw:recveth", slog.String("err", err.Error()))
+	}
 	d.rcvEth = handler
 }
 
 // SendEth sends an Ethernet packet over the current interface.
 func (d *Device) SendEth(pkt []byte) error {
-	d.lock()
-	defer d.unlock()
+	err := d.acquire(modeWifi)
+	defer d.release()
+	if err != nil {
+		return err
+	}
 	return d.tx(pkt)
 }
 
 // NetFlags returns the current network flags for the device.
 func (d *Device) NetFlags() (flags net.Flags) {
-	d.lock()
-	defer d.unlock()
+	err := d.acquire(modeWifi)
+	defer d.release()
+	if err != nil {
+		return 0
+	}
 	// Define net.Flags locally since not all Tinygo versions have them fully defined.
 	const (
 		FlagUp           net.Flags = 1 << iota // interface is administratively up

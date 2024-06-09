@@ -134,7 +134,7 @@ func (d *Device) tx(packet []byte) (err error) {
 
 	copy(buf8[whd.SDPCM_HEADER_LEN+PADDING_SIZE+whd.BDC_HEADER_LEN:], packet)
 
-	return d.wlan_write(buf[:align(uint32(totalLen), 4)/4], uint32(totalLen))
+	return d.wlan_write(buf[:alignup(uint32(totalLen), 4)/4], uint32(totalLen))
 }
 
 func (d *Device) get_iovar(VAR string, iface whd.IoctlInterface) (_ uint32, err error) {
@@ -285,7 +285,7 @@ func (d *Device) sendIoctl(kind uint8, cmd whd.SDPCMCommand, iface whd.IoctlInte
 
 	copy(buf8[whd.SDPCM_HEADER_LEN+whd.CDC_HEADER_LEN:], data)
 
-	return d.wlan_write(buf[:align(totalLen, 4)/4], totalLen)
+	return d.wlan_write(buf[:alignup(totalLen, 4)/4], totalLen)
 }
 
 // handle_irq waits for IRQ on F2 packet available
@@ -311,10 +311,10 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 // TODO get real hw interrupts working and ditch polling
 func (d *Device) irqPoll() {
 	for {
-		d.lock()
+		d.acquire(0)
 		d.log_read()
 		d.handle_irq(d._rxBuf[:])
-		d.unlock()
+		d.release()
 		// Avoid busy waiting on idle.  Trade off here is time sleeping
 		// is time added to receive latency.
 		time.Sleep(10 * time.Millisecond)

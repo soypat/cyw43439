@@ -143,7 +143,7 @@ func (Int Interrupts) String() (s string) {
 }
 
 func GetCLM(firmware []byte) []byte {
-	clmAddr := align(uint32(len(firmware)), 512)
+	clmAddr := alignup(uint32(len(firmware)), 512)
 	if uint32(cap(firmware)) < clmAddr+clmLen {
 		panic("firmware slice too small for CLM")
 	}
@@ -226,43 +226,43 @@ const (
 	// Custom, officially unsupported mode. Use at your own risk.
 	// All power-saving features set to their max at only a marginal decrease in power consumption
 	// as oppposed to `Aggressive`.
-	SuperSave = iota
+	pmSuperSave powerManagementMode = iota
 
-	// Aggressive power saving mode.
-	Aggressive
+	// pmAggressive power saving mode.
+	pmAggressive
 
 	// The default mode.
-	PowerSave
+	pmPowerSave
 
-	// Performance is prefered over power consumption but still some power is conserved as opposed to
+	// pmPerformance is prefered over power consumption but still some power is conserved as opposed to
 	// `None`.
-	Performance
+	pmPerformance
 
 	// Unlike all the other PM modes, this lowers the power consumption at all times at the cost of
 	// a much lower throughput.
-	ThroughputThrottling
+	pmThroughputThrottling
 
 	// No power management is configured. This consumes the most power.
-	None
+	pmNone
 )
 
 func (pm powerManagementMode) IsValid() bool {
-	return pm <= None
+	return pm <= pmNone
 }
 
 func (pm powerManagementMode) String() string {
 	switch pm {
-	case SuperSave:
+	case pmSuperSave:
 		return "SuperSave"
-	case Aggressive:
+	case pmAggressive:
 		return "Aggressive"
-	case PowerSave:
+	case pmPowerSave:
 		return "PowerSave"
-	case Performance:
+	case pmPerformance:
 		return "Performance"
-	case ThroughputThrottling:
+	case pmThroughputThrottling:
 		return "ThroughputThrottling"
-	case None:
+	case pmNone:
 		return "None"
 	default:
 		return "unknown"
@@ -270,13 +270,13 @@ func (pm powerManagementMode) String() string {
 }
 func (pm powerManagementMode) sleep_ret_ms() uint16 {
 	switch pm {
-	case SuperSave:
+	case pmSuperSave:
 		return 2000
-	case Aggressive:
+	case pmAggressive:
 		return 2000
-	case PowerSave:
+	case pmPowerSave:
 		return 200
-	case Performance:
+	case pmPerformance:
 		return 20
 	default: // ThroughputThrottling, None
 		return 0 // value doesn't matter
@@ -285,13 +285,13 @@ func (pm powerManagementMode) sleep_ret_ms() uint16 {
 
 func (pm powerManagementMode) beacon_period() uint8 {
 	switch pm {
-	case SuperSave:
+	case pmSuperSave:
 		return 255
-	case Aggressive:
+	case pmAggressive:
 		return 1
-	case PowerSave:
+	case pmPowerSave:
 		return 1
-	case Performance:
+	case pmPerformance:
 		return 1
 	default: // ThroughputThrottling, None
 		return 0 // value doesn't matter
@@ -300,13 +300,13 @@ func (pm powerManagementMode) beacon_period() uint8 {
 
 func (pm powerManagementMode) dtim_period() uint8 {
 	switch pm {
-	case SuperSave:
+	case pmSuperSave:
 		return 255
-	case Aggressive:
+	case pmAggressive:
 		return 1
-	case PowerSave:
+	case pmPowerSave:
 		return 1
-	case Performance:
+	case pmPerformance:
 		return 1
 	default: // ThroughputThrottling, None
 		return 0 // value doesn't matter
@@ -315,13 +315,13 @@ func (pm powerManagementMode) dtim_period() uint8 {
 
 func (pm powerManagementMode) assoc() uint8 {
 	switch pm {
-	case SuperSave:
+	case pmSuperSave:
 		return 255
-	case Aggressive:
+	case pmAggressive:
 		return 10
-	case PowerSave:
+	case pmPowerSave:
 		return 10
-	case Performance:
+	case pmPerformance:
 		return 1
 	default: // ThroughputThrottling, None
 		return 0 // value doesn't matter
@@ -331,9 +331,9 @@ func (pm powerManagementMode) assoc() uint8 {
 // mode returns the WHD's internal mode number.
 func (pm powerManagementMode) mode() uint8 {
 	switch pm {
-	case ThroughputThrottling:
+	case pmThroughputThrottling:
 		return 1
-	case None:
+	case pmNone:
 		return 0
 	default:
 		return 2
