@@ -34,19 +34,14 @@ func (d *deviceHCI) Read(b []byte) (int, error) {
 }
 
 func (d *deviceHCI) Write(b []byte) (int, error) {
-	// if len(b)%4 != 0 && len(b) < len(d.buf4) {
-	// 	// Ensure length 4 on buffer to WriteHCI.
-	// 	d.mu.Lock()
-	// 	copy(d.buf4[:], b)
-	// 	n, err := d.dev.WriteHCI(d.buf4[:alignup(uint(len(b)), 4)])
-	// 	d.mu.Unlock()
-	// 	return n, err
-	// }
 	return d.dev.WriteHCI(b)
 }
 
 // HCIReaderWriter returns a io.ReadWriter interface which wraps the BufferedHCI, WriteHCI and ReadHCI methods.
-func (d *Device) HCIReaderWriter() (io.ReadWriter, error) {
+func (d *Device) HCIReadWriter() (interface {
+	io.ReadWriter
+	Buffered() int
+}, error) {
 	if !d.bt_mode_enabled() {
 		return nil, errors.New("need to enable bluetooth in Init to use HCI interface")
 	}
@@ -219,7 +214,6 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 				end = alignedDataBufferIdx
 			}
 			chunk := bufferToWrite[offset:end]
-			// d.trace("chunk-write", slog.Uint64("idx", uint64(i)), slog.Uint64("offset", uint64(offset)), slog.Uint64("end", uint64(end)), slog.Uint64("len", uint64(end-offset)))
 			err := d.bp_write(dstStartAddr+offset, chunk)
 			if err != nil {
 				return err
