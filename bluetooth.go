@@ -19,6 +19,7 @@ var (
 	errZeroBTAddr             = errors.New("cyw: btaddr=0")
 	errBTInvalidVersionLength = errors.New("invalid bt version length")
 	errBTWatermark            = errors.New("bt watermark set failed")
+	errLargeHCIPacket         = errors.New("cyw: HCI packet too large for buffer")
 )
 
 type deviceHCI struct {
@@ -266,7 +267,7 @@ func (d *Device) hci_read(b []byte) (uint32, error) {
 	roundedLength := alignup(hciLength, 4)
 	if len(b) < int(roundedLength) {
 		println("short buffer: length=", length, "hcilen", hciLength, "rlen", roundedLength, "buflen", len(b))
-		return 0, io.ErrShortBuffer
+		return 0, errLargeHCIPacket
 	}
 	err = d.hci_read_ringbuf(b[:roundedLength], true)
 	if err != nil {

@@ -10,7 +10,10 @@ import (
 	"github.com/soypat/seqs/eth"
 )
 
-var errShortBufferCDC = errors.New("short CDC.Parse buffer")
+var (
+	errShortBufferCDC = errors.New("short CDC.Parse buffer")
+	errBadSPCM        = errors.New("SDPCM size exceeds buffer")
+)
 
 // SDPCM header errors.
 var (
@@ -78,7 +81,7 @@ func (s *SDPCMHeader) Put(order binary.ByteOrder, dst []byte) {
 
 func (s *SDPCMHeader) Parse(packet []byte) ([]byte, error) {
 	if len(packet) < int(s.Size) {
-		return nil, io.ErrShortBuffer
+		return nil, errBadSPCM
 	}
 	if s.Size != ^s.SizeCom {
 		return nil, errSDPCMHeaderSizeComplementMismatch

@@ -59,9 +59,9 @@ func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.Re
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: slog.LevelDebug - 4,
 	}))
-
+	time.Sleep(time.Second)
 	_, stack, devlocal, err := common.SetupWithDHCP(common.SetupConfig{
 		Hostname: "TCP-pico",
 		Logger:   logger,
