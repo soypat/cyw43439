@@ -12,7 +12,7 @@ const (
 	// currentLevel decides which log levels are printed.
 	// A higher currentLevel means less logs (less verbose).
 	defaultLevel slog.Level = levelTrace + 1
-	levelTrace   slog.Level = slog.LevelDebug - 1
+	levelTrace   slog.Level = slog.LevelDebug - 2
 	deviceLevel  slog.Level = slog.LevelDebug - 1
 
 	// heapAllocDebugging enables heap allocation debugging. So Prints do not use the heap.

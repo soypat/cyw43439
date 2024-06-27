@@ -539,7 +539,7 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 			d.state = linkStateFailed
 		}
 	case whd.EvLINK:
-		if aePacket.Message.Flags == 0 {
+		if aePacket.Message.Flags&^1 == 0 { // 1 set on REASSOC.
 			d.state = linkStateWaitForReconnect // Disconnected, but will try to reconnect.
 		}
 	case whd.EvJOIN:

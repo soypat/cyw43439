@@ -59,7 +59,7 @@ func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.Re
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelDebug - 1,
+		Level: slog.LevelDebug - 2,
 	}))
 	time.Sleep(time.Second)
 	_, stack, devlocal, err := common.SetupWithDHCP(common.SetupConfig{
