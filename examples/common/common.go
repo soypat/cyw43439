@@ -47,9 +47,11 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 
 	dev := cyw43439.NewPicoWDevice()
 	wificfg := cyw43439.DefaultWifiConfig()
+	wificfg.Logger = logger
 	// cfg.Logger = logger // Uncomment to see in depth info on wifi device functioning.
 	logger.Info("initializing pico W device...")
 	devInitTime := time.Now()
+
 	err = dev.Init(wificfg)
 	if err != nil {
 		return nil, nil, nil, errors.New("wifi init failed:" + err.Error())

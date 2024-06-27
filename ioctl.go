@@ -324,7 +324,9 @@ func (d *Device) irqPoll() {
 // f2PacketAvail checks if a packet is available, and if so, returns
 // the packet length.
 func (d *Device) f2PacketAvail() (bool, uint16) {
-	d.trace("f2PacketAvail:start")
+	if d._traceenabled {
+		d.logattrs(levelTrace-1, "f2PacketAvail:start") // Spammy, log one below trace.
+	}
 	// First, check cached status from previous cmd_read|cmd_write
 	status := d.spi.Status()
 	if status.F2PacketAvailable() {
@@ -397,7 +399,9 @@ func (d *Device) check_status(buf []uint32) error {
 // If no packet is available then it returns errNoPacketAvail as the error.
 // If an error is returned it will return whd.UNKNOWN_HEADER as the header type.
 func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
-	d.trace("tryPoll:start")
+	if d._traceenabled {
+		d.logattrs(levelTrace-1, "tryPoll:start") // Very spammy message, log one below trace.
+	}
 	avail, length := d.f2PacketAvail()
 	if !avail {
 		return nil, whd.UNKNOWN_HEADER, errNoF2Avail
@@ -408,17 +412,20 @@ func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
 	}
 	buf8 := u32AsU8(buf[:])
 	offset, plen, hdrType, err := d.rx(buf8[:length])
-
-	if err == whd.ErrInvalidEtherType || err == errBDCInvalidLength { // Both result from event packet parsing.
-		// Spurious Poll error correction.
-		// TODO(soypat): get to the bottom of this-
-		// why are we getting these errors exclusively during first IO operations?
-		if d.logenabled(slog.LevelDebug) {
-			d.debug("tryPoll:ignore_spurious", slog.String("err", err.Error()))
+	if err != nil {
+		spuriousError := err == whd.ErrInvalidEtherType || err == errBDCInvalidLength || err == errEventBufferTooSmall
+		if spuriousError {
+			// Spurious Poll error correction.
+			// TODO(soypat): get to the bottom of this-
+			// why are we getting these errors exclusively during first IO operations?
+			// errEventBufferTooSmall is causing events to be missed, may cause deadlock in spurious down-link state.
+			if d.logenabled(slog.LevelDebug) {
+				d.debug("tryPoll:ignore_spurious", slog.String("err", err.Error()))
+			}
+			err = nil
+		} else if d.logenabled(slog.LevelError) {
+			d.logerr("tryPoll:rx", slog.Uint64("plen", uint64(plen)), slog.String("err", err.Error()))
 		}
-		err = nil
-	} else if err != nil && d.logenabled(slog.LevelError) {
-		d.logerr("tryPoll:rx", slog.Uint64("plen", uint64(plen)), slog.String("err", err.Error()))
 	}
 	return buf8[offset : offset+plen], hdrType, err
 }
@@ -426,7 +433,8 @@ func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
 func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, err error) {
 	d.trace("rx:start")
 	//reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/runner.rs#L347
-	if len(packet) < whd.SDPCM_HEADER_LEN+whd.BDC_HEADER_LEN+1 {
+	const requiredPacketSize = whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN + 1
+	if len(packet) < requiredPacketSize {
 		return 0, 0, noPacket, io.ErrShortBuffer
 	}
 
@@ -476,8 +484,9 @@ func (d *Device) rxControl(packet []byte) (offset, plen uint16, err error) {
 }
 
 var (
-	errBDCInvalidLength = errors.New("BDC header invalid length")
-	errPacketSmol       = errors.New("asyncEvent packet too small for parsing")
+	errEventBufferTooSmall = errors.New("event buffer too small")
+	errBDCInvalidLength    = errors.New("BDC header invalid length")
+	errPacketSmol          = errors.New("asyncEvent packet too small for parsing")
 )
 
 func (d *Device) rxEvent(packet []byte) (err error) {
@@ -494,7 +503,9 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 		return errBDCInvalidLength
 	}
 	bdcPacket := packet[packetStart:]
-
+	if len(bdcPacket) < 72 {
+		return errEventBufferTooSmall
+	}
 	// Split BDC payload into Event header:payload.
 	// After this point we are in big endian (network order).
 	aePacket, err = whd.DecodeEventPacket(binary.BigEndian, bdcPacket)
