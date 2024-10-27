@@ -189,8 +189,8 @@ func (d *Device) wait_for_join(ssid string) (err error) {
 			return err
 		}
 		// Keep trying until we get a link up/auth failed/timeout.
-		keepGoing = d.state == linkStateDown && d.state != linkStateUpWaitForSSID &&
-			time.Until(deadline) > 0
+		stateWait := d.state == linkStateDown || d.state == linkStateUpWaitForSSID
+		keepGoing = stateWait && time.Until(deadline) > 0
 	}
 	switch d.state {
 	case linkStateUp:
