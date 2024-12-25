@@ -12,7 +12,7 @@ tinygo flash -target=pico -stack-size=8kb -monitor  ./examples/blinky
 
 1. Clone this repository
 
-2. Rename [`examples/common/secrets.go.template`](examples/common/secrets.go.template) to have the `.go` extension and edit the contents with `ssid` and `pass` strings set to your WIFI SSID and Password, respecively. If `pass` is not set then an open network is assumed.
+2. Create ssid.text and password.text files in the [`examples/common`](examples/common) directory. Write your SSID into ssid.text and WiFi password into password.text. Do not add final newlines to the files. If the password is empty then an open network is assumed.
 
 3. Run any of the examples in the [`examples`](./examples) directory
 
