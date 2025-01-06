@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"time"
 
+	_ "embed"
+
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/seqs/eth/dhcp"
 	"github.com/soypat/seqs/eth/dns"
@@ -27,6 +29,15 @@ type SetupConfig struct {
 	// Number of TCP ports to open for the stack.
 	TCPPorts uint16
 }
+
+var (
+	// Put the SSID and password text in ssid.text and password.text.
+	//
+	//go:embed ssid.text
+	ssid string
+	//go:embed password.text
+	pass string
+)
 
 func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw43439.Device, error) {
 	cfg.UDPPorts++ // Add extra UDP port for DHCP client.
@@ -68,7 +79,7 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 		if err == nil {
 			break
 		}
-		logger.Error("wifi join faled", slog.String("err", err.Error()))
+		logger.Error("wifi join failed", slog.String("err", err.Error()))
 		time.Sleep(5 * time.Second)
 	}
 	mac, _ := dev.HardwareAddr6()
