@@ -76,7 +76,7 @@ func (d *Device) WriteHCI(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// WriteHCI reads from HCI ring buffer internal to the CYW43439. Used for bluetooth.
+// ReadHCI reads from HCI ring buffer internal to the CYW43439. Used for bluetooth.
 func (d *Device) ReadHCI(b []byte) (int, error) {
 	err := d.acquire(modeBluetooth)
 	defer d.release()
@@ -277,13 +277,13 @@ func (d *Device) hci_read(b []byte) (uint32, error) {
 	// Release bus.
 	err = d.bt_toggle_intr()
 	if err != nil {
-		return length, err
+		return hciLength, err
 	}
 	err = d.bt_bus_release()
 	if err != nil {
-		return length, err
+		return hciLength, err
 	}
-	return length, nil
+	return hciLength, nil
 }
 
 // hci_wait_read_buffered blocks until there are at least n bytes ready to read.
