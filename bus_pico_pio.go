@@ -1,9 +1,10 @@
-//go:build !cy43nopio && rp2040
+//go:build !cy43nopio && (rp2040 || rp2350)
 
 package cyw43439
 
 import (
 	"encoding/binary"
+
 	"machine"
 
 	pio "github.com/tinygo-org/pio/rp2-pio"
