@@ -4,7 +4,6 @@ package cyw43439
 
 import (
 	"encoding/binary"
-
 	"machine"
 
 	pio "github.com/tinygo-org/pio/rp2-pio"
