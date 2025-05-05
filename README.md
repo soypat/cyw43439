@@ -1,5 +1,5 @@
 # cyw43439
-Driver for the Wifi+bluetooth integrated circuit on the pico.
+Heapless driver for the Wifi+bluetooth integrated circuit on the pico.
 
 ## Examples
 To run the blinky example:
