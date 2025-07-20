@@ -2,6 +2,8 @@ github.com/soypat/lneto v0.0.0-20250714224829-61c66a2e580b h1:58Jj5exSwID9Jm70Dd
 github.com/soypat/lneto v0.0.0-20250714224829-61c66a2e580b/go.mod h1:g/8Lk+hIsMZydyWDJjK2YfsCuG6jA5mWCO6U+4S7w1U=
 github.com/soypat/lneto v0.0.0-20250714230426-ad22c61b2891 h1:9rCNElngZT/xZnrsy/cXrHPh1P2x+RjTX1+6RQDg8w4=
 github.com/soypat/lneto v0.0.0-20250714230426-ad22c61b2891/go.mod h1:g/8Lk+hIsMZydyWDJjK2YfsCuG6jA5mWCO6U+4S7w1U=
+github.com/soypat/lneto v0.0.0-20250720002239-dd1a15b206e2 h1:zhNFaNMWuE6EMGDfEL+bz8SpN326dEtl+JnTaalhEYo=
+github.com/soypat/lneto v0.0.0-20250720002239-dd1a15b206e2/go.mod h1:g/8Lk+hIsMZydyWDJjK2YfsCuG6jA5mWCO6U+4S7w1U=
 github.com/soypat/natiu-mqtt v0.6.0 h1:ddrem9iAqFYtQOx2C7AhCizhPXXmGZs1T5fkvLroPO4=
 github.com/soypat/natiu-mqtt v0.6.0/go.mod h1:xEta+cwop9izVCW7xOx2W+ct9PRMqr0gNVkvBPnQTc4=
 github.com/soypat/saleae v0.0.0-20230607000858-72cbd6ef4f23 h1:oxtjmxCkdYGMwo/VSt3+zllqB117yxwH4oUC8unTbqs=
