@@ -31,15 +31,21 @@ func main() {
 	println("starting program")
 
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: slog.LevelInfo,
 	}))
 	devcfg := cyw43439.DefaultWifiConfig()
 	devcfg.Logger = logger
-	_, err = stack.SetupPicoWifiWithDHCPv4(credentials.SSID(), credentials.Password(), requestedIP, devcfg)
+	dev, err := stack.SetupPicoWifi(credentials.SSID(), credentials.Password(), devcfg)
 	if err != nil {
 		panic(err)
 	}
-	results, err := stack.ResultDHCP()
+	go loopForeverStack(dev, &stack)
+	const (
+		timeout = 6 * time.Second
+		retries = 3
+	)
+	rstack := stack.StackRetrying()
+	results, err := rstack.DoDHCPv4(requestedIP, timeout, retries)
 	if err != nil {
 		panic(err)
 	}
@@ -56,4 +62,13 @@ func main() {
 		slog.Uint64("renew[seconds]", uint64(results.TRenewal)),
 		slog.Any("DNS-servers", results.DNSServers),
 	)
+}
+
+func loopForeverStack(dev *cyw43439.Device, stack *cywnet.StackAsync) {
+	for {
+		send, recv, _ := stack.RecvAndSend(dev, nil)
+		if send == 0 && recv == 0 {
+			time.Sleep(5 * time.Millisecond) // No data to send or receive, sleep for a bit.
+		}
+	}
 }

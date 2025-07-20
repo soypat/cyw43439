@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/soypat/cyw43439"
-	"github.com/soypat/lneto/dhcpv4"
 )
 
 func (stack *StackAsync) SetupPicoWifiWithDHCPv4(ssid, password string, requestIPv4 [4]byte, cfg cyw43439.Config) (*cyw43439.Device, error) {
@@ -18,28 +17,21 @@ func (stack *StackAsync) SetupPicoWifiWithDHCPv4(ssid, password string, requestI
 	if err != nil {
 		return dev, err
 	}
-	err = stack.StartDHCPv4Request(requestIPv4)
+	stackBlocking := stack.StackRetrying()
+	_, err = stackBlocking.DoDHCPv4(requestIPv4, 6*time.Second, 2) // Do 2 DHCP retries
 	if err != nil {
 		return dev, err
 	}
-	const timeout = 10 * time.Second
-	deadline := time.Now().Add(timeout)
-	requested := false
-	for {
-		if time.Since(deadline) > 0 {
-			return dev, errors.New("DHCP timed out")
-		}
-		_, _, _ = stack.RecvAndSend(dev, stack.sendbuf)
-		state := stack.dhcp.State()
-		requested = requested || state == dhcpv4.StateRequesting
-		if requested && state == dhcpv4.StateInit {
-			return dev, errors.New("DHCP NACK")
-		} else if state == dhcpv4.StateBound {
-			break // DHCP done succesfully.
-		}
-		time.Sleep(timeout / 1000)
+	err = stack.AssimilateDHCPResults()
+	if err != nil {
+		return dev, err
 	}
-
+	// Do 3 ARP requests before giving up.
+	routerHW, err := stackBlocking.DoResolveHardwareAddress6(stack.dhcpResults.Router, 3*time.Second, 10)
+	if err != nil {
+		return dev, err
+	}
+	stack.link.SetGateway6(routerHW)
 	return dev, nil
 }
 
@@ -67,7 +59,7 @@ func (stack *StackAsync) SetupPicoWifi(ssid, password string, cfg cyw43439.Confi
 		return nil, err
 	}
 	dev.RecvEthHandle(func(pkt []byte) error {
-		return stack.Demux(pkt, 0)
+		return stack.link.Demux(pkt, 0)
 	})
 	err = stack.SetHardwareAddress(mac)
 	if err != nil {

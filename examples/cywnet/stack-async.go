@@ -34,10 +34,11 @@ type StackAsync struct {
 	dns     dns.Client
 	ednsopt dns.Resource
 	lookup  dns.Message
-
-	ntpUDP  internet.StackUDPPort
-	ntp     ntp.Client
 	dnssv   netip.Addr
+
+	ntpUDP internet.StackUDPPort
+	ntp    ntp.Client
+
 	sysprec int8 // NTP system precision.
 
 	prng     uint32
@@ -253,6 +254,7 @@ func (s *StackAsync) ResultLookupIP(host string) ([]netip.Addr, bool, error) {
 func (s *StackAsync) StartDHCPv4Request(request [4]byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.dhcp.Reset()
 	xid := s.Prand32()
 	err := s.dhcp.BeginRequest(xid, dhcpv4.RequestConfig{
 		RequestedAddr:      request,
@@ -302,6 +304,7 @@ func (s *StackAsync) StartResolveHardwareAddress6(ip netip.Addr) error {
 	return s.arp.StartQuery(addr[:])
 }
 
+// ResultResolveHardwareAddress6
 func (s *StackAsync) ResultResolveHardwareAddress6(ip netip.Addr) (hw [6]byte, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -337,6 +340,26 @@ func (s *StackAsync) ResultDHCP() (*DHCPResults, error) {
 		return nil, err
 	}
 	return &s.dhcpResults, nil
+}
+
+// AssimilateDHCPResults sets the stack's following parameters:
+//   - IPv4 address.
+//   - DNS server.
+func (stack *StackAsync) AssimilateDHCPResults() error {
+	stack.mu.Lock()
+	defer stack.mu.Unlock()
+	err := stack.populateDHCPResults()
+	if err != nil {
+		return err
+	}
+	err = stack.ip.SetAddr(addr4(stack.dhcp.AssignedAddr()))
+	if err != nil {
+		return err
+	}
+	if len(stack.dhcpResults.DNSServers) > 0 && !stack.dnssv.IsValid() {
+		stack.dnssv = stack.dhcpResults.DNSServers[0]
+	}
+	return nil
 }
 
 func (s *StackAsync) populateDHCPResults() error {
