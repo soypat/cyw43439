@@ -14,17 +14,20 @@ import (
 	"github.com/soypat/lneto/ethernet"
 	"github.com/soypat/lneto/internet"
 	"github.com/soypat/lneto/ntp"
+	"github.com/soypat/lneto/tcp"
 )
 
 type StackAsync struct {
 	mu       sync.Mutex
 	logger   *slog.Logger
 	hostname string
+	clientID string
 	link     internet.StackEthernet
 	ip       internet.StackIP
 	arp      arp.Handler
 	udps     internet.StackPorts
 	tcps     internet.StackPorts
+	tcpconns []tcp.Conn
 
 	dhcpUDP     internet.StackUDPPort
 	dhcp        dhcpv4.Client
@@ -137,6 +140,9 @@ func (s *StackAsync) Reset(cfg StackConfig) error {
 	}
 	var timebuf [32]time.Time
 	s.sysprec = ntp.CalculateSystemPrecision(time.Now, timebuf[:])
+	if s.clientID == "" {
+		s.clientID = "tinygo-" + s.hostname
+	}
 	return nil
 }
 
@@ -188,6 +194,34 @@ func (s *StackAsync) SetHardwareAddress(hw [6]byte) error {
 	defer s.mu.Unlock()
 	s.link.SetHardwareAddr6(hw)
 	return s.resetARP()
+}
+
+var errNoTCPConnsAvail = errors.New("all allocated TCP connections busy")
+
+func (s *StackAsync) DialTCP(localPort uint16, addrp netip.AddrPort) (conn *tcp.Conn, err error) {
+	for i := range s.tcpconns {
+		maybeFreeConn := &s.tcpconns[i]
+		state := conn.State()
+		if state.IsClosed() {
+			conn = maybeFreeConn
+			break // Can be used!
+		}
+	}
+	if conn == nil {
+		return nil, errNoTCPConnsAvail
+	}
+	conn.Abort() // Conn is closed, safe to abort.
+	err = conn.OpenActive(localPort, addrp, tcp.Value(s.Prand32()))
+	if err != nil {
+		conn.Abort()
+		return nil, err
+	}
+	err = s.tcps.Register(conn)
+	if err != nil {
+		conn.Abort()
+		return nil, err
+	}
+	return conn, nil
 }
 
 var errNoDNSServer = errors.New("no DNS server- did DHCP complete? You can set a predetermined DNS server in Stack configuration")
@@ -260,6 +294,7 @@ func (s *StackAsync) StartDHCPv4Request(request [4]byte) error {
 		RequestedAddr:      request,
 		ClientHardwareAddr: s.link.HardwareAddr6(),
 		Hostname:           s.hostname,
+		ClientID:           s.clientID,
 	})
 	if err != nil {
 		return err
