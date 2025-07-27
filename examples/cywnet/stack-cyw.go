@@ -12,36 +12,12 @@ import (
 	"github.com/soypat/cyw43439"
 )
 
-func (stack *StackAsync) SetupPicoWifiWithDHCPv4(ssid, password string, requestIPv4 [4]byte, cfg cyw43439.Config) (*cyw43439.Device, error) {
-	dev, err := stack.SetupPicoWifi(ssid, password, cfg)
-	if err != nil {
-		return dev, err
-	}
-	stackBlocking := stack.StackRetrying()
-	_, err = stackBlocking.DoDHCPv4(requestIPv4, 6*time.Second, 2) // Do 2 DHCP retries
-	if err != nil {
-		return dev, err
-	}
-	err = stack.AssimilateDHCPResults()
-	if err != nil {
-		return dev, err
-	}
-	// Do 3 ARP requests before giving up.
-	routerHW, err := stackBlocking.DoResolveHardwareAddress6(stack.dhcpResults.Router, 3*time.Second, 10)
-	if err != nil {
-		return dev, err
-	}
-	stack.link.SetGateway6(routerHW)
-	return dev, nil
-}
-
 func (stack *StackAsync) SetupPicoWifi(ssid, password string, cfg cyw43439.Config) (*cyw43439.Device, error) {
 	if stack.hostname == "" {
 		return nil, errors.New("call stack.Reset with a Hostname before setting up pico")
 	}
 	start := time.Now()
 	dev := cyw43439.NewPicoWDevice()
-	println("starting program")
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))

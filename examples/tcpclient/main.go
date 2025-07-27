@@ -10,88 +10,103 @@ import (
 
 	"log/slog"
 
-	"github.com/soypat/cyw43439/examples/common"
-	"github.com/soypat/seqs"
-	"github.com/soypat/seqs/stacks"
+	"github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439/examples/cywnet"
+	"github.com/soypat/cyw43439/examples/cywnet/credentials"
 )
 
+// Note: Try running the dhcp example before this one!
+
+// Setup Wifi Password and SSID by creating ssid.text and password.text files in
+// ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
+// When building your own application use local storage to store wifi credentials securely.
 var (
-	logger *slog.Logger
+	stack       cywnet.StackAsync
+	requestedIP = [4]byte{192, 168, 1, 99}
+	targetIP    = [4]byte{192, 168, 1, 53}
+	targetPort  = uint16(8080)
 )
 
 func main() {
-	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
-	}))
-
-	time.Sleep(2 * time.Second)
-	println("starting program")
-	dhcpc, stack, _, err := common.SetupWithDHCP(common.SetupConfig{
-		Hostname: "TCP-pico",
-		Logger:   logger,
-		TCPPorts: 1,
+	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
+	err := stack.Reset(cywnet.StackConfig{
+		Hostname: "TCPclient-pico",
+		RandSeed: uint32(time.Now().UnixNano()), // Not terribly random.
+		MTU:      cyw43439.MTU,
 	})
 	if err != nil {
-		panic("in dhcp setup:" + err.Error())
+		panic(err)
 	}
-	// Instantiate TCP Client with a target address to reach.
-	const socketBuf = 256
-	const listenPort = 1234
-	targetAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
-	socket, err := stacks.NewTCPConn(stack, stacks.TCPConnConfig{TxBufSize: socketBuf, RxBufSize: socketBuf})
+	println("starting program")
+
+	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	devcfg := cyw43439.DefaultWifiConfig()
+	devcfg.Logger = logger
+	dev, err := stack.SetupPicoWifi(credentials.SSID(), credentials.Password(), devcfg)
 	if err != nil {
-		panic("socket create:" + err.Error())
+		panic(err)
 	}
 
-	// Get target MAC Address.
-	err = stack.ARP().BeginResolve(dhcpc.Router())
+	// Goroutine loop needed to use the cywnet.StackBlocking implementation.
+	// To avoid goroutines use StackAsync. This however means much more effort and boilerplate done by the user.
+	go loopForeverStack(dev, &stack)
+
+	const (
+		timeout = 6 * time.Second
+		retries = 2
+	)
+
+	rstack := stack.StackRetrying()
+	_, err = rstack.DoDHCPv4(requestedIP, timeout, retries)
 	if err != nil {
 		panic(err)
 	}
-	targetMAC, err := common.ResolveHardwareAddr(stack, dhcpc.Router())
+	err = stack.AssimilateDHCPResults()
 	if err != nil {
 		panic(err)
 	}
-	println("start connecting to:", targetAddr.String())
-	err = ForeverTCPSend(socket, targetAddr, targetMAC)
-	if err != nil {
-		panic("socket listen:" + err.Error())
+	var buf [512]byte
+
+	for {
+		lport := uint16(stack.Prand32()>>17) + 1 // Ensure non-zero local port.
+		println("attempting TCP connection with port", lport)
+		conn, err := rstack.DoDialTCP(lport, netip.AddrPortFrom(netip.AddrFrom4(targetIP), targetPort), timeout, retries)
+		if err != nil {
+			println("failed TCP:", err.Error())
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		for {
+			n, err := conn.Read(buf[:])
+			if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
+				break
+			} else if n == 0 {
+				time.Sleep(5 * time.Millisecond)
+				continue
+			}
+			_, err = conn.Write(buf[:n])
+			if err != nil {
+				panic(err)
+			}
+		}
+		conn.Close()
+		// Give some time for connection to perform TCP close actions.
+		for i := 0; i < 20 && !conn.State().IsClosed(); i++ {
+			time.Sleep(5 * time.Millisecond)
+		}
+		conn.Abort() // Completely annihilate connection state even if not done by now.
+		time.Sleep(time.Second)
 	}
 }
 
-func ForeverTCPSend(socket *stacks.TCPConn, remoteAddr netip.AddrPort, remoteMAC [6]byte) error {
-	var iss seqs.Value = 100 // Starting TCP sequence number.
-	var localPort uint16 = 1
-	var buf [512]byte
+func loopForeverStack(dev *cyw43439.Device, stack *cywnet.StackAsync) {
 	for {
-		localPort += 1
-		if localPort == 0 {
-			localPort = 1 // Prevent crash on wraparound.
+		send, recv, _ := stack.RecvAndSend(dev, nil)
+		if send == 0 && recv == 0 {
+			time.Sleep(5 * time.Millisecond) // No data to send or receive, sleep for a bit.
 		}
-		iss += 200
-		err := socket.OpenDialTCP(localPort, remoteMAC, remoteAddr, iss) // Attempt to reach server.
-		if err != nil {
-			return err
-		}
-		for socket.State().IsPreestablished() {
-			time.Sleep(5 * time.Millisecond)
-		}
-		for {
-			n, err := socket.Read(buf[:])
-			if errors.Is(err, net.ErrClosed) || errors.Is(err, io.EOF) {
-				break
-			}
-			if n == 0 {
-				time.Sleep(10 * time.Millisecond)
-				continue
-			}
-			_, err = socket.Write(buf[:n])
-			if err != nil {
-				return err
-			}
-		}
-		socket.Close()
-		socket.FlushOutputBuffer()
-		time.Sleep(time.Second)
 	}
 }

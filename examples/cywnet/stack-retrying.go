@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/netip"
 	"time"
+
+	"github.com/soypat/lneto/tcp"
 )
 
 func (s *StackAsync) StackRetrying() StackRetrying {
@@ -51,4 +53,14 @@ func (s StackRetrying) DoResolveHardwareAddress6(addr netip.Addr, timeout time.D
 		}
 	}
 	return hw, errRetriesExceeded
+}
+
+func (s StackRetrying) DoDialTCP(localPort uint16, addrp netip.AddrPort, timeout time.Duration, retries int) (conn *tcp.Conn, err error) {
+	for i := 0; i < retries; i++ {
+		conn, err = s.block.DoDialTCP(localPort, addrp, timeout)
+		if err == nil {
+			return conn, nil
+		}
+	}
+	return nil, errRetriesExceeded
 }

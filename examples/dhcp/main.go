@@ -11,18 +11,19 @@ import (
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
 )
 
-// Setup Wifi Password and SSID in common/secrets.go
+// Setup Wifi Password and SSID by creating ssid.text and password.text files in
+// ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
+// When building your own application use local storage to store wifi credentials securely.
 var (
 	stack       cywnet.StackAsync
 	requestedIP = [4]byte{192, 168, 1, 99}
 )
 
 func main() {
-
 	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
 	err := stack.Reset(cywnet.StackConfig{
 		Hostname: "DHCP-pico",
-		RandSeed: uint32(time.Now().UnixMicro()), // Not terribly random.
+		RandSeed: uint32(time.Now().UnixNano()), // Not terribly random.
 		MTU:      cyw43439.MTU,
 	})
 	if err != nil {
@@ -39,7 +40,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// Goroutine loop needed to use the cywnet.StackBlocking implementation.
+	// To avoid goroutines use StackAsync. This however means much more effort and boilerplate done by the user.
 	go loopForeverStack(dev, &stack)
+
 	const (
 		timeout = 6 * time.Second
 		retries = 3

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/soypat/lneto/dhcpv4"
+	"github.com/soypat/lneto/tcp"
 )
 
 const (
@@ -88,6 +89,34 @@ func (s StackBlocking) DoLookupIP(host string, timeout time.Duration) (addrs []n
 		time.Sleep(sleep)
 	}
 	return nil, errDeadlineExceed
+}
+
+var errTCPFailedToConnect = errors.New("tcp failed to connect")
+
+func (s StackBlocking) DoDialTCP(localPort uint16, addrp netip.AddrPort, timeout time.Duration) (conn *tcp.Conn, err error) {
+	conn, err = s.async.DialTCP(localPort, addrp)
+	if err != nil {
+		return nil, err
+	}
+	sleep := timeout/maxIter + 1
+	deadline := time.Now().Add(timeout)
+	for i := 0; i < maxIter; i++ {
+		state := conn.State()
+		switch state {
+		case tcp.StateEstablished:
+			break
+		case tcp.StateSynSent, tcp.StateSynRcvd:
+			if err = s.checkDeadline(deadline); err != nil {
+				return nil, err
+			}
+			time.Sleep(sleep)
+		default:
+			// Unexpected state, abort and terminate connection.
+			conn.Abort()
+			return nil, errTCPFailedToConnect
+		}
+	}
+	return conn, nil
 }
 
 func (s StackBlocking) checkDeadline(deadline time.Time) error {
