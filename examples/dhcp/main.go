@@ -15,40 +15,33 @@ import (
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
 // When building your own application use local storage to store wifi credentials securely.
 var (
-	stack       cywnet.StackAsync
 	requestedIP = [4]byte{192, 168, 1, 99}
 )
 
 func main() {
 	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
-	err := stack.Reset(cywnet.StackConfig{
-		Hostname: "DHCP-pico",
-		RandSeed: uint32(time.Now().UnixNano()), // Not terribly random.
-		MTU:      cyw43439.MTU,
-	})
-	if err != nil {
-		panic(err)
-	}
 	println("starting program")
-
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 	devcfg := cyw43439.DefaultWifiConfig()
 	devcfg.Logger = logger
-	dev, err := stack.SetupPicoWifi(credentials.SSID(), credentials.Password(), devcfg)
+	stack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
+		Hostname: "DHCP-pico",
+	})
 	if err != nil {
 		panic(err)
 	}
 	// Goroutine loop needed to use the cywnet.StackBlocking implementation.
 	// To avoid goroutines use StackAsync. This however means much more effort and boilerplate done by the user.
-	go loopForeverStack(dev, &stack)
+	go loopForeverStack(stack)
 
 	const (
 		timeout = 6 * time.Second
 		retries = 3
 	)
-	rstack := stack.StackRetrying()
+	rstack := stack.LnetoStack().StackRetrying()
+
 	results, err := rstack.DoDHCPv4(requestedIP, timeout, retries)
 	if err != nil {
 		panic(err)
@@ -68,9 +61,9 @@ func main() {
 	)
 }
 
-func loopForeverStack(dev *cyw43439.Device, stack *cywnet.StackAsync) {
+func loopForeverStack(stack *cywnet.Stack) {
 	for {
-		send, recv, _ := stack.RecvAndSend(dev, nil)
+		send, recv, _ := stack.RecvAndSend()
 		if send == 0 && recv == 0 {
 			time.Sleep(5 * time.Millisecond) // No data to send or receive, sleep for a bit.
 		}

@@ -7,14 +7,35 @@ import (
 	"errors"
 	"log/slog"
 	"machine"
+	"net/netip"
 	"time"
 
 	"github.com/soypat/cyw43439"
+	"github.com/soypat/lneto/x/xnet"
 )
 
-func (stack *StackAsync) SetupPicoWifi(ssid, password string, cfg cyw43439.Config) (*cyw43439.Device, error) {
-	if stack.hostname == "" {
-		return nil, errors.New("call stack.Reset with a Hostname before setting up pico")
+type Stack struct {
+	s        xnet.StackAsync
+	dev      *cyw43439.Device
+	log      *slog.Logger
+	sendbuf  []byte
+	lastrecv uint16
+}
+
+type StackConfig struct {
+	StaticAddress   netip.Addr
+	DNSServer       netip.Addr
+	NTPServer       netip.Addr
+	Hostname        string
+	MaxTCPConns     int
+	TCPBufferSizeRx int
+	TCPBufferSizeTx int
+	RandSeed        int64
+}
+
+func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, cfg StackConfig) (*Stack, error) {
+	if cfg.Hostname == "" {
+		return nil, errors.New("empty hostname")
 	}
 	start := time.Now()
 	dev := cyw43439.NewPicoWDevice()
@@ -22,7 +43,7 @@ func (stack *StackAsync) SetupPicoWifi(ssid, password string, cfg cyw43439.Confi
 		Level: slog.LevelDebug,
 	}))
 	dev.SetLogger(logger)
-	err := dev.Init(cfg)
+	err := dev.Init(cfgDev)
 	if err != nil {
 		return nil, err
 	}
@@ -34,19 +55,45 @@ func (stack *StackAsync) SetupPicoWifi(ssid, password string, cfg cyw43439.Confi
 	if err != nil {
 		return nil, err
 	}
-	dev.RecvEthHandle(func(pkt []byte) error {
-		return stack.link.Demux(pkt, 0)
-	})
-	err = stack.SetHardwareAddress(mac)
-	if err != nil {
-		return nil, err
-	}
+
+	// Configure Stack.
+	stack := new(Stack)
+	stack.dev = dev
 	elapsed := time.Since(start)
-	stack.prng ^= uint32(elapsed) ^ uint32(elapsed>>32)
-	return dev, nil
+	err = stack.s.Reset(xnet.StackConfig{
+		StaticAddress:   cfg.StaticAddress,
+		DNSServer:       cfg.DNSServer,
+		NTPServer:       cfg.NTPServer,
+		Hostname:        cfg.Hostname,
+		MaxTCPConns:     cfg.MaxTCPConns,
+		TCPBufferSizeTx: cfg.TCPBufferSizeTx,
+		TCPBufferSizeRx: cfg.TCPBufferSizeRx,
+		RandSeed:        elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
+		HardwareAddress: mac,
+		MTU:             cyw43439.MTU,
+	})
+	dev.RecvEthHandle(func(pkt []byte) error {
+		// return stack.s
+		return stack.s.Demux(pkt, 0)
+	})
+	stack.sendbuf = make([]byte, cyw43439.MTU)
+	return stack, err
 }
 
-func (stack *StackAsync) RecvAndSend(dev *cyw43439.Device, sendBufOrNil []byte) (send, recv int, err error) {
+func (stack *Stack) Hostname() string {
+	return stack.s.Hostname()
+}
+
+func (stack *Stack) Device() *cyw43439.Device {
+	return stack.dev
+}
+
+func (stack *Stack) LnetoStack() *xnet.StackAsync {
+	return &stack.s
+}
+
+func (stack *Stack) RecvAndSend() (send, recv int, err error) {
+	dev := stack.dev
 	gotRecv, errrecv := dev.PollOne()
 	if gotRecv {
 		recv = int(stack.lastrecv)
@@ -54,13 +101,7 @@ func (stack *StackAsync) RecvAndSend(dev *cyw43439.Device, sendBufOrNil []byte) 
 	if errrecv != nil {
 		stack.logerr("RecvAndSend:PollOne", slog.Int("plen", recv), slog.String("err", errrecv.Error()))
 	}
-	if sendBufOrNil == nil {
-		if stack.sendbuf == nil {
-			stack.sendbuf = make([]byte, stack.link.MTU())
-		}
-		sendBufOrNil = stack.sendbuf
-	}
-	send, err = stack.Encapsulate(sendBufOrNil, 0)
+	send, err = stack.s.Encapsulate(stack.sendbuf, 0)
 	if err != nil {
 		stack.logerr("RecvAndSend:Encapsulate", slog.Int("plen", send), slog.String("err", err.Error()))
 	} else {
@@ -69,15 +110,15 @@ func (stack *StackAsync) RecvAndSend(dev *cyw43439.Device, sendBufOrNil []byte) 
 	if send == 0 {
 		return send, recv, err
 	}
-	err = dev.SendEth(sendBufOrNil[:send])
+	err = dev.SendEth(stack.sendbuf[:send])
 	if err != nil {
 		stack.logerr("RecvAndSend:SendEth", slog.Int("plen", send), slog.String("err", err.Error()))
 	}
 	return send, recv, err
 }
 
-func (stack *StackAsync) logerr(msg string, attrs ...slog.Attr) {
-	if stack.logger != nil {
-		stack.logger.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)
+func (stack *Stack) logerr(msg string, attrs ...slog.Attr) {
+	if stack.log != nil {
+		stack.log.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)
 	}
 }
