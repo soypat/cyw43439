@@ -2,6 +2,7 @@ package main
 
 import (
 	"machine"
+	"net"
 	"time"
 
 	"log/slog"
@@ -40,12 +41,17 @@ func main() {
 		timeout = 6 * time.Second
 		retries = 3
 	)
-	rstack := stack.LnetoStack().StackRetrying()
-
+	llstack := stack.LnetoStack()
+	rstack := llstack.StackRetrying()
 	results, err := rstack.DoDHCPv4(requestedIP, timeout, retries)
 	if err != nil {
 		panic(err)
 	}
+	gatewayHW, err := rstack.DoResolveHardwareAddress6(results.Router, 500*time.Millisecond, 4)
+	if err != nil {
+		panic(err)
+	}
+	llstack.SetGateway6(gatewayHW)
 	logger.Info("DHCP complete",
 		slog.String("hostname", stack.Hostname()),
 		slog.String("ourIP", results.AssignedAddr.String()),
@@ -54,6 +60,7 @@ func main() {
 		slog.String("server", results.ServerAddr.String()),
 		slog.String("broadcast", results.BroadcastAddr.String()),
 		slog.String("gateway", results.Gateway.String()),
+		slog.String("gatewayhw", net.HardwareAddr(gatewayHW[:]).String()),
 		slog.Uint64("lease[seconds]", uint64(results.TLease)),
 		slog.Uint64("rebind[seconds]", uint64(results.TRebind)),
 		slog.Uint64("renew[seconds]", uint64(results.TRenewal)),

@@ -13,6 +13,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/tcp"
 )
 
 // Note: Try running the dhcp example before this one!
@@ -35,7 +36,8 @@ func main() {
 	devcfg := cyw43439.DefaultWifiConfig()
 	devcfg.Logger = logger
 	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
-		Hostname: "DHCP-pico",
+		Hostname:    "DHCP-pico",
+		MaxTCPConns: 1,
 	})
 	if err != nil {
 		panic(err)
@@ -59,16 +61,35 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	println("dhcp addr:", dhcpResults.AssignedAddr.String())
-	var buf [512]byte
 
+	// Set the router hardware address as the gateway. Defaults to this address.
+	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcpResults.Router, 500*time.Millisecond, 4)
+	if err != nil {
+		panic(err)
+	}
+	stack.SetGateway6(gatewayHW)
+
+	println("dhcp addr:", dhcpResults.AssignedAddr.String(), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
+	var buf [512]byte
+	var conn tcp.Conn
+	err = conn.Configure(tcp.ConnConfig{
+		RxBuf:             make([]byte, 512),
+		TxBuf:             make([]byte, 512),
+		TxPacketQueueSize: 3,
+	})
+	if err != nil {
+		panic(err)
+	}
+	targetIPPort := netip.AddrPortFrom(netip.AddrFrom4(targetIP), targetPort)
 	for {
 		lport := uint16(stack.Prand32()>>17) + 1 // Ensure non-zero local port.
 		println("attempting TCP connection with port", lport)
-		conn, err := rstack.DoDialTCP(lport, netip.AddrPortFrom(netip.AddrFrom4(targetIP), targetPort), timeout, retries)
+		err := rstack.DoDialTCP(&conn, lport, targetIPPort, timeout, retries)
 		if err != nil {
+			conn.Close()
 			println("failed TCP:", err.Error())
 			time.Sleep(2 * time.Second)
+			conn.Abort()
 			continue
 		}
 
@@ -85,11 +106,15 @@ func main() {
 				panic(err)
 			}
 		}
-		conn.Close()
+		err = conn.Close()
+		if err != nil {
+			println("close failed:", err.Error())
+		}
 		// Give some time for connection to perform TCP close actions.
 		for i := 0; i < 20 && !conn.State().IsClosed(); i++ {
 			time.Sleep(5 * time.Millisecond)
 		}
+		println("abort conn.")
 		conn.Abort() // Completely annihilate connection state even if not done by now.
 		time.Sleep(time.Second)
 	}

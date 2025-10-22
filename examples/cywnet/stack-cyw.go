@@ -23,14 +23,12 @@ type Stack struct {
 }
 
 type StackConfig struct {
-	StaticAddress   netip.Addr
-	DNSServer       netip.Addr
-	NTPServer       netip.Addr
-	Hostname        string
-	MaxTCPConns     int
-	TCPBufferSizeRx int
-	TCPBufferSizeTx int
-	RandSeed        int64
+	StaticAddress netip.Addr
+	DNSServer     netip.Addr
+	NTPServer     netip.Addr
+	Hostname      string
+	MaxTCPConns   int
+	RandSeed      int64
 }
 
 func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, cfg StackConfig) (*Stack, error) {
@@ -66,8 +64,6 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		NTPServer:       cfg.NTPServer,
 		Hostname:        cfg.Hostname,
 		MaxTCPConns:     cfg.MaxTCPConns,
-		TCPBufferSizeTx: cfg.TCPBufferSizeTx,
-		TCPBufferSizeRx: cfg.TCPBufferSizeRx,
 		RandSeed:        elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
 		HardwareAddress: mac,
 		MTU:             cyw43439.MTU,
