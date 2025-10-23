@@ -113,6 +113,34 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 	return send, recv, err
 }
 
+type DHCPConfig struct {
+	RequestedAddr netip.Addr
+}
+
+func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (dhcpResults *xnet.DHCPResults, err error) {
+	if !cfg.RequestedAddr.Is4() {
+		return dhcpResults, errors.New("only dhcpv4 supported")
+	}
+	lstack := stack.LnetoStack()
+	rstack := lstack.StackRetrying()
+	dhcpResults, err = rstack.DoDHCPv4(cfg.RequestedAddr.As4(), 3*time.Second, 3)
+	if err != nil {
+		return dhcpResults, err
+	}
+	err = lstack.AssimilateDHCPResults(dhcpResults)
+	if err != nil {
+		panic(err)
+	}
+
+	// Set the router hardware address as the gateway. Defaults to this address.
+	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcpResults.Router, 500*time.Millisecond, 4)
+	if err != nil {
+		panic(err)
+	}
+	lstack.SetGateway6(gatewayHW)
+	return dhcpResults, nil
+}
+
 func (stack *Stack) logerr(msg string, attrs ...slog.Attr) {
 	if stack.log != nil {
 		stack.log.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)

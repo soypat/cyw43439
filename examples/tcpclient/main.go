@@ -27,6 +27,11 @@ var (
 	targetPort  = uint16(8080)
 )
 
+const (
+	tcpTimeout = 6 * time.Second
+	tcpRetries = 2
+)
+
 func main() {
 	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
 	println("starting program")
@@ -47,28 +52,14 @@ func main() {
 	// To avoid goroutines use StackAsync. This however means much more effort and boilerplate done by the user.
 	go loopForeverStack(cystack)
 
-	const (
-		timeout = 6 * time.Second
-		retries = 2
-	)
+	dhcpResults, err := cystack.SetupWithDHCP(cywnet.DHCPConfig{
+		RequestedAddr: netip.AddrFrom4(requestedIP),
+	})
+	if err != nil {
+		panic("while performing DHCP: " + err.Error())
+	}
 	stack := cystack.LnetoStack()
-	rstack := stack.StackRetrying()
-	dhcpResults, err := rstack.DoDHCPv4(requestedIP, timeout, retries)
-	if err != nil {
-		panic(err)
-	}
-	err = stack.AssimilateDHCPResults(dhcpResults)
-	if err != nil {
-		panic(err)
-	}
-
-	// Set the router hardware address as the gateway. Defaults to this address.
-	gatewayHW, err := rstack.DoResolveHardwareAddress6(dhcpResults.Router, 500*time.Millisecond, 4)
-	if err != nil {
-		panic(err)
-	}
-	stack.SetGateway6(gatewayHW)
-
+	gatewayHW := stack.Gateway6()
 	println("dhcp addr:", dhcpResults.AssignedAddr.String(), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
 	var buf [512]byte
 	var conn tcp.Conn
@@ -81,10 +72,11 @@ func main() {
 		panic(err)
 	}
 	targetIPPort := netip.AddrPortFrom(netip.AddrFrom4(targetIP), targetPort)
+	rstack := stack.StackRetrying()
 	for {
 		lport := uint16(stack.Prand32()>>17) + 1 // Ensure non-zero local port.
 		println("attempting TCP connection with port", lport)
-		err := rstack.DoDialTCP(&conn, lport, targetIPPort, timeout, retries)
+		err := rstack.DoDialTCP(&conn, lport, targetIPPort, tcpTimeout, tcpRetries)
 		if err != nil {
 			conn.Close()
 			println("failed TCP:", err.Error())

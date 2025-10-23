@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	l, err := net.Listen("tcp", ":8080")
+	l, err := net.Listen("tcp4", ":8080")
 	if err != nil {
 		log.Fatal(err)
 	}
