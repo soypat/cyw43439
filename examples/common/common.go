@@ -244,7 +244,23 @@ func (r *Resolver) LookupNetIP(host string) ([]netip.Addr, error) {
 }
 
 func (r *Resolver) updateDNSHWAddr() (err error) {
-	r.dnshwaddr, err = ResolveHardwareAddr(r.stack, r.dnsaddr)
+	picoIP := r.dhcp.Offer()
+
+	prefix, err := picoIP.Prefix(int(r.dhcp.CIDRBits()))
+	if err != nil {
+		return errors.New("could not get DHCP lease info to check subnet")
+	}
+
+	// Decide which IP to perform the ARP request for.
+	targetIP := r.dnsaddr
+
+	if !prefix.Contains(r.dnsaddr) {
+		// If the DNS server is NOT on our local subnet, we must send packets
+		// to the router/gateway instead.
+		targetIP = r.dhcp.Router()
+	}
+
+	r.dnshwaddr, err = ResolveHardwareAddr(r.stack, targetIP)
 	return err
 }
 
