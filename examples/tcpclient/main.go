@@ -72,7 +72,8 @@ func main() {
 		panic(err)
 	}
 	targetIPPort := netip.AddrPortFrom(netip.AddrFrom4(targetIP), targetPort)
-	rstack := stack.StackRetrying()
+	const pollTime = 5 * time.Millisecond
+	rstack := stack.StackRetrying(pollTime)
 	for {
 		lport := uint16(stack.Prand32()>>17) + 1 // Ensure non-zero local port.
 		println("attempting TCP connection with port", lport)

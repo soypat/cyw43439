@@ -97,7 +97,7 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 	if errrecv != nil {
 		stack.logerr("RecvAndSend:PollOne", slog.Int("plen", recv), slog.String("err", errrecv.Error()))
 	}
-	send, err = stack.s.Encapsulate(stack.sendbuf, 0)
+	send, err = stack.s.Encapsulate(stack.sendbuf, -1, 0)
 	if err != nil {
 		stack.logerr("RecvAndSend:Encapsulate", slog.Int("plen", send), slog.String("err", err.Error()))
 	} else {
@@ -122,7 +122,8 @@ func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (dhcpResults *xnet.DHCPResults
 		return dhcpResults, errors.New("only dhcpv4 supported")
 	}
 	lstack := stack.LnetoStack()
-	rstack := lstack.StackRetrying()
+	const pollTime = 50 * time.Millisecond
+	rstack := lstack.StackRetrying(pollTime)
 	dhcpResults, err = rstack.DoDHCPv4(cfg.RequestedAddr.As4(), 3*time.Second, 3)
 	if err != nil {
 		return dhcpResults, err

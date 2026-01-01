@@ -59,11 +59,16 @@ func main() {
 	println("dhcp addr:", dhcpResults.AssignedAddr.String(), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
 	var buf [512]byte
 	var conn tcp.Conn
+	connlogger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
 	err = conn.Configure(tcp.ConnConfig{
 		RxBuf:             make([]byte, 512),
 		TxBuf:             make([]byte, 512),
 		TxPacketQueueSize: 3,
+		Logger:            connlogger,
 	})
+	conn.InternalHandler().SetLoggers(connlogger, connlogger)
 	if err != nil {
 		panic(err)
 	}
@@ -71,7 +76,6 @@ func main() {
 	for {
 		err = stack.ListenTCP(&conn, ourPort)
 		if err != nil {
-			conn.Close()
 			println("listen failed:", err.Error())
 			time.Sleep(3 * time.Second)
 			conn.Abort()
@@ -95,6 +99,9 @@ func main() {
 			_, err = conn.Write(buf[:n]) // Echo back response.
 			if err != nil {
 				println("write error:", err.Error())
+			} else {
+				err = conn.Flush()
+				println("wrote back response of length", n)
 			}
 		}
 		conn.Close()

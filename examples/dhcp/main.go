@@ -38,11 +38,12 @@ func main() {
 	go loopForeverStack(stack)
 
 	const (
-		timeout = 6 * time.Second
-		retries = 3
+		timeout  = 6 * time.Second
+		retries  = 3
+		pollTime = 5 * time.Millisecond
 	)
 	llstack := stack.LnetoStack()
-	rstack := llstack.StackRetrying()
+	rstack := llstack.StackRetrying(pollTime)
 	results, err := rstack.DoDHCPv4(requestedIP, timeout, retries)
 	if err != nil {
 		panic(err)
