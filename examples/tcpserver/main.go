@@ -105,7 +105,6 @@ func main() {
 			}
 		}
 		conn.Close()
-		// conn.FlushOutputBuffer()
 		time.Sleep(time.Second)
 	}
 }
