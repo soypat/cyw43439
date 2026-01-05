@@ -14,6 +14,8 @@ import (
 	"github.com/soypat/lneto/x/xnet"
 )
 
+// WARNING: Compile with -scheduler=tasks flag set. -scheduler=cores unsupported!
+
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
 // When building your own application use local storage to store wifi credentials securely.
@@ -34,6 +36,7 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
+
 	devcfg := cyw43439.DefaultWifiConfig()
 	devcfg.Logger = logger
 	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
@@ -57,12 +60,18 @@ func main() {
 	stack := cystack.LnetoStack()
 	gatewayHW := stack.Gateway6()
 	println("dhcp addr:", dhcpResults.AssignedAddr.String(), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
+	// tracelog can log very verbose output to debug low level bugs in lneto.
+	// traceLog := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+	// 	Level: slog.LevelDebug - 2,
+	// }))
 	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:           4,
 		QueueSize:          3,
 		BufferSize:         512,
 		EstablishedTimeout: 5 * time.Second,
 		ClosingTimeout:     5 * time.Second,
+		// Logger:             traceLog.WithGroup("tcppool"),
+		// ConnLogger:         traceLog,
 	})
 	if err != nil {
 		panic(err)
@@ -72,6 +81,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// listener.SetLogger(traceLog)
 	// atttach listener to stack so as to begin receiving packets.
 	err = stack.RegisterListener(&listener)
 	if err != nil {
@@ -81,6 +91,7 @@ func main() {
 	for {
 		if listener.NumberOfReadyToAccept() == 0 {
 			time.Sleep(loopSleep)
+			tcpPool.CheckTimeouts()
 			continue
 		}
 		conn, err := listener.TryAccept()
@@ -94,22 +105,31 @@ func main() {
 func handleConn(conn *tcp.Conn) {
 	// Do simple echo of data received.
 	var buf [64]byte
+	start := time.Now()
 	ntot := 0
+	// Cache address/port at start to avoid repeated mutex locks during println.
+	// On multicore, frequent lock/unlock + slow Serial can cause issues.
 	addr, _ := netip.AddrFromSlice(conn.RemoteAddr())
 	addrs := addr.String()
-	println("conn address:", addrs, "port", conn.RemotePort())
+	port := conn.RemotePort()
+	println("conn address:", addrs, "port", port)
 	for {
-		println("read port", conn.RemotePort())
+		println("read port", port)
 		n, err := conn.Read(buf[:])
 		ntot += n
-		if err == net.ErrClosed {
+		state := conn.State()
+		if err == net.ErrClosed || state != tcp.StateEstablished {
+			conn.Close()
 			println("connection closed:", addrs, "written:", ntot)
 			return
 		} else if n == 0 {
+			if time.Since(start) > 10*time.Second {
+				conn.Close() // stale.
+			}
 			time.Sleep(loopSleep)
 			continue
 		}
-		println("write port", conn.RemotePort(), "data", n)
+		println("write port", port, "data", n)
 		conn.Write(buf[:n])
 	}
 }
