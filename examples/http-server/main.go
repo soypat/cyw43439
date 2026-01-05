@@ -1,25 +1,31 @@
 package main
 
 import (
-	"bufio"
-	"io"
 	"log/slog"
 	"machine"
 	"net/netip"
+	"strconv"
 	"time"
 
 	_ "embed"
 
 	"github.com/soypat/cyw43439"
-	"github.com/soypat/cyw43439/examples/common"
-	"github.com/soypat/seqs/httpx"
-	"github.com/soypat/seqs/stacks"
+	"github.com/soypat/cyw43439/examples/cywnet"
+	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/http/httpraw"
+	"github.com/soypat/lneto/tcp"
+	"github.com/soypat/lneto/x/xnet"
 )
+
+// Setup Wifi Password and SSID by creating ssid.text and password.text files in
+// ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
 
 const connTimeout = 3 * time.Second
 const maxconns = 3
 const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
 const hostname = "http-pico"
+
+var requestedIP = [4]byte{192, 168, 1, 99}
 
 var (
 	// We embed the html file in the binary so that we can edit
@@ -31,93 +37,158 @@ var (
 	lastLedState bool
 )
 
-// This is our HTTP hander. It handles ALL incoming requests. Path routing is left
-// as an excercise to the reader.
-func HTTPHandler(respWriter io.Writer, resp *httpx.ResponseHeader, req *httpx.RequestHeader) {
-	uri := string(req.RequestURI())
-	resp.SetConnectionClose()
-	switch uri {
-	case "/":
-		println("Got webpage request!")
-		resp.SetContentType("text/html")
-		resp.SetContentLength(len(webPage))
-		respWriter.Write(resp.Header())
-		respWriter.Write(webPage)
-
-	case "/toggle-led":
-		println("Got toggle led request!")
-		respWriter.Write(resp.Header())
-		lastLedState = !lastLedState
-		dev.GPIOSet(0, lastLedState)
-
-	default:
-		println("Path not found:", uri)
-		resp.SetStatusCode(404)
-		respWriter.Write(resp.Header())
-	}
-}
-
 func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelDebug - 2,
 	}))
-	time.Sleep(time.Second)
-	_, stack, devlocal, err := common.SetupWithDHCP(common.SetupConfig{
-		Hostname: "TCP-pico",
-		Logger:   logger,
-		TCPPorts: 1,
+	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
+	println("starting HTTP server example")
+
+	devcfg := cyw43439.DefaultWifiConfig()
+	devcfg.Logger = logger
+	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
+		Hostname:    hostname,
+		MaxTCPConns: maxconns,
 	})
-	dev = devlocal
 	if err != nil {
-		panic("setup DHCP:" + err.Error())
+		panic("setup failed:" + err.Error())
 	}
-	// Start TCP server.
+	dev = cystack.Device()
+
+	// Background loop needed to process packets.
+	go loopForeverStack(cystack)
+
+	dhcpResults, err := cystack.SetupWithDHCP(cywnet.DHCPConfig{
+		RequestedAddr: netip.AddrFrom4(requestedIP),
+	})
+	if err != nil {
+		panic("DHCP failed:" + err.Error())
+	}
+
+	stack := cystack.LnetoStack()
 	const listenPort = 80
-	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
-	listener, err := stacks.NewTCPListener(stack, stacks.TCPListenerConfig{
-		MaxConnections: maxconns,
-		ConnTxBufSize:  tcpbufsize,
-		ConnRxBufSize:  tcpbufsize,
+	listenAddr := netip.AddrPortFrom(dhcpResults.AssignedAddr, listenPort)
+
+	// Create TCP pool for connection management.
+	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
+		PoolSize:           maxconns,
+		QueueSize:          3,
+		BufferSize:         tcpbufsize,
+		EstablishedTimeout: connTimeout,
+		ClosingTimeout:     connTimeout,
 	})
 	if err != nil {
-		panic("listener create:" + err.Error())
+		panic("tcppool create:" + err.Error())
 	}
-	err = listener.StartListening(listenPort)
+
+	// Create and register TCP listener.
+	var listener tcp.Listener
+	err = listener.Reset(listenPort, tcpPool)
 	if err != nil {
-		panic("listener start:" + err.Error())
+		panic("listener reset:" + err.Error())
 	}
-	// Reuse the same buffers for each connection to avoid heap allocations.
-	var req httpx.RequestHeader
-	var resp httpx.ResponseHeader
-	buf := bufio.NewReaderSize(nil, 1024)
+	err = stack.RegisterListener(&listener)
+	if err != nil {
+		panic("listener register:" + err.Error())
+	}
+
+	// Buffers for HTTP handling (reused for each connection).
+	var hdr httpraw.Header
+	rxBuf := make([]byte, 2048)
+	txBuf := make([]byte, 512)
+
 	logger.Info("listening",
 		slog.String("addr", "http://"+listenAddr.String()),
 	)
 
 	for {
-		conn, err := listener.Accept()
+		if listener.NumberOfReadyToAccept() == 0 {
+			time.Sleep(5 * time.Millisecond)
+			tcpPool.CheckTimeouts()
+			continue
+		}
+
+		conn, err := listener.TryAccept()
 		if err != nil {
 			logger.Error("listener accept:", slog.String("err", err.Error()))
 			time.Sleep(time.Second)
 			continue
 		}
-		logger.Info("new connection", slog.String("remote", conn.RemoteAddr().String()))
-		err = conn.SetDeadline(time.Now().Add(connTimeout))
-		if err != nil {
-			conn.Close()
-			logger.Error("conn set deadline:", slog.String("err", err.Error()))
-			continue
-		}
-		buf.Reset(conn)
-		err = req.Read(buf)
-		if err != nil {
-			logger.Error("hdr read:", slog.String("err", err.Error()))
+
+		remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
+		logger.Info("new connection", slog.String("remote", remoteAddr.String()))
+
+		// Read HTTP request.
+		n, err := conn.Read(rxBuf)
+		if err != nil || n == 0 {
+			logger.Error("read failed", slog.String("err", errStr(err)))
 			conn.Close()
 			continue
 		}
-		resp.Reset()
-		HTTPHandler(conn, &resp, &req)
-		// time.Sleep(100 * time.Millisecond)
+
+		// Parse HTTP request.
+		hdr.Reset(rxBuf[:0])
+		hdr.ReadFromBytes(rxBuf[:n])
+		needMore, err := hdr.TryParse(false) // false = parse as request
+		if err != nil && !needMore {
+			logger.Error("parse failed", slog.String("err", err.Error()))
+			conn.Close()
+			continue
+		}
+
+		// Handle HTTP request.
+		handleHTTP(conn, &hdr, txBuf)
 		conn.Close()
+	}
+}
+
+// handleHTTP processes an HTTP request and writes the response.
+func handleHTTP(conn *tcp.Conn, reqHdr *httpraw.Header, buf []byte) {
+	uri := string(reqHdr.RequestURI())
+
+	// Build response header.
+	var respHdr httpraw.Header
+	respHdr.SetProtocol("HTTP/1.1")
+	respHdr.Set("Connection", "close")
+
+	switch uri {
+	case "/":
+		println("Got webpage request!")
+		respHdr.SetStatus("200", "OK")
+		respHdr.Set("Content-Type", "text/html")
+		respHdr.Set("Content-Length", strconv.Itoa(len(webPage)))
+		resp, _ := respHdr.AppendResponse(buf[:0])
+		conn.Write(resp)
+		conn.Write(webPage)
+
+	case "/toggle-led":
+		println("Got toggle led request!")
+		respHdr.SetStatus("200", "OK")
+		resp, _ := respHdr.AppendResponse(buf[:0])
+		conn.Write(resp)
+		lastLedState = !lastLedState
+		dev.GPIOSet(0, lastLedState)
+
+	default:
+		println("Path not found:", uri)
+		respHdr.SetStatus("404", "Not Found")
+		resp, _ := respHdr.AppendResponse(buf[:0])
+		conn.Write(resp)
+	}
+}
+
+func errStr(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return err.Error()
+}
+
+func loopForeverStack(stack *cywnet.Stack) {
+	for {
+		send, recv, _ := stack.RecvAndSend()
+		if send == 0 && recv == 0 {
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 }

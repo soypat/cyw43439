@@ -3,127 +3,152 @@ package main
 import (
 	"log/slog"
 	"machine"
-	"math/rand"
 	"net/netip"
 	"time"
 
-	_ "embed"
-
-	"github.com/soypat/cyw43439/examples/common"
-	"github.com/soypat/seqs"
-	"github.com/soypat/seqs/httpx"
-	"github.com/soypat/seqs/stacks"
+	"github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439/examples/cywnet"
+	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/http/httpraw"
+	"github.com/soypat/lneto/tcp"
 )
+
+// Setup Wifi Password and SSID by creating ssid.text and password.text files in
+// ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
 
 const connTimeout = 5 * time.Second
 const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
+
 // Set this address to the server's address.
 // You can run the server example in this same directory to test this client.
-const serverAddrStr = "192.168.0.44:8080"
+const serverAddrStr = "192.168.1.53:8080"
 const ourHostname = "tinygo-http-client"
+
+var requestedIP = [4]byte{192, 168, 1, 99}
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
+	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
+	println("starting HTTP client example")
 
-	_, stack, _, err := common.SetupWithDHCP(common.SetupConfig{
-		Hostname: ourHostname,
-		Logger:   logger,
-		TCPPorts: 1, // For HTTP over TCP.
-		UDPPorts: 1, // For DNS.
+	devcfg := cyw43439.DefaultWifiConfig()
+	devcfg.Logger = logger
+	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
+		Hostname:    ourHostname,
+		MaxTCPConns: 1,
 	})
-	start := time.Now()
 	if err != nil {
-		panic("setup DHCP:" + err.Error())
+		panic("setup failed:" + err.Error())
 	}
+
+	// Background loop needed to process packets.
+	go loopForeverStack(cystack)
+
+	dhcpResults, err := cystack.SetupWithDHCP(cywnet.DHCPConfig{
+		RequestedAddr: netip.AddrFrom4(requestedIP),
+	})
+	if err != nil {
+		panic("DHCP failed:" + err.Error())
+	}
+	logger.Info("DHCP complete", slog.String("addr", dhcpResults.AssignedAddr.String()))
+
 	svAddr, err := netip.ParseAddrPort(serverAddrStr)
 	if err != nil {
 		panic("parsing server address:" + err.Error())
 	}
-	// Resolver router's hardware address to dial outside our network to internet.
-	routerhw, err := common.ResolveHardwareAddr(stack, svAddr.Addr())
-	if err != nil {
-		panic("router hwaddr resolving:" + err.Error())
-	}
 
-	rng := rand.New(rand.NewSource(int64(time.Now().Sub(start))))
-	// Start TCP server.
-	clientAddr := netip.AddrPortFrom(stack.Addr(), uint16(rng.Intn(65535-1024)+1024))
-	conn, err := stacks.NewTCPConn(stack, stacks.TCPConnConfig{
-		TxBufSize: tcpbufsize,
-		RxBufSize: tcpbufsize,
+	stack := cystack.LnetoStack()
+	const pollTime = 5 * time.Millisecond
+	rstack := stack.StackRetrying(pollTime)
+
+	// Configure TCP connection.
+	var conn tcp.Conn
+	err = conn.Configure(tcp.ConnConfig{
+		RxBuf:             make([]byte, tcpbufsize),
+		TxBuf:             make([]byte, tcpbufsize),
+		TxPacketQueueSize: 3,
 	})
-
 	if err != nil {
-		panic("conn create:" + err.Error())
+		panic("conn configure:" + err.Error())
 	}
 
-	closeConn := func(err string) {
-		slog.Error("tcpconn:closing", slog.String("err", err))
-		conn.Close()
-		for !conn.State().IsClosed() {
-			slog.Info("tcpconn:waiting", slog.String("state", conn.State().String()))
-			time.Sleep(1000 * time.Millisecond)
-		}
+	// Build HTTP request using httpraw.Header.
+	var hdr httpraw.Header
+	hdr.SetMethod("GET")
+	hdr.SetRequestURI("/")
+	hdr.SetProtocol("HTTP/1.1")
+	hdr.Set("Host", svAddr.Addr().String())
+	hdr.Set("Connection", "close")
+	reqbytes, err := hdr.AppendRequest(nil)
+	if err != nil {
+		panic("building HTTP request:" + err.Error())
 	}
 
-	// Here we create the HTTP request and generate the bytes. The Header method
-	// returns the raw header bytes as should be sent over the wire.
-	var req httpx.RequestHeader
-	req.SetRequestURI("/")
-	// If you need a Post request change "GET" to "POST" and then add the
-	// post data to reqbytes: `postReq := append(reqbytes, postData...)` and send postReq over TCP.
-	req.SetMethod("GET")
-	req.SetHost(svAddr.Addr().String())
-	reqbytes := req.Header()
-
-	logger.Info("tcp:ready",
-		slog.String("clientaddr", clientAddr.String()),
+	logger.Info("http:ready",
 		slog.String("serveraddr", serverAddrStr),
 	)
 	rxBuf := make([]byte, 4096)
+
 	for {
 		time.Sleep(5 * time.Second)
-		slog.Info("dialing", slog.String("serveraddr", serverAddrStr))
+		lport := uint16(stack.Prand32()>>17) + 1024 // Random local port.
+		logger.Info("dialing", slog.String("serveraddr", serverAddrStr), slog.Uint64("localport", uint64(lport)))
 
-		// Make sure to timeout the connection if it takes too long.
-		conn.SetDeadline(time.Now().Add(connTimeout))
-		err = conn.OpenDialTCP(clientAddr.Port(), routerhw, svAddr, seqs.Value(rng.Intn(65535-1024)+1024))
+		// Dial TCP with retries.
+		err = rstack.DoDialTCP(&conn, lport, svAddr, connTimeout, 3)
 		if err != nil {
-			closeConn("opening TCP: " + err.Error())
-			continue
-		}
-		retries := 50
-		for conn.State() != seqs.StateEstablished && retries > 0 {
-			time.Sleep(100 * time.Millisecond)
-			retries--
-		}
-		conn.SetDeadline(time.Time{}) // Disable the deadline.
-		if retries == 0 {
-			closeConn("tcp establish retry limit exceeded")
+			logger.Error("tcp dial failed", slog.String("err", err.Error()))
+			conn.Close()
+			for !conn.State().IsClosed() {
+				time.Sleep(5 * time.Millisecond)
+			}
+			conn.Abort()
 			continue
 		}
 
-		// Send the request.
+		// Send the HTTP request.
 		_, err = conn.Write(reqbytes)
 		if err != nil {
-			closeConn("writing request: " + err.Error())
+			logger.Error("writing request", slog.String("err", err.Error()))
+			closeConn(&conn)
 			continue
 		}
+
+		// Wait for response.
 		time.Sleep(500 * time.Millisecond)
-		conn.SetDeadline(time.Now().Add(connTimeout))
 		n, err := conn.Read(rxBuf)
 		if n == 0 && err != nil {
-			closeConn("reading response: " + err.Error())
+			logger.Error("reading response", slog.String("err", err.Error()))
+			closeConn(&conn)
 			continue
 		} else if n == 0 {
-			closeConn("no response")
+			logger.Error("no response received")
+			closeConn(&conn)
 			continue
 		}
+
 		println("got HTTP response!")
-		println(string(rxBuf[:n]))
-		closeConn("done")
-		return // exit program.
+		machine.Serial.Write(rxBuf[:n])
+		closeConn(&conn)
+		return // Exit program after successful request.
+	}
+}
+
+func closeConn(conn *tcp.Conn) {
+	conn.Close()
+	for i := 0; i < 50 && !conn.State().IsClosed(); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	conn.Abort()
+}
+
+func loopForeverStack(stack *cywnet.Stack) {
+	for {
+		send, recv, _ := stack.RecvAndSend()
+		if send == 0 && recv == 0 {
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 }
