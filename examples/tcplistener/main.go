@@ -67,7 +67,8 @@ func main() {
 	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:           4,
 		QueueSize:          3,
-		BufferSize:         512,
+		TxBufSize:          512,
+		RxBufSize:          512,
 		EstablishedTimeout: 5 * time.Second,
 		ClosingTimeout:     5 * time.Second,
 		// Logger:             traceLog.WithGroup("tcppool"),
@@ -94,7 +95,7 @@ func main() {
 			tcpPool.CheckTimeouts()
 			continue
 		}
-		conn, err := listener.TryAccept()
+		conn, _, err := listener.TryAccept()
 		if err != nil {
 			panic(err)
 		}
