@@ -36,9 +36,9 @@ var (
 	//
 	//go:embed index.html
 	webPage      []byte
-	dev          *cyw43439.Device
 	lastLedState bool
 	requestedIP  = [4]byte{192, 168, 1, 99}
+	cystack      *cywnet.Stack
 )
 
 func main() {
@@ -50,7 +50,8 @@ func main() {
 
 	devcfg := cyw43439.DefaultWifiConfig()
 	devcfg.Logger = logger
-	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
+	var err error
+	cystack, err = cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
 		Hostname:    hostname,
 		MaxTCPPorts: numListeners,
 	})
@@ -176,11 +177,12 @@ func handleConn(conn *tcp.Conn, hdr *httpraw.Header) {
 		println("got toggle led request")
 		requestedPage = pageToggleLED
 		lastLedState = !lastLedState
-		dev.GPIOSet(0, lastLedState)
+		cystack.Device().GPIOSet(0, lastLedState)
 	}
 
 	// Prepare response with same buffer.
 	hdr.Reset(nil)
+	hdr.SetProtocol("HTTP/1.1")
 	if requestedPage == pageNotExits {
 		hdr.SetStatus("404", "Not Found")
 	} else {
