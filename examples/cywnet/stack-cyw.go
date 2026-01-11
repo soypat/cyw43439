@@ -27,7 +27,7 @@ type StackConfig struct {
 	DNSServer     netip.Addr
 	NTPServer     netip.Addr
 	Hostname      string
-	MaxTCPConns   int
+	MaxTCPPorts   int
 	RandSeed      int64
 }
 
@@ -63,7 +63,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		DNSServer:       cfg.DNSServer,
 		NTPServer:       cfg.NTPServer,
 		Hostname:        cfg.Hostname,
-		MaxTCPConns:     cfg.MaxTCPConns,
+		MaxTCPConns:     cfg.MaxTCPPorts,
 		RandSeed:        elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
 		HardwareAddress: mac,
 		MTU:             cyw43439.MTU,

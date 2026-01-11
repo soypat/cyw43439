@@ -36,12 +36,12 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
-
 	devcfg := cyw43439.DefaultWifiConfig()
+
 	devcfg.Logger = logger
 	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
 		Hostname:    "DHCP-pico",
-		MaxTCPConns: 1,
+		MaxTCPPorts: 1,
 	})
 	if err != nil {
 		panic(err)
@@ -82,7 +82,7 @@ func main() {
 		panic(err)
 	}
 	// listener.SetLogger(traceLog)
-	// atttach listener to stack so as to begin receiving packets.
+	// attach listener to stack so as to begin receiving packets.
 	err = stack.RegisterListener(&listener)
 	if err != nil {
 		panic(err)

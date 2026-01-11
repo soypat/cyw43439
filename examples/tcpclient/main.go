@@ -42,7 +42,7 @@ func main() {
 	devcfg.Logger = logger
 	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
 		Hostname:    "DHCP-pico",
-		MaxTCPConns: 1,
+		MaxTCPPorts: 1,
 	})
 	if err != nil {
 		panic(err)

@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"machine"
+	"net"
 	"net/netip"
 	"strconv"
 	"time"
@@ -17,16 +18,18 @@ import (
 	"github.com/soypat/lneto/x/xnet"
 )
 
+const connTimeout = 3 * time.Second
+const numListeners = 1 // Just one listener.
+const maxConns = 3     // Max amount of concurrent connections.
+const tcpbufsize = 512 // MTU - ethhdr - iphdr - tcphdr
+const hostname = "http-pico"
+const listenPort = 80                  // HTTP server port.
+const loopSleep = 5 * time.Millisecond // Sleep between polls of network.
+const httpBuf = 512
+
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
-
-const connTimeout = 3 * time.Second
-const maxconns = 3
-const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
-const hostname = "http-pico"
-
-var requestedIP = [4]byte{192, 168, 1, 99}
-
+// When building your own application use local storage to store wifi credentials securely.
 var (
 	// We embed the html file in the binary so that we can edit
 	// index.html with pretty syntax highlighting.
@@ -35,27 +38,28 @@ var (
 	webPage      []byte
 	dev          *cyw43439.Device
 	lastLedState bool
+	requestedIP  = [4]byte{192, 168, 1, 99}
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelDebug - 2,
-	}))
 	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
 	println("starting HTTP server example")
+	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
 
 	devcfg := cyw43439.DefaultWifiConfig()
 	devcfg.Logger = logger
 	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
 		Hostname:    hostname,
-		MaxTCPConns: maxconns,
+		MaxTCPPorts: numListeners,
 	})
 	if err != nil {
 		panic("setup failed:" + err.Error())
 	}
-	dev = cystack.Device()
 
-	// Background loop needed to process packets.
+	// Goroutine loop needed to use the cywnet.StackBlocking implementation.
+	// To avoid goroutines use StackAsync. This however means much more effort and boilerplate done by the user.
 	go loopForeverStack(cystack)
 
 	dhcpResults, err := cystack.SetupWithDHCP(cywnet.DHCPConfig{
@@ -64,22 +68,32 @@ func main() {
 	if err != nil {
 		panic("DHCP failed:" + err.Error())
 	}
-
-	stack := cystack.LnetoStack()
-	const listenPort = 80
-	listenAddr := netip.AddrPortFrom(dhcpResults.AssignedAddr, listenPort)
-
-	// Create TCP pool for connection management.
+	// tracelog can log very verbose output to debug low level bugs in lneto.
+	// traceLog := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+	// 	Level: slog.LevelDebug - 2,
+	// }))
 	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
-		PoolSize:           maxconns,
+		PoolSize:           maxConns,
 		QueueSize:          3,
-		BufferSize:         tcpbufsize,
-		EstablishedTimeout: connTimeout,
-		ClosingTimeout:     connTimeout,
+		TxBufSize:          len(webPage) + 128,
+		RxBufSize:          256,
+		EstablishedTimeout: 5 * time.Second,
+		ClosingTimeout:     5 * time.Second,
+		NewUserData: func() any {
+			var hdr httpraw.Header
+			buf := make([]byte, httpBuf)
+			hdr.Reset(buf)
+			return &hdr
+		},
+		// Logger:             traceLog.WithGroup("tcppool"),
+		// ConnLogger:         traceLog,
 	})
 	if err != nil {
 		panic("tcppool create:" + err.Error())
 	}
+
+	stack := cystack.LnetoStack()
+	listenAddr := netip.AddrPortFrom(dhcpResults.AssignedAddr, listenPort)
 
 	// Create and register TCP listener.
 	var listener tcp.Listener
@@ -92,11 +106,6 @@ func main() {
 		panic("listener register:" + err.Error())
 	}
 
-	// Buffers for HTTP handling (reused for each connection).
-	var hdr httpraw.Header
-	rxBuf := make([]byte, 2048)
-	txBuf := make([]byte, 512)
-
 	logger.Info("listening",
 		slog.String("addr", "http://"+listenAddr.String()),
 	)
@@ -108,87 +117,104 @@ func main() {
 			continue
 		}
 
-		conn, err := listener.TryAccept()
+		conn, httpBuf, err := listener.TryAccept()
 		if err != nil {
 			logger.Error("listener accept:", slog.String("err", err.Error()))
 			time.Sleep(time.Second)
 			continue
 		}
-
-		remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
-		logger.Info("new connection", slog.String("remote", remoteAddr.String()))
-
-		// Read HTTP request.
-		n, err := conn.Read(rxBuf)
-		if err != nil || n == 0 {
-			logger.Error("read failed", slog.String("err", errStr(err)))
-			conn.Close()
-			continue
-		}
-
-		// Parse HTTP request.
-		hdr.Reset(rxBuf[:0])
-		hdr.ReadFromBytes(rxBuf[:n])
-		needMore, err := hdr.TryParse(false) // false = parse as request
-		if err != nil && !needMore {
-			logger.Error("parse failed", slog.String("err", err.Error()))
-			conn.Close()
-			continue
-		}
-
-		// Handle HTTP request.
-		handleHTTP(conn, &hdr, txBuf)
-		conn.Close()
+		go handleConn(conn, httpBuf.(*httpraw.Header))
 	}
 }
 
-// handleHTTP processes an HTTP request and writes the response.
-func handleHTTP(conn *tcp.Conn, reqHdr *httpraw.Header, buf []byte) {
-	uri := string(reqHdr.RequestURI())
+type page uint8
 
-	// Build response header.
-	var respHdr httpraw.Header
-	respHdr.SetProtocol("HTTP/1.1")
-	respHdr.Set("Connection", "close")
+const (
+	pageNotExits  page = iota
+	pageLanding        // /
+	pageToggleLED      // /toggle-led
+)
 
-	switch uri {
+func handleConn(conn *tcp.Conn, hdr *httpraw.Header) {
+	defer conn.Close()
+	const AsRequest = false
+	var buf [64]byte
+	hdr.Reset(nil)
+
+	remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
+	println("incoming connection:", remoteAddr.String(), "from port", conn.RemotePort())
+
+	for {
+		n, err := conn.Read(buf[:])
+		if n > 0 {
+			hdr.ReadFromBytes(buf[:n])
+			needMoreData, err := hdr.TryParse(AsRequest)
+			if err != nil && !needMoreData {
+				println("parsing HTTP request:", err.Error())
+				return
+			}
+			if !needMoreData {
+				break
+			}
+		}
+		closed := err == net.ErrClosed || conn.State() != tcp.StateEstablished
+		if closed {
+			break
+		} else if hdr.BufferReceived() >= httpBuf {
+			println("too much HTTP data")
+			return
+		}
+	}
+	// Check requested requestedPage URI.
+	var requestedPage page
+	uri := hdr.RequestURI()
+	switch string(uri) {
 	case "/":
 		println("Got webpage request!")
-		respHdr.SetStatus("200", "OK")
-		respHdr.Set("Content-Type", "text/html")
-		respHdr.Set("Content-Length", strconv.Itoa(len(webPage)))
-		resp, _ := respHdr.AppendResponse(buf[:0])
-		conn.Write(resp)
-		conn.Write(webPage)
-
+		requestedPage = pageLanding
 	case "/toggle-led":
-		println("Got toggle led request!")
-		respHdr.SetStatus("200", "OK")
-		resp, _ := respHdr.AppendResponse(buf[:0])
-		conn.Write(resp)
+		println("got toggle led request")
+		requestedPage = pageToggleLED
 		lastLedState = !lastLedState
 		dev.GPIOSet(0, lastLedState)
-
-	default:
-		println("Path not found:", uri)
-		respHdr.SetStatus("404", "Not Found")
-		resp, _ := respHdr.AppendResponse(buf[:0])
-		conn.Write(resp)
 	}
-}
 
-func errStr(err error) string {
-	if err == nil {
-		return "<nil>"
+	// Prepare response with same buffer.
+	hdr.Reset(nil)
+	if requestedPage == pageNotExits {
+		hdr.SetStatus("404", "Not Found")
+	} else {
+		hdr.SetStatus("200", "OK")
 	}
-	return err.Error()
+	var body []byte
+	switch requestedPage {
+	case pageLanding:
+		body = webPage
+		hdr.Set("Content-Type", "text/html")
+	}
+	if len(body) > 0 {
+		hdr.Set("Content-Length", strconv.Itoa(len(body)))
+	}
+	responseHeader, err := hdr.AppendResponse(buf[:0])
+	if err != nil {
+		println("error appending:", err.Error())
+	}
+	conn.Write(responseHeader)
+	if len(body) > 0 {
+		_, err := conn.Write(body)
+		if err != nil {
+			println("writing body:", err.Error())
+		}
+		time.Sleep(loopSleep)
+	}
+	// connection closed automatically by defer.
 }
 
 func loopForeverStack(stack *cywnet.Stack) {
 	for {
 		send, recv, _ := stack.RecvAndSend()
 		if send == 0 && recv == 0 {
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(loopSleep)
 		}
 	}
 }

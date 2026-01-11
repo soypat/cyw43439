@@ -10,8 +10,8 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
-	mqtt "github.com/soypat/natiu-mqtt"
 	"github.com/soypat/lneto/tcp"
+	mqtt "github.com/soypat/natiu-mqtt"
 )
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
@@ -48,7 +48,7 @@ func main() {
 	devcfg.Logger = logger
 	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
 		Hostname:    string(clientID),
-		MaxTCPConns: 1,
+		MaxTCPPorts: 1,
 	})
 	if err != nil {
 		panic("setup failed:" + err.Error())
