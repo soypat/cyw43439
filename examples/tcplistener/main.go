@@ -1,5 +1,7 @@
 package main
 
+// WARNING: default -scheduler=cores unsupported, compile with -scheduler=tasks set!
+
 import (
 	"log/slog"
 	"machine"
@@ -13,8 +15,6 @@ import (
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 )
-
-// WARNING: Compile with -scheduler=tasks flag set. -scheduler=cores unsupported!
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.

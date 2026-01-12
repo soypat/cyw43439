@@ -1,5 +1,7 @@
 package main
 
+// WARNING: default -scheduler=cores unsupported, compile with -scheduler=tasks set!
+
 import (
 	"errors"
 	"io"

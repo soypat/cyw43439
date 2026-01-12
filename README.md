@@ -4,7 +4,7 @@ Heapless driver for the Wifi+bluetooth integrated circuit on the pico.
 ## Examples
 To run the blinky example:
 ```shell
-tinygo flash -target=pico -stack-size=8kb -monitor  ./examples/blinky
+tinygo flash -target=pico -stack-size=8kb -scheduler=tasks -monitor  ./examples/blinky
 ```
 
 | To run Wifi examples you must first set your wifi credentials: |
@@ -18,7 +18,7 @@ tinygo flash -target=pico -stack-size=8kb -monitor  ./examples/blinky
 
     Example of how to run the DHCP example:
     ```shell
-    tinygo flash -target=pico -stack-size=8kb -monitor  ./examples/dhcp
+    tinygo flash -target=pico -stack-size=8kb -scheduler=tasks -monitor  ./examples/dhcp
     ```
 
 ### Debugging and heap allocations
@@ -26,7 +26,7 @@ The examples use the [`soypat/seqs` networking stack library](https://github.com
 
 Example:
  ```shell
-tinygo flash -target=pico -stack-size=8kb -monitor -tags=debugheaplog  ./examples/dhcp
+tinygo flash -target=pico -stack-size=8kb -scheduler=tasks -monitor -tags=debugheaplog  ./examples/dhcp
 ```
 This will use a simpler logger implementation within the `seqs` package that avoids all allocations and will also log heap increments on lines starting with the `[ALLOC]` text.
 
