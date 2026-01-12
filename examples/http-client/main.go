@@ -100,11 +100,7 @@ func main() {
 		err = rstack.DoDialTCP(&conn, lport, svAddr, connTimeout, 3)
 		if err != nil {
 			logger.Error("tcp dial failed", slog.String("err", err.Error()))
-			conn.Close()
-			for !conn.State().IsClosed() {
-				time.Sleep(5 * time.Millisecond)
-			}
-			conn.Abort()
+			closeConn(&conn)
 			continue
 		}
 

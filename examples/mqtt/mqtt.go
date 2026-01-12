@@ -33,7 +33,7 @@ const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
 // Set this address to the server's address.
 // You may run a local comqtt server: https://github.com/wind-c/comqtt
 // build cmd/single, run it and change the IP address to your local server.
-const serverAddrStr = "192.168.0.44:1883"
+const serverAddrStr = "192.168.1.53:1883"
 
 var requestedIP = [4]byte{192, 168, 1, 99}
 

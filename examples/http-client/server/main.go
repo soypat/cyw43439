@@ -15,6 +15,7 @@ func main() {
 	svAddr := myaddr.String() + portStr
 	sv := http.NewServeMux()
 	sv.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Request from %s: %s %s", r.RemoteAddr, r.Method, r.URL.Path)
 		w.Write([]byte("Dear " + r.RemoteAddr + ",\nGreetings from " + host + " @ " + svAddr + "\n"))
 	})
 	log.Println("Listening on", svAddr)

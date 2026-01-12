@@ -4,24 +4,26 @@ import (
 	"log/slog"
 	"machine"
 	"net/netip"
+	"runtime"
 	"time"
 
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
-	"github.com/soypat/lneto/ntp"
 )
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
 
 const hostname = "ntp-pico"
+const ntpHost = "pool.ntp.org"
+const pollTime = 5 * time.Millisecond
 
 var requestedIP = [4]byte{192, 168, 1, 145}
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: slog.LevelInfo,
 	}))
 	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
 	println("starting NTP example")
@@ -47,12 +49,10 @@ func main() {
 	logger.Info("DHCP complete", slog.String("addr", dhcpResults.AssignedAddr.String()))
 
 	stack := cystack.LnetoStack()
-	const pollTime = 5 * time.Millisecond
-	rstack := stack.StackRetrying(pollTime)
 
+	rstack := stack.StackRetrying(pollTime)
 	// DNS lookup for NTP server.
-	const ntpHost = "pool.ntp.org"
-	logger.Info("resolving NTP host", slog.String("host", ntpHost))
+	logger.Info("resolving NTP host", slog.String("host", ntpHost), slog.Any("dnssv", dhcpResults.DNSServers))
 	addrs, err := rstack.DoLookupIP(ntpHost, 5*time.Second, 3)
 	if err != nil {
 		panic("DNS lookup failed:" + err.Error())
@@ -66,21 +66,22 @@ func main() {
 		panic("NTP failed:" + err.Error())
 	}
 
-	// Calculate corrected time.
-	// Using ntp.BaseTime().Add(offset) for Y2K36 compatibility on systems without RTC.
-	now := ntp.BaseTime().Add(offset)
+	// Calculate corrected time (server time).
+	now := time.Now().Add(offset)
 	logger.Info("NTP complete",
 		slog.String("time", now.String()),
 		slog.Duration("offset", offset),
 	)
 	println("ntp done newtime=", now.String())
+	runtime.AdjustTimeOffset(int64(offset))
+	logger.Info("time-update")
 }
 
 func loopForeverStack(stack *cywnet.Stack) {
 	for {
 		send, recv, _ := stack.RecvAndSend()
 		if send == 0 && recv == 0 {
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(pollTime)
 		}
 	}
 }
