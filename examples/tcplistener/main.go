@@ -1,94 +1,145 @@
 package main
 
 import (
-	"errors"
+	"log/slog"
 	"machine"
+	"net"
 	"net/netip"
-	"os"
 	"time"
 
-	"log/slog"
+	"github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439/examples/cywnet"
+	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/tcp"
+	"github.com/soypat/lneto/x/xnet"
+)
 
-	"github.com/soypat/cyw43439/examples/common"
-	"github.com/soypat/seqs/stacks"
+// WARNING: Compile with -scheduler=tasks flag set. -scheduler=cores unsupported!
+
+// Setup Wifi Password and SSID by creating ssid.text and password.text files in
+// ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
+// When building your own application use local storage to store wifi credentials securely.
+var (
+	requestedIP = [4]byte{192, 168, 1, 99}
+	ourPort     = uint16(1234)
 )
 
 const (
-	tcpbufsize  = 512 // MTU - ethhdr - iphdr - tcphdr
-	connTimeout = 5 * time.Second
-	// Can help prevent stalling connections from blocking control the more connections you have.
-	maxconns = 3
-)
-
-var (
-	lastRx, lastTx time.Time
-	logger         *slog.Logger
+	tcpTimeout = 6 * time.Second
+	tcpRetries = 2
+	loopSleep  = 5 * time.Millisecond
 )
 
 func main() {
-	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelInfo, // Go lower (Debug-1) to see more verbosity on wifi device.
+	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
+	println("starting program")
+	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
 	}))
-	time.Sleep(2 * time.Second)
-	logger.Info("starting program")
-	_, stack, _, err := common.SetupWithDHCP(common.SetupConfig{
-		Hostname: "TCP-pico",
-		Logger:   logger,
-		TCPPorts: 1,
+	devcfg := cyw43439.DefaultWifiConfig()
+
+	devcfg.Logger = logger
+	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
+		Hostname:    "DHCP-pico",
+		MaxTCPPorts: 1,
 	})
 	if err != nil {
-		panic("in dhcp setup:" + err.Error())
+		panic(err)
 	}
-	// Start TCP server.
-	const listenPort = 1234
-	listenAddr := netip.AddrPortFrom(stack.Addr(), listenPort)
-	listener, err := stacks.NewTCPListener(stack, stacks.TCPListenerConfig{
-		MaxConnections: maxconns,
-		ConnTxBufSize:  tcpbufsize,
-		ConnRxBufSize:  tcpbufsize,
+
+	// Goroutine loop needed to use the cywnet.StackBlocking implementation.
+	// To avoid goroutines use StackAsync. This however means much more effort and boilerplate done by the user.
+	go loopForeverStack(cystack)
+
+	dhcpResults, err := cystack.SetupWithDHCP(cywnet.DHCPConfig{
+		RequestedAddr: netip.AddrFrom4(requestedIP),
 	})
 	if err != nil {
-		panic("listener create:" + err.Error())
+		panic("while performing DHCP: " + err.Error())
 	}
-	err = listener.StartListening(listenPort)
+	stack := cystack.LnetoStack()
+	gatewayHW := stack.Gateway6()
+	println("dhcp addr:", dhcpResults.AssignedAddr.String(), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
+	// tracelog can log very verbose output to debug low level bugs in lneto.
+	// traceLog := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
+	// 	Level: slog.LevelDebug - 2,
+	// }))
+	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
+		PoolSize:           4,
+		QueueSize:          3,
+		TxBufSize:          512,
+		RxBufSize:          512,
+		EstablishedTimeout: 5 * time.Second,
+		ClosingTimeout:     5 * time.Second,
+		// Logger:             traceLog.WithGroup("tcppool"),
+		// ConnLogger:         traceLog,
+	})
 	if err != nil {
-		panic("listener start:" + err.Error())
+		panic(err)
 	}
-	var buf [512]byte
-	logger.Info("listening", slog.String("addr", listenAddr.String()))
+	var listener tcp.Listener
+	err = listener.Reset(ourPort, tcpPool)
+	if err != nil {
+		panic(err)
+	}
+	// listener.SetLogger(traceLog)
+	// attach listener to stack so as to begin receiving packets.
+	err = stack.RegisterListener(&listener)
+	if err != nil {
+		panic(err)
+	}
+	println("listening on:", netip.AddrPortFrom(stack.Addr(), ourPort).String())
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			logger.Error("listener accept:", slog.String("err", err.Error()))
-			time.Sleep(time.Second)
+		if listener.NumberOfReadyToAccept() == 0 {
+			time.Sleep(loopSleep)
+			tcpPool.CheckTimeouts()
 			continue
 		}
-		logger.Info("new connection", slog.String("remote", conn.RemoteAddr().String()))
-		err = conn.SetDeadline(time.Now().Add(connTimeout))
+		conn, _, err := listener.TryAccept()
 		if err != nil {
-			logger.Error("conn set deadline:", slog.String("err", err.Error()))
+			panic(err)
+		}
+		go handleConn(conn)
+	}
+}
+
+func handleConn(conn *tcp.Conn) {
+	// Do simple echo of data received.
+	var buf [64]byte
+	start := time.Now()
+	ntot := 0
+	// Cache address/port at start to avoid repeated mutex locks during println.
+	// On multicore, frequent lock/unlock + slow Serial can cause issues.
+	addr, _ := netip.AddrFromSlice(conn.RemoteAddr())
+	addrs := addr.String()
+	port := conn.RemotePort()
+	println("conn address:", addrs, "port", port)
+	for {
+		println("read port", port)
+		n, err := conn.Read(buf[:])
+		ntot += n
+		state := conn.State()
+		if err == net.ErrClosed || state != tcp.StateEstablished {
+			conn.Close()
+			println("connection closed:", addrs, "written:", ntot)
+			return
+		} else if n == 0 {
+			if time.Since(start) > 10*time.Second {
+				conn.Close() // stale.
+			}
+			time.Sleep(loopSleep)
 			continue
 		}
-		for {
-			n, err := conn.Read(buf[:])
-			if err != nil {
-				if !errors.Is(err, os.ErrDeadlineExceeded) {
-					logger.Error("conn read:", slog.String("err", err.Error()))
-				}
-				break
-			}
-			_, err = conn.Write(buf[:n])
-			if err != nil {
-				if !errors.Is(err, os.ErrDeadlineExceeded) {
-					logger.Error("conn write:", slog.String("err", err.Error()))
-				}
-				break
-			}
+		println("write port", port, "data", n)
+		conn.Write(buf[:n])
+	}
+}
+
+func loopForeverStack(stack *cywnet.Stack) {
+	for {
+		send, recv, _ := stack.RecvAndSend()
+		if send == 0 && recv == 0 {
+			time.Sleep(loopSleep) // No data to send or receive, sleep for a bit.
 		}
-		err = conn.Close()
-		if err != nil {
-			logger.Error("conn close:", slog.String("err", err.Error()))
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
 }

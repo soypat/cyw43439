@@ -2,32 +2,78 @@ package main
 
 import (
 	"machine"
+	"net"
 	"time"
 
 	"log/slog"
 
-	"github.com/soypat/cyw43439/examples/common"
-	"github.com/soypat/seqs/eth/dhcp"
+	"github.com/soypat/cyw43439"
+	"github.com/soypat/cyw43439/examples/cywnet"
+	"github.com/soypat/cyw43439/examples/cywnet/credentials"
 )
 
-// Setup Wifi Password and SSID in common/secrets.go
+// Setup Wifi Password and SSID by creating ssid.text and password.text files in
+// ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
+// When building your own application use local storage to store wifi credentials securely.
+var (
+	requestedIP = [4]byte{192, 168, 1, 99}
+)
 
 func main() {
-	time.Sleep(2 * time.Second)
+	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
 	println("starting program")
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: slog.LevelInfo,
 	}))
-	client, _, _, err := common.SetupWithDHCP(common.SetupConfig{
-		Hostname:    "DHCP-pico",
-		Logger:      logger,
-		RequestedIP: "10.94.2.0",
-		UDPPorts:    1,
+	devcfg := cyw43439.DefaultWifiConfig()
+	devcfg.Logger = logger
+	stack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
+		Hostname: "DHCP-pico",
 	})
-	if client.State() != dhcp.StateBound {
-		println("DHCP did not complete succesfully")
-	}
 	if err != nil {
 		panic(err)
+	}
+	// Goroutine loop needed to use the cywnet.StackBlocking implementation.
+	// To avoid goroutines use StackAsync. This however means much more effort and boilerplate done by the user.
+	go loopForeverStack(stack)
+
+	const (
+		timeout  = 6 * time.Second
+		retries  = 3
+		pollTime = 5 * time.Millisecond
+	)
+	llstack := stack.LnetoStack()
+	rstack := llstack.StackRetrying(pollTime)
+	results, err := rstack.DoDHCPv4(requestedIP, timeout, retries)
+	if err != nil {
+		panic(err)
+	}
+	gatewayHW, err := rstack.DoResolveHardwareAddress6(results.Router, 500*time.Millisecond, 4)
+	if err != nil {
+		panic(err)
+	}
+	llstack.SetGateway6(gatewayHW)
+	logger.Info("DHCP complete",
+		slog.String("hostname", stack.Hostname()),
+		slog.String("ourIP", results.AssignedAddr.String()),
+		slog.String("subnet", results.Subnet.String()),
+		slog.String("router", results.Router.String()),
+		slog.String("server", results.ServerAddr.String()),
+		slog.String("broadcast", results.BroadcastAddr.String()),
+		slog.String("gateway", results.Gateway.String()),
+		slog.String("gatewayhw", net.HardwareAddr(gatewayHW[:]).String()),
+		slog.Uint64("lease[seconds]", uint64(results.TLease)),
+		slog.Uint64("rebind[seconds]", uint64(results.TRebind)),
+		slog.Uint64("renew[seconds]", uint64(results.TRenewal)),
+		slog.Any("DNS-servers", results.DNSServers),
+	)
+}
+
+func loopForeverStack(stack *cywnet.Stack) {
+	for {
+		send, recv, _ := stack.RecvAndSend()
+		if send == 0 && recv == 0 {
+			time.Sleep(5 * time.Millisecond) // No data to send or receive, sleep for a bit.
+		}
 	}
 }

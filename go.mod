@@ -1,6 +1,8 @@
 module github.com/soypat/cyw43439
 
-go 1.20
+go 1.23.8
+
+toolchain go1.24.2
 
 require (
 	github.com/soypat/natiu-mqtt v0.6.0
@@ -9,3 +11,5 @@ require (
 	github.com/tinygo-org/pio v0.2.0
 	golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa
 )
+
+require github.com/soypat/lneto v0.0.0-20260112140510-1a427323f2ca

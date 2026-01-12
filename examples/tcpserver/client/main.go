@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"strconv"
@@ -9,12 +11,19 @@ import (
 )
 
 const (
-	// Edit to match server's listening TCP addr:port
-	server = "192.168.1.145:1234"
+// Edit to match server's listening TCP addr:port
 )
 
 func main() {
-	raddr := netip.MustParseAddrPort(server)
+	flag.Parse()
+	ipaddr := flag.Arg(0)
+	if ipaddr == "" {
+		log.Fatal("missing address:port argument to server")
+	}
+	raddr, err := netip.ParseAddrPort(ipaddr)
+	if err != nil {
+		log.Fatal("failed to parse addrport: %s", err)
+	}
 	conn, err := net.DialTCP("tcp", nil, net.TCPAddrFromAddrPort(raddr))
 	if err != nil {
 		panic(err)
