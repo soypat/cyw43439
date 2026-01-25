@@ -182,6 +182,8 @@ func (d *Device) set_power_management(mode powerManagementMode) error {
 	return d.set_ioctl(whd.WLC_SET_PM, whd.IF_STA, uint32(mode_num))
 }
 
+// join_open connects to an open (unencrypted) WiFi network.
+// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L316-L321
 func (d *Device) join_open(ssid string) error {
 	d.debug("join_open", slog.String("ssid", ssid))
 	if len(ssid) > 32 {
@@ -192,6 +194,7 @@ func (d *Device) join_open(ssid string) error {
 	d.set_iovar2("bsscfg:sup_wpa", whd.IF_STA, 0, 0)
 	d.set_ioctl(whd.WLC_SET_INFRA, whd.IF_STA, 1)
 	d.set_ioctl(whd.WLC_SET_AUTH, whd.IF_STA, 0)
+	d.set_ioctl(whd.WLC_SET_WPA_AUTH, whd.IF_STA, whd.WPA_AUTH_DISABLED)
 
 	return d.wait_for_join(ssid)
 }
@@ -251,7 +254,7 @@ func (p *passphraseInfo) Put(order binary.ByteOrder, b []byte) {
 
 func (d *Device) setPassphrase(pass string) error {
 	if len(pass) > 64 {
-		return errors.New("ssid too long")
+		return errors.New("passphrase too long")
 	}
 
 	var pfi = passphraseInfo{
@@ -264,6 +267,19 @@ func (d *Device) setPassphrase(pass string) error {
 	pfi.Put(_busOrder, buf[:])
 
 	return d.doIoctlSet(whd.WLC_SET_WSEC_PMK, whd.IF_STA, buf[:])
+}
+
+// setSaePassword sets the SAE (WPA3) password via "sae_password" iovar.
+// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L362-L370
+func (d *Device) setSaePassword(pass string) error {
+	if len(pass) > 128 {
+		return errors.New("sae password too long")
+	}
+	// SaePassphraseInfo: len (u16) + passphrase ([u8; 128])
+	var buf [2 + 128]byte
+	_busOrder.PutUint16(buf[0:2], uint16(len(pass)))
+	copy(buf[2:], pass)
+	return d.set_iovar_n("sae_password", whd.IF_STA, buf[:2+len(pass)])
 }
 
 type ssidInfo struct {
@@ -376,14 +392,22 @@ func (d *Device) Join(ssid string, options JoinOptions) error {
 	time.Sleep(100 * time.Millisecond)
 
 	// Set passphrase for WPA/WPA2.
+	// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L346-L360
 	if options.Auth == JoinAuthWPA || options.Auth == JoinAuthWPA2 || options.Auth == JoinAuthWPA2WPA3 {
+		time.Sleep(3 * time.Millisecond) // Embassy: Timer::after_millis(3)
 		if err := d.setPassphrase(options.Passphrase); err != nil {
 			return err
 		}
 	}
 
-	// TODO: Add WPA3 SAE password support when needed.
-	// WPA3 uses "sae_password" iovar instead of WLC_SET_WSEC_PMK.
+	// Set SAE password for WPA3 modes.
+	// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L362-L370
+	if options.Auth == JoinAuthWPA3 || options.Auth == JoinAuthWPA2WPA3 {
+		time.Sleep(3 * time.Millisecond) // Embassy: Timer::after_millis(3)
+		if err := d.setSaePassword(options.Passphrase); err != nil {
+			return err
+		}
+	}
 
 	// set_infra = 1
 	if err := d.set_ioctl(whd.WLC_SET_INFRA, whd.IF_STA, 1); err != nil {
@@ -391,8 +415,9 @@ func (d *Device) Join(ssid string, options JoinOptions) error {
 	}
 
 	// Set auth type.
+	// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L338-L344
 	var auth uint32 = whd.AUTH_OPEN
-	if options.Auth == JoinAuthWPA3 {
+	if options.Auth == JoinAuthWPA3 || options.Auth == JoinAuthWPA2WPA3 {
 		auth = whd.AUTH_SAE
 	}
 	if err := d.set_ioctl(whd.WLC_SET_AUTH, whd.IF_STA, auth); err != nil {
@@ -412,16 +437,15 @@ func (d *Device) Join(ssid string, options JoinOptions) error {
 	}
 
 	// Set WPA auth mode.
+	// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L338-L344
 	var wpaAuth uint32
 	switch options.Auth {
 	case JoinAuthWPA:
 		wpaAuth = whd.WPA_AUTH_WPA_PSK
 	case JoinAuthWPA2:
 		wpaAuth = whd.WPA_AUTH_WPA2_PSK
-	case JoinAuthWPA3:
-		wpaAuth = whd.WPA_AUTH_WPA3_SAE
-	case JoinAuthWPA2WPA3:
-		wpaAuth = whd.WPA_AUTH_WPA2_PSK | whd.WPA_AUTH_WPA3_SAE
+	case JoinAuthWPA3, JoinAuthWPA2WPA3:
+		wpaAuth = whd.WPA_AUTH_WPA3_SAE_PSK
 	}
 	if err := d.set_ioctl(whd.WLC_SET_WPA_AUTH, whd.IF_STA, wpaAuth); err != nil {
 		return err

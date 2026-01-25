@@ -565,11 +565,12 @@ const (
 )
 
 // WPA Authentication modes for WLC_SET_WPA_AUTH ioctl.
+// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/consts.rs#L732-L735
 const (
-	WPA_AUTH_DISABLED uint32 = 0x0000
-	WPA_AUTH_WPA_PSK  uint32 = 0x0004
-	WPA_AUTH_WPA2_PSK uint32 = 0x0080
-	WPA_AUTH_WPA3_SAE uint32 = 0x40000
+	WPA_AUTH_DISABLED    uint32 = 0x0000
+	WPA_AUTH_WPA_PSK     uint32 = 0x0004
+	WPA_AUTH_WPA2_PSK    uint32 = 0x0080
+	WPA_AUTH_WPA3_SAE_PSK uint32 = 0x40000
 )
 
 // Open system authentication for WLC_SET_AUTH ioctl.
