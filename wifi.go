@@ -21,6 +21,31 @@ var (
 	errJoinGeneric  = errors.New("join:failed")
 )
 
+// JoinAuth specifies the authentication method for joining a WiFi network.
+type JoinAuth uint8
+
+const (
+	joinAuthUndefined JoinAuth = iota
+	JoinAuthOpen
+	JoinAuthWPA
+	JoinAuthWPA2
+	JoinAuthWPA3
+	JoinAuthWPA2WPA3
+)
+
+// JoinOptions configures WiFi connection parameters.
+// See embassy-rs for reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs
+type JoinOptions struct {
+	// Auth specifies the authentication method. Implementation will choose WPA2 if passphrase is set or Open if no passphrase is set.
+	Auth JoinAuth
+	// CipherNoAES disables AES cipher.
+	CipherNoAES bool
+	// CipherTKIP enables TKIP cipher. Default is false.
+	CipherTKIP bool
+	// Passphrase is the WiFi password.
+	Passphrase string
+}
+
 func (d *Device) clmLoad(clm string) error {
 	// reference: https://github.com/embassy-rs/embassy/blob/26870082427b64d3ca42691c55a2cded5eadc548/cyw43/src/control.rs#L35
 	d.debug("initControl", slog.Int("clm_len", len(clm)))
@@ -302,23 +327,40 @@ func (d *Device) IsLinkUp() bool {
 	return d.state == linkStateUp
 }
 
-func (d *Device) JoinWPA2(ssid, pass string) error {
+// Join connects to a WiFi network using the specified options.
+// For WPA2/WPA3 networks, provide a passphrase in options.
+// For open networks, use JoinAuth=JoinAuthOpen with empty passphrase.
+//
+// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs see `pub async fn join`
+func (d *Device) Join(ssid string, options JoinOptions) error {
 	err := d.acquire(modeWifi)
 	defer d.release()
 	if err != nil {
 		return err
 	}
-	if ssid != "" && pass == "" {
+	if options.Auth == joinAuthUndefined || options.Auth > JoinAuthWPA2WPA3 {
+		options.Auth = JoinAuthOpen
+		if options.Passphrase != "" {
+			options.Auth = JoinAuthWPA2
+		}
+	}
+	if options.Auth == JoinAuthOpen {
 		return d.join_open(ssid)
 	}
-	d.info("joinWpa2", slog.String("ssid", ssid), slog.Int("len(pass)", len(pass)))
-
+	d.info("join", slog.String("ssid", ssid), slog.Int("auth", int(options.Auth)), slog.Int("passlen", len(options.Passphrase)))
 	if err := d.set_iovar("ampdu_ba_wsize", whd.IF_STA, 8); err != nil {
 		return err
 	}
 
-	// wsec = wpa2
-	if err := d.set_ioctl(whd.WLC_SET_WSEC, whd.IF_STA, 4); err != nil {
+	// Set WSEC (wireless security) based on cipher options.
+	var wsec uint32
+	if !options.CipherNoAES {
+		wsec |= whd.WSEC_AES
+	}
+	if options.CipherTKIP {
+		wsec |= whd.WSEC_TKIP
+	}
+	if err := d.set_ioctl(whd.WLC_SET_WSEC, whd.IF_STA, wsec); err != nil {
 		return err
 	}
 	if err := d.set_iovar2("bsscfg:sup_wpa", whd.IF_STA, 0, 1); err != nil {
@@ -333,24 +375,66 @@ func (d *Device) JoinWPA2(ssid, pass string) error {
 
 	time.Sleep(100 * time.Millisecond)
 
-	if err := d.setPassphrase(pass); err != nil {
-		return err
+	// Set passphrase for WPA/WPA2.
+	if options.Auth == JoinAuthWPA || options.Auth == JoinAuthWPA2 || options.Auth == JoinAuthWPA2WPA3 {
+		if err := d.setPassphrase(options.Passphrase); err != nil {
+			return err
+		}
 	}
+
+	// TODO: Add WPA3 SAE password support when needed.
+	// WPA3 uses "sae_password" iovar instead of WLC_SET_WSEC_PMK.
 
 	// set_infra = 1
 	if err := d.set_ioctl(whd.WLC_SET_INFRA, whd.IF_STA, 1); err != nil {
 		return err
 	}
-	// set_auth = 0 (open)
-	if err := d.set_ioctl(whd.WLC_SET_AUTH, whd.IF_STA, 0); err != nil {
+
+	// Set auth type.
+	var auth uint32 = whd.AUTH_OPEN
+	if options.Auth == JoinAuthWPA3 {
+		auth = whd.AUTH_SAE
+	}
+	if err := d.set_ioctl(whd.WLC_SET_AUTH, whd.IF_STA, auth); err != nil {
 		return err
 	}
-	// set_wpa_auth
-	if err := d.set_ioctl(whd.WLC_SET_WPA_AUTH, whd.IF_STA, 0x80); err != nil {
+
+	// Set MFP based on auth type.
+	var mfp uint32 = whd.MFP_NONE
+	switch options.Auth {
+	case JoinAuthWPA2, JoinAuthWPA2WPA3:
+		mfp = whd.MFP_CAPABLE
+	case JoinAuthWPA3:
+		mfp = whd.MFP_REQUIRED
+	}
+	if err := d.set_iovar("mfp", whd.IF_STA, mfp); err != nil {
+		return err
+	}
+
+	// Set WPA auth mode.
+	var wpaAuth uint32
+	switch options.Auth {
+	case JoinAuthWPA:
+		wpaAuth = whd.WPA_AUTH_WPA_PSK
+	case JoinAuthWPA2:
+		wpaAuth = whd.WPA_AUTH_WPA2_PSK
+	case JoinAuthWPA3:
+		wpaAuth = whd.WPA_AUTH_WPA3_SAE
+	case JoinAuthWPA2WPA3:
+		wpaAuth = whd.WPA_AUTH_WPA2_PSK | whd.WPA_AUTH_WPA3_SAE
+	}
+	if err := d.set_ioctl(whd.WLC_SET_WPA_AUTH, whd.IF_STA, wpaAuth); err != nil {
 		return err
 	}
 
 	return d.wait_for_join(ssid)
+}
+
+// JoinWPA2 connects to a WPA2 WiFi network. If pass is empty, connects to an open network.
+//
+// Deprecated: Use [Device.Join] instead.
+func (d *Device) JoinWPA2(ssid, pass string) error {
+	return d.Join(ssid, JoinOptions{Passphrase: pass})
 }
 
 func (d *Device) StartAP(ssid, pass string, channel uint8) error {

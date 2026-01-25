@@ -545,6 +545,39 @@ const (
 	CYW43_WPA2_AUTH_PSK = 0x0080
 )
 
+// The following constants are from embassy-rs cyw43 driver:
+// https://github.com/embassy-rs/embassy/blob/main/cyw43/src/consts.rs
+
+// Wireless Security (WSEC) cipher flags for WLC_SET_WSEC ioctl.
+const (
+	WSEC_NONE uint32 = 0x00
+	WSEC_WEP  uint32 = 0x01
+	WSEC_TKIP uint32 = 0x02
+	WSEC_AES  uint32 = 0x04
+)
+
+// Management Frame Protection (MFP) modes for "mfp" iovar.
+// Required for proper WPA2/WPA3 cipher negotiation.
+const (
+	MFP_NONE     uint32 = 0 // No MFP
+	MFP_CAPABLE  uint32 = 1 // MFP capable (recommended for WPA2)
+	MFP_REQUIRED uint32 = 2 // MFP required (required for WPA3)
+)
+
+// WPA Authentication modes for WLC_SET_WPA_AUTH ioctl.
+const (
+	WPA_AUTH_DISABLED uint32 = 0x0000
+	WPA_AUTH_WPA_PSK  uint32 = 0x0004
+	WPA_AUTH_WPA2_PSK uint32 = 0x0080
+	WPA_AUTH_WPA3_SAE uint32 = 0x40000
+)
+
+// Open system authentication for WLC_SET_AUTH ioctl.
+const (
+	AUTH_OPEN uint32 = 0x00
+	AUTH_SAE  uint32 = 0x03 // SAE (Simultaneous Authentication of Equals) for WPA3
+)
+
 // # Authorization types
 //
 // Used when setting up an access point, or connecting to an access point
