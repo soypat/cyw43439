@@ -72,7 +72,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		// return stack.s
 		return stack.s.Demux(pkt, 0)
 	})
-	stack.sendbuf = make([]byte, cyw43439.MTU)
+	stack.sendbuf = make([]byte, cyw43439.MaxFrameSize)
 	return stack, err
 }
 
