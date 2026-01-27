@@ -196,12 +196,20 @@ func (d *Device) join_open(ssid string) error {
 	d.set_ioctl(whd.WLC_SET_AUTH, whd.IF_STA, 0)
 	d.set_ioctl(whd.WLC_SET_WPA_AUTH, whd.IF_STA, whd.WPA_AUTH_DISABLED)
 
-	return d.wait_for_join(ssid)
+	return d.wait_for_join(ssid, false) // open network
 }
 
-func (d *Device) wait_for_join(ssid string) (err error) {
+// wait_for_join waits for the join operation to complete.
+// For open networks (secureNetwork=false), success is indicated by SET_SSID with status=0.
+// For secure networks (secureNetwork=true), success is indicated by PSK_SUP with status=6 (KEYED).
+// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L389-L440
+func (d *Device) wait_for_join(ssid string, secureNetwork bool) (err error) {
+	d.secureNetwork = secureNetwork
 	d.eventmask.Enable(whd.EvSET_SSID)
 	d.eventmask.Enable(whd.EvAUTH)
+	if secureNetwork {
+		d.eventmask.Enable(whd.EvPSK_SUP)
+	}
 
 	err = d.setSSID(ssid)
 	if err != nil {
@@ -451,7 +459,7 @@ func (d *Device) Join(ssid string, options JoinOptions) error {
 		return err
 	}
 
-	return d.wait_for_join(ssid)
+	return d.wait_for_join(ssid, true) // secure network
 }
 
 // JoinWPA2 connects to a WPA2 WiFi network. If pass is empty, connects to an open network.

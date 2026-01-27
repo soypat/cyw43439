@@ -525,18 +525,48 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	if !d.eventmask.IsEnabled(ev) {
 		return nil
 	}
+	// Event handling for WiFi join follows Embassy's logic:
+	// - Open networks: SET_SSID with status=SUCCESS indicates success
+	// - Secure networks: PSK_SUP with status=UNSOLICITED (6) indicates success
+	// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L407-L430
+	status := whd.EStatus(aePacket.Message.Status)
 	switch ev {
 	case whd.EvAUTH:
-		if aePacket.Message.Status != 0 {
-			d.state = linkStateAuthFailed
+		if status != whd.EStatusSuccess {
+			// AUTH failure - but only fail for secure networks if not followed by PSK_SUP success
+			if !d.secureNetwork {
+				d.state = linkStateAuthFailed
+			}
 		} else if d.state == linkStateDown {
 			d.state = linkStateUpWaitForSSID
 		}
 	case whd.EvSET_SSID:
-		if aePacket.Message.Status == 0 && d.state == linkStateUpWaitForSSID {
-			d.state = linkStateUp // join operation ends with SET_SSID event
-		} else if aePacket.Message.Status != 0 {
+		switch {
+		case status == whd.EStatusSuccess && !d.secureNetwork:
+			// Open network: SET_SSID success completes the join
+			d.state = linkStateUp
+		case status == whd.EStatusNoNetworks:
 			d.state = linkStateFailed
+		case status != whd.EStatusSuccess && !d.secureNetwork:
+			// Open network with non-zero status is a failure
+			d.state = linkStateFailed
+		}
+		// For secure networks, SET_SSID status!=SUCCESS is normal - wait for PSK_SUP
+	case whd.EvPSK_SUP:
+		// PSK supplicant event - indicates key exchange status for secure networks
+		// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L420-L427
+		switch status {
+		case whd.EStatusUnsolicited:
+			// WLC_SUP_KEYED / UNSOLICITED - success!
+			d.state = linkStateUp
+		case whd.EStatusAbort:
+			// Ignore ABORT which is sometimes sent before successful join
+		case whd.EStatusPartial, whd.EStatusNewassoc:
+			// Timeout waiting for key exchange (M1/M3/G1) - might retry
+			// Keep waiting, don't fail yet
+		default:
+			// Other PSK_SUP status indicates authentication failure
+			d.state = linkStateAuthFailed
 		}
 	case whd.EvLINK:
 		if aePacket.Message.Flags&^1 == 0 { // 1 set on REASSOC.

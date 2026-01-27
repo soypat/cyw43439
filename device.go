@@ -94,6 +94,7 @@ type Device struct {
 	logger          *slog.Logger
 	_traceenabled   bool
 	state           linkState
+	secureNetwork   bool // true when joining WPA/WPA2/WPA3 network (affects event handling)
 }
 
 type Config struct {
