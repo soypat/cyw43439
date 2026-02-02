@@ -54,8 +54,9 @@ func main() {
 	devcfg.Logger = logger
 	var err error
 	cystack, err = cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
-		Hostname:    hostname,
-		MaxTCPPorts: numListeners,
+		Hostname:              hostname,
+		MaxTCPPorts:           numListeners,
+		EnableRxPacketCapture: true,
 	})
 	if err != nil {
 		panic("setup failed:" + err.Error())
