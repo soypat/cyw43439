@@ -4,6 +4,11 @@
 *.dll
 *.so
 *.dylib
+*.uf2
+*.hex
+*.bin
+/.claude
+/docs
 
 cmd/cywanalyze/*.bin
 cmd/cywanalyze/*.txt

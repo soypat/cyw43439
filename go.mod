@@ -12,4 +12,4 @@ require (
 	golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa
 )
 
-require github.com/soypat/lneto v0.0.0-20260126214933-360628f1b8a2
+require github.com/soypat/lneto v0.0.0-20260202131651-0a19c6bfd8d5

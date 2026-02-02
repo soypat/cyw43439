@@ -57,6 +57,7 @@ func main() {
 		Hostname:              hostname,
 		MaxTCPPorts:           numListeners,
 		EnableRxPacketCapture: true,
+		EnableTxPacketCapture: true,
 	})
 	if err != nil {
 		panic("setup failed:" + err.Error())
