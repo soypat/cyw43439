@@ -525,66 +525,100 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	if !d.eventmask.IsEnabled(ev) {
 		return nil
 	}
-	// Event handling for WiFi join follows Embassy's logic:
-	// - Open networks: SET_SSID with status=SUCCESS indicates success
-	// - Secure networks: PSK_SUP with status=UNSOLICITED (6) indicates success
-	// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L407-L430
+	// Event handling follows embassy-rs runner.rs:769-842.
+	// Uses three flags (authOK, joinOK, keyExchangeOK) to determine link state.
+	// Link is UP when: joinOK && (!secureNetwork || keyExchangeOK)  ref: runner.rs:826
 	status := whd.EStatus(aePacket.Message.Status)
+	msg := &aePacket.Message
+	updateLinkStatus := false
 	switch ev {
-	case whd.EvAUTH:
-		if status != whd.EStatusSuccess {
-			// AUTH failure - but only fail for secure networks if not followed by PSK_SUP success
-			if !d.secureNetwork {
-				d.state = linkStateAuthFailed
-			}
-		} else if d.state == linkStateDown {
-			d.state = linkStateUpWaitForSSID
-		}
-	case whd.EvSET_SSID:
-		switch {
-		case status == whd.EStatusSuccess && !d.secureNetwork:
-			// Open network: SET_SSID success completes the join
-			d.state = linkStateUp
-		case status == whd.EStatusNoNetworks:
-			d.state = linkStateFailed
-		case status != whd.EStatusSuccess && !d.secureNetwork:
-			// Open network with non-zero status is a failure
-			d.state = linkStateFailed
-		}
-		// For secure networks, SET_SSID status!=SUCCESS is normal - wait for PSK_SUP
-	case whd.EvPSK_SUP:
-		// PSK supplicant event - indicates key exchange status for secure networks
-		// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L420-L427
-		switch status {
-		case whd.EStatusUnsolicited:
-			// WLC_SUP_KEYED / UNSOLICITED - success!
-			d.state = linkStateUp
-		case whd.EStatusAbort:
-			// Ignore ABORT which is sometimes sent before successful join
-		case whd.EStatusPartial, whd.EStatusNewassoc:
-			// Timeout waiting for key exchange (M1/M3/G1) - might retry
-			// Keep waiting, don't fail yet
-		default:
-			// Other PSK_SUP status indicates authentication failure
-			d.state = linkStateAuthFailed
-		}
 	case whd.EvLINK:
-		if aePacket.Message.Flags&^1 == 0 { // 1 set on REASSOC.
-			d.state = linkStateWaitForReconnect // Disconnected, but will try to reconnect.
+		// LINK with flags==0 indicates link down. ref: runner.rs:779
+		if status == whd.EStatusSuccess && msg.Flags == 0 {
+			d.authOK = false
+			d.joinOK = false
+			d.keyExchangeOK = false
+			updateLinkStatus = true
+		}
+	case whd.EvDEAUTH:
+		// DEAUTH with SUCCESS indicates link down. ref: runner.rs:780
+		if status == whd.EStatusSuccess {
+			d.authOK = false
+			d.joinOK = false
+			d.keyExchangeOK = false
+			updateLinkStatus = true
+		}
+	case whd.EvDISASSOC:
+		d.authOK = false
+		d.joinOK = false
+		d.keyExchangeOK = false
+		updateLinkStatus = true
+	case whd.EvAUTH:
+		// AUTH FAIL with reason=16, auth_type=3 is WPA3-specific link down. ref: runner.rs:781
+		if status == whd.EStatusFail && msg.Reason == 16 && msg.AuthType == 3 {
+			d.authOK = false
+			d.joinOK = false
+			d.keyExchangeOK = false
+			updateLinkStatus = true
+		} else if status != whd.EStatusUnsolicited {
+			// Update auth flag. Ignore unsolicited events. ref: runner.rs:787-794
+			d.authOK = status == whd.EStatusSuccess
 		}
 	case whd.EvJOIN:
-		if d.state == linkStateWaitForReconnect {
-			d.state = linkStateUp
+		// Successfully joined the network. ref: runner.rs:795-799
+		if status == whd.EStatusSuccess {
+			d.joinOK = true
+			updateLinkStatus = true
 		}
-	case whd.EvDEAUTH, whd.EvDISASSOC:
-		d.state = linkStateDown
+	case whd.EvSET_SSID:
+		// SET_SSID is used by wait_for_join (control.rs:413-419) to detect join completion/failure.
+		switch {
+		case status == whd.EStatusSuccess && !d.secureNetwork:
+			// Open network: SET_SSID success completes the join. ref: control.rs:415
+			d.state = linkStateUp
+		case status == whd.EStatusNoNetworks:
+			// Network not found (open or secure). ref: control.rs:416
+			d.state = linkStateFailed
+		case status != whd.EStatusSuccess:
+			// Non-success SET_SSID is a join failure for both open and secure. ref: control.rs:417-418
+			d.state = linkStateFailed
+		}
+	case whd.EvPSK_SUP:
+		// Key exchange events for secure networks. ref: runner.rs:801-820
+		reason := msg.Reason
+		if status == whd.EStatusUnsolicited && msg.Flags == 0 && reason == 0 {
+			// Successful key exchange, guarded by authOK. ref: runner.rs:806-812
+			if d.authOK {
+				d.keyExchangeOK = true
+				updateLinkStatus = true
+			}
+		} else if reason == 14 {
+			// Ignore PSK_SUP events with reason 14 (AP roaming). ref: runner.rs:815
+		} else {
+			// Other PSK_SUP events indicate key exchange errors. ref: runner.rs:817-820
+			d.keyExchangeOK = false
+			updateLinkStatus = true
+		}
 	}
+
+	if updateLinkStatus {
+		// Compute link state from flags. ref: runner.rs:824-830
+		if d.joinOK && (!d.secureNetwork || d.keyExchangeOK) {
+			d.state = linkStateUp
+		} else {
+			d.state = linkStateDown
+		}
+	}
+
 	if d.logenabled(slog.LevelInfo) {
 		d.info("rxEvent",
 			slog.String("event", ev.String()),
 			slog.Uint64("status", uint64(aePacket.Message.Status)),
 			slog.Uint64("reason", uint64(aePacket.Message.Reason)),
 			slog.Uint64("flags", uint64(aePacket.Message.Flags)),
+			slog.Bool("joinOK", d.joinOK),
+			slog.Bool("authOK", d.authOK),
+			slog.Bool("keyExOK", d.keyExchangeOK),
 			slog.Uint64("dev.linkstate", uint64(d.state)),
 		)
 	}
