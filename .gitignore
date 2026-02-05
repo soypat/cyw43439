@@ -26,6 +26,7 @@ cmd/cywanalyze/*.txt
 # vendor/
 .vscode/*
 .idea/*
+/.claude
 local
 go.work
 go.work.sum
