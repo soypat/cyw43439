@@ -8,8 +8,9 @@ import (
 	"github.com/soypat/cyw43439/whd"
 )
 
-// MTU (maximum transmission unit) returns the maximum amount
-// of bytes that can be sent in a single ethernet frame in a call to SendEth.
+// MTU (maximum transmission unit) returns the maximum ethernet payload size
+// (excluding the 14-byte ethernet header). This is the value expected by
+// network stacks like lneto. For full frame capacity, use [MaxFrameSize].
 func (d *Device) MTU() int { return MTU }
 
 // HardwareAddr6 returns the device's 6-byte [MAC address].

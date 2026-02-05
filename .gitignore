@@ -4,6 +4,11 @@
 *.dll
 *.so
 *.dylib
+*.uf2
+*.hex
+*.bin
+/.claude
+/docs
 
 cmd/cywanalyze/*.bin
 cmd/cywanalyze/*.txt
@@ -21,6 +26,7 @@ cmd/cywanalyze/*.txt
 # vendor/
 .vscode/*
 .idea/*
+/.claude
 local
 go.work
 go.work.sum

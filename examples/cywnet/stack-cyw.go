@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/soypat/cyw43439"
+	"github.com/soypat/lneto/internet/pcap"
 	"github.com/soypat/lneto/x/xnet"
 )
 
@@ -20,6 +21,13 @@ type Stack struct {
 	log      *slog.Logger
 	sendbuf  []byte
 	lastrecv uint16
+	// Packet capture utilities.
+	enableRxPcap bool
+	enableTxPcap bool
+	fmtPcapBuf   []byte
+	frms         []pcap.Frame
+	cap          pcap.PacketBreakdown
+	pfmt         pcap.Formatter
 }
 
 type StackConfig struct {
@@ -29,6 +37,10 @@ type StackConfig struct {
 	Hostname      string
 	MaxTCPPorts   int
 	RandSeed      int64
+	// Enables printing of received packets. Useful for debugging.
+	EnableRxPacketCapture bool
+	// Enable printing of transmitted packets
+	EnableTxPacketCapture bool
 }
 
 func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, cfg StackConfig) (*Stack, error) {
@@ -57,6 +69,8 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	// Configure Stack.
 	stack := new(Stack)
 	stack.dev = dev
+	stack.enableRxPcap = cfg.EnableRxPacketCapture
+	stack.enableTxPcap = cfg.EnableTxPacketCapture
 	elapsed := time.Since(start)
 	err = stack.s.Reset(xnet.StackConfig{
 		StaticAddress:   cfg.StaticAddress,
@@ -69,10 +83,13 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		MTU:             cyw43439.MTU,
 	})
 	dev.RecvEthHandle(func(pkt []byte) error {
-		// return stack.s
-		return stack.s.Demux(pkt, 0)
+		err := stack.s.Demux(pkt, 0)
+		if stack.enableRxPcap && err == nil {
+			stack.printPacket("IN  ", pkt)
+		}
+		return err
 	})
-	stack.sendbuf = make([]byte, cyw43439.MTU)
+	stack.sendbuf = make([]byte, cyw43439.MaxFrameSize)
 	return stack, err
 }
 
@@ -110,6 +127,9 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 	if err != nil {
 		stack.logerr("RecvAndSend:SendEth", slog.Int("plen", send), slog.String("err", err.Error()))
 	}
+	if stack.enableTxPcap {
+		stack.printPacket("OUT ", stack.sendbuf[:send])
+	}
 	return send, recv, err
 }
 
@@ -145,5 +165,35 @@ func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (dhcpResults *xnet.DHCPResults
 func (stack *Stack) logerr(msg string, attrs ...slog.Attr) {
 	if stack.log != nil {
 		stack.log.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)
+	}
+}
+
+func (stack *Stack) printPacket(prefix string, pkt []byte) {
+	var err error
+	stack.frms, err = stack.cap.CaptureEthernet(stack.frms[:0], pkt, 0)
+	if err == nil {
+		stack.fmtPcapBuf = append(stack.fmtPcapBuf[:0], prefix...)
+		stack.fmtPcapBuf, err = stack.pfmt.FormatFrames(stack.fmtPcapBuf, stack.frms, pkt)
+		stack.fmtPcapBuf = append(stack.fmtPcapBuf, '\n')
+		if err != nil {
+			println("formatting frame:", err.Error())
+		}
+		serialWrite(stack.fmtPcapBuf)
+	} else {
+		println("processing", prefix, "packet:", err.Error())
+	}
+}
+
+// circumvents pico issue on tinygo https://github.com/tinygo-org/tinygo/issues/5188
+func serialWrite(b []byte) {
+	const chunkSize = 256
+	const sleep = 30 * time.Millisecond
+	for len(b) > 0 {
+		n := min(len(b), chunkSize)
+		machine.Serial.Write(b[:n])
+		b = b[n:]
+		if len(b) > 0 {
+			time.Sleep(sleep)
+		}
 	}
 }
