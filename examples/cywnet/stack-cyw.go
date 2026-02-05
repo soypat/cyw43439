@@ -37,15 +37,12 @@ type StackConfig struct {
 	Hostname      string
 	MaxTCPPorts   int
 	RandSeed      int64
-<<<<<<< mfp
 	// WifiJoinOptions are used to join the wifi. Passphrase field is override by password argument to [NewConfiguredPicoWithStack].
 	WifiJoinOptions cyw43439.JoinOptions
-=======
 	// Enables printing of received packets. Useful for debugging.
 	EnableRxPacketCapture bool
 	// Enable printing of transmitted packets
 	EnableTxPacketCapture bool
->>>>>>> main
 }
 
 func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, cfg StackConfig) (*Stack, error) {
