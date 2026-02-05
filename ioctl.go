@@ -531,47 +531,9 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	status := whd.EStatus(aePacket.Message.Status)
 	msg := &aePacket.Message
 	updateLinkStatus := false
-	switch ev {
-	case whd.EvLINK:
-		// LINK with flags==0 indicates link down. ref: runner.rs:779
-		if status == whd.EStatusSuccess && msg.Flags == 0 {
-			d.authOK = false
-			d.joinOK = false
-			d.keyExchangeOK = false
-			updateLinkStatus = true
-		}
-	case whd.EvDEAUTH:
-		// DEAUTH with SUCCESS indicates link down. ref: runner.rs:780
-		if status == whd.EStatusSuccess {
-			d.authOK = false
-			d.joinOK = false
-			d.keyExchangeOK = false
-			updateLinkStatus = true
-		}
-	case whd.EvDISASSOC:
-		d.authOK = false
-		d.joinOK = false
-		d.keyExchangeOK = false
-		updateLinkStatus = true
-	case whd.EvAUTH:
-		// AUTH FAIL with reason=16, auth_type=3 is WPA3-specific link down. ref: runner.rs:781
-		if status == whd.EStatusFail && msg.Reason == 16 && msg.AuthType == 3 {
-			d.authOK = false
-			d.joinOK = false
-			d.keyExchangeOK = false
-			updateLinkStatus = true
-		} else if status != whd.EStatusUnsolicited {
-			// Update auth flag. Ignore unsolicited events. ref: runner.rs:787-794
-			d.authOK = status == whd.EStatusSuccess
-		}
-	case whd.EvJOIN:
-		// Successfully joined the network. ref: runner.rs:795-799
-		if status == whd.EStatusSuccess {
-			d.joinOK = true
-			updateLinkStatus = true
-		}
-	case whd.EvSET_SSID:
-		// SET_SSID is used by wait_for_join (control.rs:413-419) to detect join completion/failure.
+	switch {
+	// SET_SSID is used by wait_for_join (control.rs:413-419) to detect join completion/failure.
+	case ev == whd.EvSET_SSID:
 		switch {
 		case status == whd.EStatusSuccess && !d.secureNetwork:
 			// Open network: SET_SSID success completes the join. ref: control.rs:415
@@ -583,22 +545,50 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 			// Non-success SET_SSID is a join failure for both open and secure. ref: control.rs:417-418
 			d.state = linkStateFailed
 		}
-	case whd.EvPSK_SUP:
-		// Key exchange events for secure networks. ref: runner.rs:801-820
-		reason := msg.Reason
-		if status == whd.EStatusUnsolicited && msg.Flags == 0 && reason == 0 {
-			// Successful key exchange, guarded by authOK. ref: runner.rs:806-812
-			if d.authOK {
-				d.keyExchangeOK = true
-				updateLinkStatus = true
-			}
-		} else if reason == 14 {
-			// Ignore PSK_SUP events with reason 14 (AP roaming). ref: runner.rs:815
-		} else {
-			// Other PSK_SUP events indicate key exchange errors. ref: runner.rs:817-820
-			d.keyExchangeOK = false
+	// Events indicating link down. ref: runner.rs:776-786
+	// LINK with flags==0: link lost (reason=1: signal loss/out of range, reason=2: controlled shutdown)
+	// DEAUTH with SUCCESS: AP deauthenticated us
+	// DISASSOC: AP disassociated us
+	// AUTH with FAIL, reason=16, auth_type=3: WPA3-specific authentication rejection
+	case ev == whd.EvLINK && status == whd.EStatusSuccess && msg.Flags == 0,
+		ev == whd.EvDEAUTH && status == whd.EStatusSuccess,
+		ev == whd.EvDISASSOC,
+		ev == whd.EvAUTH && status == whd.EStatusFail && msg.Reason == 16 && msg.AuthType == 3:
+
+		d.authOK = false
+		d.joinOK = false
+		d.keyExchangeOK = false
+		updateLinkStatus = true
+
+	// Update auth flag; ignore unsolicited events. ref: runner.rs:787-794
+	// When changing passwords on a WPA3 AP we're connected to, or when roaming,
+	// PSK_SUP events indicating success may still arrive. Only AUTH events
+	// reliably indicate failure, so this flag covers that scenario.
+	case ev == whd.EvAUTH && status != whd.EStatusUnsolicited:
+		d.authOK = status == whd.EStatusSuccess
+
+	// Successfully joined the network. ref: runner.rs:795-799
+	case ev == whd.EvJOIN && status == whd.EStatusSuccess:
+		d.joinOK = true
+		updateLinkStatus = true
+
+	// Key exchange events (PSK_SUP) for secure networks. ref: runner.rs:801-820
+	// Note: PSK_SUP status codes have different meanings from other event types.
+
+	// Successful key exchange.
+	case ev == whd.EvPSK_SUP && status == whd.EStatusUnsolicited && msg.Flags == 0 && msg.Reason == 0:
+		if d.authOK {
+			d.keyExchangeOK = true
 			updateLinkStatus = true
 		}
+
+	// Ignore PSK_SUP with reason=14; these are often sent when roaming between APs.
+	case ev == whd.EvPSK_SUP && msg.Reason == 14:
+
+	// All other PSK_SUP events indicate key exchange failure.
+	case ev == whd.EvPSK_SUP:
+		d.keyExchangeOK = false
+		updateLinkStatus = true
 	}
 
 	if updateLinkStatus {
