@@ -29,12 +29,10 @@ const (
 type linkState uint8
 
 const (
-	linkStateDown = iota
-	linkStateUpWaitForSSID
+	linkStateDown   linkState = iota
+	_                         // unused (was linkStateUpWaitForSSID)
 	linkStateUp
 	linkStateFailed
-	linkStateAuthFailed
-	linkStateWaitForReconnect
 )
 
 type outputPin func(bool)
@@ -94,6 +92,10 @@ type Device struct {
 	logger          *slog.Logger
 	_traceenabled   bool
 	state           linkState
+	secureNetwork   bool // true when joining WPA/WPA2/WPA3 network (affects event handling)
+	authOK          bool // AUTH event succeeded. ref: runner.rs:90
+	joinOK          bool // JOIN event succeeded. ref: runner.rs:88
+	keyExchangeOK   bool // PSK_SUP key exchange succeeded. ref: runner.rs:89
 }
 
 type Config struct {

@@ -37,6 +37,8 @@ type StackConfig struct {
 	Hostname      string
 	MaxTCPPorts   int
 	RandSeed      int64
+	// WifiJoinOptions are used to join the wifi. Passphrase field is override by password argument to [NewConfiguredPicoWithStack].
+	WifiJoinOptions cyw43439.JoinOptions
 	// Enables printing of received packets. Useful for debugging.
 	EnableRxPacketCapture bool
 	// Enable printing of transmitted packets
@@ -47,6 +49,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	if cfg.Hostname == "" {
 		return nil, errors.New("empty hostname")
 	}
+	cfg.WifiJoinOptions.Passphrase = password
 	start := time.Now()
 	dev := cyw43439.NewPicoWDevice()
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
@@ -57,7 +60,8 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	if err != nil {
 		return nil, err
 	}
-	err = dev.JoinWPA2(ssid, password)
+
+	err = dev.Join(ssid, cfg.WifiJoinOptions)
 	if err != nil {
 		return nil, err
 	}

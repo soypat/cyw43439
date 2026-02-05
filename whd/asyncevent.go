@@ -279,3 +279,43 @@ const (
 	// highest val + 1 for range checkin
 	evLAST AsyncEventType = 190
 )
+
+// EStatus represents the status field in async event messages.
+// Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/consts.rs#L244-L279
+type EStatus uint32
+
+const (
+	// EStatusSuccess indicates operation was successful.
+	EStatusSuccess EStatus = 0
+	// EStatusFail indicates operation failed.
+	EStatusFail EStatus = 1
+	// EStatusTimeout indicates operation timed out.
+	EStatusTimeout EStatus = 2
+	// EStatusNoNetworks indicates failed due to no matching network found.
+	EStatusNoNetworks EStatus = 3
+	// EStatusAbort indicates operation was aborted.
+	EStatusAbort EStatus = 4
+	// EStatusNoAck indicates protocol failure: packet not ack'd.
+	EStatusNoAck EStatus = 5
+	// EStatusUnsolicited indicates AUTH or ASSOC packet was unsolicited.
+	// For PSK_SUP event, status=6 indicates successful key exchange (WLC_SUP_KEYED).
+	EStatusUnsolicited EStatus = 6
+	// EStatusAttempt indicates attempt to assoc to an auto auth configuration.
+	EStatusAttempt EStatus = 7
+	// EStatusPartial indicates scan results are incomplete.
+	EStatusPartial EStatus = 8
+	// EStatusNewscan indicates scan aborted by another scan.
+	EStatusNewscan EStatus = 9
+	// EStatusNewassoc indicates scan aborted due to assoc in progress.
+	EStatusNewassoc EStatus = 10
+	// EStatus11hQuiet indicates 802.11h quiet period started.
+	EStatus11hQuiet EStatus = 11
+	// EStatusSuppress indicates user disabled scanning (WLC_SET_SCANSUPPRESS).
+	EStatusSuppress EStatus = 12
+	// EStatusNochans indicates no allowable channels to scan.
+	EStatusNochans EStatus = 13
+	// EStatusCcxFastRoam indicates scan aborted due to CCX fast roam.
+	EStatusCcxFastRoam EStatus = 14
+	// EStatusCsAbort indicates abort channel select.
+	EStatusCsAbort EStatus = 15
+)

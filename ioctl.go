@@ -534,36 +534,90 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	if !d.eventmask.IsEnabled(ev) {
 		return nil
 	}
-	switch ev {
-	case whd.EvAUTH:
-		if aePacket.Message.Status != 0 {
-			d.state = linkStateAuthFailed
-		} else if d.state == linkStateDown {
-			d.state = linkStateUpWaitForSSID
-		}
-	case whd.EvSET_SSID:
-		if aePacket.Message.Status == 0 && d.state == linkStateUpWaitForSSID {
-			d.state = linkStateUp // join operation ends with SET_SSID event
-		} else if aePacket.Message.Status != 0 {
+	// Event handling follows embassy-rs runner.rs:769-842.
+	// Uses three flags (authOK, joinOK, keyExchangeOK) to determine link state.
+	// Link is UP when: joinOK && (!secureNetwork || keyExchangeOK)  ref: runner.rs:826
+	status := whd.EStatus(aePacket.Message.Status)
+	msg := &aePacket.Message
+	updateLinkStatus := false
+	switch {
+	// SET_SSID is used by wait_for_join (control.rs:413-419) to detect join completion/failure.
+	case ev == whd.EvSET_SSID:
+		switch {
+		case status == whd.EStatusSuccess && !d.secureNetwork:
+			// Open network: SET_SSID success completes the join. ref: control.rs:415
+			d.state = linkStateUp
+		case status == whd.EStatusNoNetworks:
+			// Network not found (open or secure). ref: control.rs:416
+			d.state = linkStateFailed
+		case status != whd.EStatusSuccess:
+			// Non-success SET_SSID is a join failure for both open and secure. ref: control.rs:417-418
 			d.state = linkStateFailed
 		}
-	case whd.EvLINK:
-		if aePacket.Message.Flags&^1 == 0 { // 1 set on REASSOC.
-			d.state = linkStateWaitForReconnect // Disconnected, but will try to reconnect.
+	// Events indicating link down. ref: runner.rs:776-786
+	// LINK with flags==0: link lost (reason=1: signal loss/out of range, reason=2: controlled shutdown)
+	// DEAUTH with SUCCESS: AP deauthenticated us
+	// DISASSOC: AP disassociated us
+	// AUTH with FAIL, reason=16, auth_type=3: WPA3-specific authentication rejection
+	case ev == whd.EvLINK && status == whd.EStatusSuccess && msg.Flags == 0,
+		ev == whd.EvDEAUTH && status == whd.EStatusSuccess,
+		ev == whd.EvDISASSOC,
+		ev == whd.EvAUTH && status == whd.EStatusFail && msg.Reason == 16 && msg.AuthType == 3:
+
+		d.authOK = false
+		d.joinOK = false
+		d.keyExchangeOK = false
+		updateLinkStatus = true
+
+	// Update auth flag; ignore unsolicited events. ref: runner.rs:787-794
+	// When changing passwords on a WPA3 AP we're connected to, or when roaming,
+	// PSK_SUP events indicating success may still arrive. Only AUTH events
+	// reliably indicate failure, so this flag covers that scenario.
+	case ev == whd.EvAUTH && status != whd.EStatusUnsolicited:
+		d.authOK = status == whd.EStatusSuccess
+
+	// Successfully joined the network. ref: runner.rs:795-799
+	case ev == whd.EvJOIN && status == whd.EStatusSuccess:
+		d.joinOK = true
+		updateLinkStatus = true
+
+	// Key exchange events (PSK_SUP) for secure networks. ref: runner.rs:801-820
+	// Note: PSK_SUP status codes have different meanings from other event types.
+
+	// Successful key exchange.
+	case ev == whd.EvPSK_SUP && status == whd.EStatusUnsolicited && msg.Flags == 0 && msg.Reason == 0:
+		if d.authOK {
+			d.keyExchangeOK = true
+			updateLinkStatus = true
 		}
-	case whd.EvJOIN:
-		if d.state == linkStateWaitForReconnect {
-			d.state = linkStateUp
-		}
-	case whd.EvDEAUTH, whd.EvDISASSOC:
-		d.state = linkStateDown
+
+	// Ignore PSK_SUP with reason=14; these are often sent when roaming between APs.
+	case ev == whd.EvPSK_SUP && msg.Reason == 14:
+
+	// All other PSK_SUP events indicate key exchange failure.
+	case ev == whd.EvPSK_SUP:
+		d.keyExchangeOK = false
+		updateLinkStatus = true
 	}
+
+	if updateLinkStatus {
+		// Compute link state from flags. ref: runner.rs:824-830
+		if d.joinOK && (!d.secureNetwork || d.keyExchangeOK) {
+			d.state = linkStateUp
+		} else {
+			d.state = linkStateDown
+		}
+	}
+
 	if d.logenabled(slog.LevelInfo) {
 		d.info("rxEvent",
 			slog.String("event", ev.String()),
 			slog.Uint64("status", uint64(aePacket.Message.Status)),
 			slog.Uint64("reason", uint64(aePacket.Message.Reason)),
 			slog.Uint64("flags", uint64(aePacket.Message.Flags)),
+			slog.Bool("joinOK", d.joinOK),
+			slog.Bool("authOK", d.authOK),
+			slog.Bool("keyExOK", d.keyExchangeOK),
 			slog.Uint64("dev.linkstate", uint64(d.state)),
 		)
 	}
