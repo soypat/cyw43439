@@ -285,11 +285,11 @@ func nicLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 		queueSize                = 3
 		maxRetriesBeforeDropping = 3
 	)
-	var queue [queueSize][mtu]byte
+	var queue [queueSize][cyw43439.MaxFrameSize]byte
 	var lenBuf [queueSize]int
 	var retries [queueSize]int
 	markSent := func(i int) {
-		queue[i] = [mtu]byte{} // Not really necessary.
+		queue[i] = [cyw43439.MaxFrameSize]byte{} // Not really necessary.
 		lenBuf[i] = 0
 		retries[i] = 0
 	}

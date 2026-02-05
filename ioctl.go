@@ -12,6 +12,7 @@ import (
 	"log/slog"
 
 	"github.com/soypat/cyw43439/whd"
+	"github.com/soypat/lneto/ethernet"
 )
 
 var (
@@ -86,9 +87,19 @@ func (d *Device) has_credit() bool {
 	return d.sdpcmSeq != d.sdpcmSeqMax && (d.sdpcmSeqMax-d.sdpcmSeq)&0x80 == 0
 }
 
-// 2 is padding necessary in the SDPCM header.
-const mtuPrefix = 2 + whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
-const MTU = 2048 - mtuPrefix
+const (
+	paddingSize = 2
+	// sdpcmOverhead is the internal protocol overhead (SDPCM + BDC headers + 2 byte padding).
+	sdpcmOverhead = paddingSize + whd.SDPCM_HEADER_LEN + whd.BDC_HEADER_LEN
+	// MaxFrameSize is the maximum ethernet frame size (including ethernet data)
+	// that can be sent through the CYW43439 chip.
+	MaxFrameSize = 2048 - sdpcmOverhead
+	// ethHeaderSize is the size of an ethernet frame header (dst MAC + src MAC + EtherType). Includes VLAN tagging and CRC.
+	ethHeaderSize = ethernet.MaxOverheadSize
+	// MTU is the Maximum Transmission Unit - the maximum ethernet payload size.
+	// This is the value expected by network stacks like lneto.
+	MTU = MaxFrameSize - ethHeaderSize
+)
 
 // tx transmits a SDPCM+BDC data packet to the device.
 func (d *Device) tx(packet []byte) (err error) {
@@ -102,9 +113,7 @@ func (d *Device) tx(packet []byte) (err error) {
 
 	// There MUST be 2 bytes of padding between the SDPCM and BDC headers (only for data packets). See reference.
 	// "¯\_(ツ)_/¯"
-
-	const PADDING_SIZE = 2
-	totalLen := mtuPrefix + len(packet)
+	totalLen := sdpcmOverhead + len(packet)
 	if totalLen > len(buf8) {
 		return errTxPacketTooLarge
 	}
@@ -123,16 +132,16 @@ func (d *Device) tx(packet []byte) (err error) {
 		SizeCom:      ^uint16(totalLen),
 		Seq:          uint8(seq),
 		ChanAndFlags: 2, // Data channel.
-		HeaderLength: whd.SDPCM_HEADER_LEN + PADDING_SIZE,
+		HeaderLength: whd.SDPCM_HEADER_LEN + paddingSize,
 	}
 	d.lastSDPCMHeader.Put(_busOrder, buf8[:whd.SDPCM_HEADER_LEN])
 
 	d.auxBDCHeader = whd.BDCHeader{
 		Flags: 2 << 4, // BDC version.
 	}
-	d.auxBDCHeader.Put(buf8[whd.SDPCM_HEADER_LEN+PADDING_SIZE:])
+	d.auxBDCHeader.Put(buf8[whd.SDPCM_HEADER_LEN+paddingSize:])
 
-	copy(buf8[whd.SDPCM_HEADER_LEN+PADDING_SIZE+whd.BDC_HEADER_LEN:], packet)
+	copy(buf8[whd.SDPCM_HEADER_LEN+paddingSize+whd.BDC_HEADER_LEN:], packet)
 
 	return d.wlan_write(buf[:alignup(uint32(totalLen), 4)/4], uint32(totalLen))
 }
