@@ -142,13 +142,18 @@ type DHCPConfig struct {
 }
 
 func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (dhcpResults *xnet.DHCPResults, err error) {
-	if !cfg.RequestedAddr.Is4() {
-		return dhcpResults, errors.New("only dhcpv4 supported")
+	var reqaddr [4]byte
+	if cfg.RequestedAddr.IsValid() {
+		if !cfg.RequestedAddr.Is4() {
+			return dhcpResults, errors.New("IPV6 DHCP unsupported")
+		}
+		reqaddr = cfg.RequestedAddr.As4()
 	}
+
 	lstack := stack.LnetoStack()
 	const pollTime = 50 * time.Millisecond
 	rstack := lstack.StackRetrying(pollTime)
-	dhcpResults, err = rstack.DoDHCPv4(cfg.RequestedAddr.As4(), 3*time.Second, 3)
+	dhcpResults, err = rstack.DoDHCPv4(reqaddr, 3*time.Second, 3)
 	if err != nil {
 		return dhcpResults, err
 	}
