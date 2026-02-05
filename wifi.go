@@ -15,10 +15,8 @@ import (
 )
 
 var (
-	errJoinAuth     = errors.New("join:auth failed")
-	errJoinSetSSID  = errors.New("join:SET_SSID failed")
-	errJoinWaitSSID = errors.New("join:wait for ssid")
-	errJoinGeneric  = errors.New("join:failed")
+	errJoinSetSSID = errors.New("join:SET_SSID failed")
+	errJoinGeneric = errors.New("join:failed")
 )
 
 // JoinAuth specifies the authentication method for joining a WiFi network.
@@ -205,8 +203,14 @@ func (d *Device) join_open(ssid string) error {
 // Reference: https://github.com/embassy-rs/embassy/blob/main/cyw43/src/control.rs#L389-L440
 func (d *Device) wait_for_join(ssid string, secureNetwork bool) (err error) {
 	d.secureNetwork = secureNetwork
+	// Reset flags for new join attempt. ref: runner.rs:120-122
+	d.authOK = false
+	d.joinOK = false
+	d.keyExchangeOK = false
+
 	d.eventmask.Enable(whd.EvSET_SSID)
 	d.eventmask.Enable(whd.EvAUTH)
+	d.eventmask.Enable(whd.EvJOIN)
 	if secureNetwork {
 		d.eventmask.Enable(whd.EvPSK_SUP)
 	}
@@ -224,26 +228,24 @@ func (d *Device) wait_for_join(ssid string, secureNetwork bool) (err error) {
 		if err != nil {
 			return err
 		}
-		// Keep trying until we get a link up/auth failed/timeout.
-		stateWait := d.state == linkStateDown || d.state == linkStateUpWaitForSSID
-		keepGoing = stateWait && time.Until(deadline) > 0
+		// Keep trying while state is still Down (waiting for events).
+		keepGoing = d.state == linkStateDown && time.Until(deadline) > 0
 	}
 	switch d.state {
 	case linkStateUp:
 		// Begin listening in for link change/down events.
 		d.eventmask.Enable(whd.EvLINK)
-		d.eventmask.Enable(whd.EvJOIN)
 		d.eventmask.Enable(whd.EvDISASSOC)
 		d.eventmask.Enable(whd.EvDEAUTH)
 
-	case linkStateAuthFailed:
-		err = errJoinAuth
 	case linkStateFailed:
 		err = errJoinSetSSID
-	case linkStateUpWaitForSSID:
-		err = errJoinWaitSSID
 	default:
-		err = errJoinGeneric
+		if d.state == linkStateDown {
+			err = errJoinGeneric // Timed out without resolving.
+		} else {
+			err = errJoinGeneric
+		}
 	}
 	return err
 }
@@ -287,7 +289,8 @@ func (d *Device) setSaePassword(pass string) error {
 	var buf [2 + 128]byte
 	_busOrder.PutUint16(buf[0:2], uint16(len(pass)))
 	copy(buf[2:], pass)
-	return d.set_iovar_n("sae_password", whd.IF_STA, buf[:2+len(pass)])
+	// Send full 130-byte struct to match embassy-rs. ref: control.rs:362-369, structs.rs:400-404
+	return d.set_iovar_n("sae_password", whd.IF_STA, buf[:])
 }
 
 type ssidInfo struct {
