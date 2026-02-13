@@ -37,6 +37,8 @@ type StackConfig struct {
 	Hostname      string
 	MaxTCPPorts   int
 	RandSeed      int64
+	// WifiJoinOptions are used to join the wifi. Passphrase field is override by password argument to [NewConfiguredPicoWithStack].
+	WifiJoinOptions cyw43439.JoinOptions
 	// Enables printing of received packets. Useful for debugging.
 	EnableRxPacketCapture bool
 	// Enable printing of transmitted packets
@@ -47,6 +49,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	if cfg.Hostname == "" {
 		return nil, errors.New("empty hostname")
 	}
+	cfg.WifiJoinOptions.Passphrase = password
 	start := time.Now()
 	dev := cyw43439.NewPicoWDevice()
 	logger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
@@ -57,7 +60,8 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	if err != nil {
 		return nil, err
 	}
-	err = dev.JoinWPA2(ssid, password)
+
+	err = dev.Join(ssid, cfg.WifiJoinOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -138,13 +142,18 @@ type DHCPConfig struct {
 }
 
 func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (dhcpResults *xnet.DHCPResults, err error) {
-	if !cfg.RequestedAddr.Is4() {
-		return dhcpResults, errors.New("only dhcpv4 supported")
+	var reqaddr [4]byte
+	if cfg.RequestedAddr.IsValid() {
+		if !cfg.RequestedAddr.Is4() {
+			return dhcpResults, errors.New("IPV6 DHCP unsupported")
+		}
+		reqaddr = cfg.RequestedAddr.As4()
 	}
+
 	lstack := stack.LnetoStack()
 	const pollTime = 50 * time.Millisecond
 	rstack := lstack.StackRetrying(pollTime)
-	dhcpResults, err = rstack.DoDHCPv4(cfg.RequestedAddr.As4(), 3*time.Second, 3)
+	dhcpResults, err = rstack.DoDHCPv4(reqaddr, 3*time.Second, 3)
 	if err != nil {
 		return dhcpResults, err
 	}
