@@ -85,7 +85,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		MaxTCPConns:     cfg.MaxTCPPorts,
 		RandSeed:        elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
 		HardwareAddress: mac,
-		MTU:             cyw43439.MTU,
+		MTU:             1500, // 1500 for compatibility with most nodes.
 	})
 	dev.RecvEthHandle(func(pkt []byte) error {
 		err := stack.s.Demux(pkt, 0)

@@ -16,7 +16,7 @@ import (
 	"github.com/soypat/seqs/stacks"
 )
 
-const mtu = cyw43439.MTU
+const mtu = 1500 // 1500 for compatibility with most nodes.
 
 type SetupConfig struct {
 	// DHCP requested hostname.
