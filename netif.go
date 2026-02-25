@@ -4,8 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"net"
-
-	"github.com/soypat/cyw43439/whd"
 )
 
 // MTU (maximum transmission unit) returns the maximum amount
@@ -35,11 +33,11 @@ func (d *Device) PollOne() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, cmd, err := d.tryPoll(d._rxBuf[:])
+	_, _, err = d.tryPoll(d._rxBuf[:])
 	if err == errNoF2Avail {
 		return false, nil
 	}
-	return cmd == whd.CONTROL_HEADER && err == nil, err
+	return err == nil, err
 }
 
 // RecvEthHandle sets handler for receiving Ethernet pkt

@@ -269,7 +269,8 @@ func nicLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 	for {
 		stallRx := true
 		// Poll for incoming packets.
-		for i := 0; i < 1; i++ {
+		const maxRxPerCycle = 8
+		for i := 0; i < maxRxPerCycle; i++ {
 			gotPacket, err := dev.PollOne()
 			if err != nil {
 				println("poll error:", err.Error())
@@ -325,4 +326,43 @@ func nicLoop(dev *cyw43439.Device, Stack *stacks.PortStack) {
 			}
 		}
 	}
+}
+
+// Reconnect rejoins the WiFi network and re-acquires an IP address via DHCP.
+// Call this when dev.NetFlags() reports the link is down.
+// Returns a new DHCPClient that replaces the old one.
+func Reconnect(dev *cyw43439.Device, stack *stacks.PortStack, hostname string, logger *slog.Logger) (*stacks.DHCPClient, error) {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.Level(127)}))
+	}
+	logger.Info("reconnect: joining WiFi...")
+	for {
+		err := dev.JoinWPA2(ssid, pass)
+		if err == nil {
+			break
+		}
+		logger.Error("reconnect: join failed", slog.String("err", err.Error()))
+		time.Sleep(5 * time.Second)
+	}
+	logger.Info("reconnect: WiFi joined, requesting DHCP...")
+	// Close the old DHCP port so NewDHCPClient can re-register on the same port.
+	stack.CloseUDP(dhcp.DefaultClientPort)
+	newClient := stacks.NewDHCPClient(stack, dhcp.DefaultClientPort)
+	err := newClient.BeginRequest(stacks.DHCPRequestConfig{
+		Xid:      uint32(time.Now().Nanosecond()),
+		Hostname: hostname,
+	})
+	if err != nil {
+		return nil, errors.New("reconnect: dhcp begin: " + err.Error())
+	}
+	for i := 0; newClient.State() != dhcp.StateBound; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if i > 20 {
+			return nil, errors.New("reconnect: DHCP timed out")
+		}
+	}
+	ip := newClient.Offer()
+	stack.SetAddr(ip)
+	logger.Info("reconnect: complete", slog.String("ip", ip.String()))
+	return newClient, nil
 }
