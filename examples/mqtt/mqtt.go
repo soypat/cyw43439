@@ -3,9 +3,11 @@ package main
 // WARNING: default -scheduler=cores unsupported, compile with -scheduler=tasks set!
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"machine"
+	"net"
 	"net/netip"
 	"time"
 
@@ -23,9 +25,14 @@ var (
 	logger      *slog.Logger
 	clientID    = []byte("tinygo-mqtt")
 	pubFlags, _ = mqtt.NewPublishFlags(mqtt.QoS0, false, false)
+	topic       = []byte("tinygo-pico-test")
 	pubVar      = mqtt.VariablesPublish{
-		TopicName:        []byte("tinygo-pico-test"),
-		PacketIdentifier: 0xc0fe,
+		TopicName: topic,
+	}
+	subVar = mqtt.VariablesSubscribe{
+		TopicFilters: []mqtt.SubscribeRequest{
+			{TopicFilter: topic, QoS: mqtt.QoS0},
+		},
 	}
 )
 
@@ -36,8 +43,6 @@ const tcpbufsize = 2030 // MTU - ethhdr - iphdr - tcphdr
 // You may run a local comqtt server: https://github.com/wind-c/comqtt
 // build cmd/single, run it and change the IP address to your local server.
 const serverAddrStr = "192.168.1.53:1883"
-
-var requestedIP = [4]byte{192, 168, 1, 99}
 
 func main() {
 	logger = slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
@@ -56,12 +61,9 @@ func main() {
 		panic("setup failed:" + err.Error())
 	}
 
-	// Background loop needed to process packets.
 	go loopForeverStack(cystack)
 
-	dhcpResults, err := cystack.SetupWithDHCP(cywnet.DHCPConfig{
-		RequestedAddr: netip.AddrFrom4(requestedIP),
-	})
+	dhcpResults, err := cystack.SetupWithDHCP(cywnet.DHCPConfig{})
 	if err != nil {
 		panic("DHCP failed:" + err.Error())
 	}
@@ -76,94 +78,101 @@ func main() {
 	const pollTime = 5 * time.Millisecond
 	rstack := stack.StackRetrying(pollTime)
 
-	// Configure TCP connection.
+	client := mqtt.NewClient(mqtt.ClientConfig{
+		Decoder: mqtt.DecoderNoAlloc{UserBuffer: make([]byte, 4096)},
+		OnPub: func(_ mqtt.Header, varPub mqtt.VariablesPublish, r io.Reader) error {
+			payload, err := io.ReadAll(r)
+			if err != nil {
+				logger.Error("OnPub:read failed", slog.String("err", err.Error()))
+				return err
+			}
+			logger.Info("mqttrx", slog.String("topic", string(varPub.TopicName)), slog.String("msg", string(payload)))
+			return nil
+		},
+	})
 	var conn tcp.Conn
 	err = conn.Configure(tcp.ConnConfig{
 		RxBuf:             make([]byte, tcpbufsize),
 		TxBuf:             make([]byte, tcpbufsize),
 		TxPacketQueueSize: 3,
+		Logger:            logger,
 	})
 	if err != nil {
 		panic("conn configure:" + err.Error())
 	}
 
-	// MQTT client configuration.
-	cfg := mqtt.ClientConfig{
-		Decoder: mqtt.DecoderNoAlloc{UserBuffer: make([]byte, 4096)},
-		OnPub: func(pubHead mqtt.Header, varPub mqtt.VariablesPublish, r io.Reader) error {
-			logger.Info("received message", slog.String("topic", string(varPub.TopicName)))
-			return nil
-		},
-	}
-	var varconn mqtt.VariablesConnect
-	varconn.SetDefaultMQTT(clientID)
-	client := mqtt.NewClient(cfg)
-
-	// Connection loop for TCP+MQTT.
 	for {
-		lport := uint16(stack.Prand32()>>17) + 1024 // Random local port.
-		logger.Info("socket:listen", slog.Uint64("localport", uint64(lport)))
-
-		// Dial TCP with retries.
+		if !conn.State().IsClosed() {
+			// Ensure connection is closed and state reset before Dial.
+			conn.Abort()
+		}
+		lport := uint16(stack.Prand32()>>17) + 1024
 		err = rstack.DoDialTCP(&conn, lport, svAddr, connTimeout, 3)
 		if err != nil {
 			logger.Error("tcp dial failed", slog.String("err", err.Error()))
-			conn.Abort()
 			time.Sleep(2 * time.Second)
 			continue
 		}
-
-		// We start MQTT connect with a deadline on the socket.
-		logger.Info("mqtt:start-connecting")
-		conn.SetDeadline(time.Now().Add(5 * time.Second))
-		err = client.StartConnect(&conn, &varconn)
-		if err != nil {
-			logger.Error("mqtt:start-connect-failed", slog.String("reason", err.Error()))
-			closeConn(&conn)
-			continue
+		handleConn(&conn, client)
+		if err := client.Err(); err != nil {
+			logger.Error("mqtt:disconnected", slog.String("err", err.Error()))
 		}
-
-		retries := 50
-		for retries > 0 && !client.IsConnected() {
-			time.Sleep(100 * time.Millisecond)
-			err = client.HandleNext()
-			if err != nil {
-				println("mqtt:handle-next-failed", err.Error())
-			}
-			retries--
-		}
-		if !client.IsConnected() {
-			logger.Error("mqtt:connect-failed", slog.Any("reason", client.Err()))
-			closeConn(&conn)
-			continue
-		}
-
-		logger.Info("mqtt:connected")
-		for client.IsConnected() {
-			conn.SetDeadline(time.Now().Add(5 * time.Second))
-			pubVar.PacketIdentifier = uint16(stack.Prand32())
-			err = client.PublishPayload(pubFlags, pubVar, []byte("hello world"))
-			if err != nil {
-				logger.Error("mqtt:publish-failed", slog.Any("reason", err))
-			}
-			logger.Info("published message", slog.Uint64("packetID", uint64(pubVar.PacketIdentifier)))
-			err = client.HandleNext()
-			if err != nil {
-				println("mqtt:handle-next-failed", err.Error())
-			}
-			time.Sleep(5 * time.Second)
-		}
-		logger.Error("mqtt:disconnected", slog.Any("reason", client.Err()))
-		closeConn(&conn)
+		conn.Close()
+		time.Sleep(time.Second) // Give time for connection to close.
 	}
 }
 
-func closeConn(conn *tcp.Conn) {
-	conn.Close()
-	for i := 0; i < 50 && !conn.State().IsClosed(); i++ {
+func handleConn(conn *tcp.Conn, client *mqtt.Client) {
+	defer client.Disconnect(net.ErrClosed)
+	var varconn mqtt.VariablesConnect
+	varconn.SetDefaultMQTT(clientID)
+
+	conn.SetDeadline(time.Now().Add(connTimeout))
+	err := client.StartConnect(conn, &varconn)
+	if err != nil {
+		logger.Error("mqtt:start-connect-failed", slog.String("err", err.Error()))
+		return
+	}
+
+	for retries := 50; retries > 0 && !client.IsConnected(); retries-- {
+		time.Sleep(100 * time.Millisecond)
+		if err = client.HandleNext(); err != nil {
+			println("mqtt:handle-next-failed", err.Error())
+		}
+	}
+	if !client.IsConnected() {
+		logger.Error("mqtt:connect-failed", slog.Any("reason", client.Err()))
+		return
+	}
+	logger.Info("mqtt:connected")
+
+	ctx, cancel := context.WithTimeout(context.Background(), connTimeout)
+	err = client.Subscribe(ctx, subVar)
+	cancel()
+	if err != nil {
+		logger.Error("mqtt:subscribe-failed", slog.String("err", err.Error()))
+		return
+	}
+	// We've connected and subscribed succesfully, unset deadline.
+	conn.SetDeadline(time.Time{})
+
+	var lastPub time.Time
+	for client.IsConnected() {
+		now := time.Now()
+		if now.Sub(lastPub) > 5*time.Second {
+			lastPub = now
+			pubVar.PacketIdentifier = uint16(now.UnixNano())
+			err = client.PublishPayload(pubFlags, pubVar, []byte("hello world"))
+			if err != nil {
+				logger.Error("mqtt:publish-failed", slog.String("err", err.Error()))
+			}
+			logger.Info("published", slog.Uint64("pktID", uint64(pubVar.PacketIdentifier)))
+		}
+		if err = client.HandleNext(); err != nil {
+			println("mqtt:handle-next-failed", err.Error())
+		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	conn.Abort()
 }
 
 func loopForeverStack(stack *cywnet.Stack) {

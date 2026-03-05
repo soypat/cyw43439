@@ -8,11 +8,9 @@ import (
 	"log/slog"
 	"machine"
 	"net/netip"
-	"strconv"
 	"time"
 
 	"github.com/soypat/cyw43439"
-	"github.com/soypat/lneto/internet/pcap"
 	"github.com/soypat/lneto/x/xnet"
 )
 
@@ -25,10 +23,7 @@ type Stack struct {
 	// Packet capture utilities.
 	enableRxPcap bool
 	enableTxPcap bool
-	fmtPcapBuf   []byte
-	frms         []pcap.Frame
-	cap          pcap.PacketBreakdown
-	pfmt         pcap.Formatter
+	pcap         xnet.CapturePrinter
 }
 
 type StackConfig struct {
@@ -95,6 +90,9 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		return err
 	})
 	stack.sendbuf = make([]byte, cyw43439.MaxFrameSize)
+	if cfg.EnableRxPacketCapture || cfg.EnableTxPacketCapture {
+		err = stack.pcap.Configure(machine.Serial, xnet.CapturePrinterConfig{})
+	}
 	return stack, err
 }
 
@@ -179,28 +177,7 @@ func (stack *Stack) logerr(msg string, attrs ...slog.Attr) {
 }
 
 func (stack *Stack) printPacket(prefix string, pkt []byte) {
-	const spaces = "     "
-	var err error
-	stack.frms, err = stack.cap.CaptureEthernet(stack.frms[:0], pkt, 0)
-	if err == nil {
-		const minLenWidth = 3
-		stack.fmtPcapBuf = append(stack.fmtPcapBuf[:0], prefix...)
-		// Ensure minimum width of packet length display for less jitter in log viewline.
-		prevlen := len(prefix)
-		stack.fmtPcapBuf = strconv.AppendInt(stack.fmtPcapBuf, int64(len(pkt)), 10)
-		numLength := len(stack.fmtPcapBuf) - prevlen
-		appendSpaces := max(0, minLenWidth-numLength) + 1 // add single space to separate actual format from packet length.
-		stack.fmtPcapBuf = append(stack.fmtPcapBuf, spaces[:appendSpaces]...)
-
-		stack.fmtPcapBuf, err = stack.pfmt.FormatFrames(stack.fmtPcapBuf, stack.frms, pkt)
-		stack.fmtPcapBuf = append(stack.fmtPcapBuf, '\n')
-		if err != nil {
-			println("formatting frame:", err.Error())
-		}
-		serialWrite(stack.fmtPcapBuf)
-	} else {
-		println("processing", prefix, "packet:", err.Error())
-	}
+	stack.pcap.PrintPacket(prefix, pkt)
 }
 
 // circumvents pico issue on tinygo https://github.com/tinygo-org/tinygo/issues/5188
