@@ -79,7 +79,7 @@ func main() {
 	rstack := stack.StackRetrying(pollTime)
 
 	client := mqtt.NewClient(mqtt.ClientConfig{
-		Decoder: mqtt.DecoderNoAlloc{UserBuffer: make([]byte, 4096)},
+		Decoder: mqtt.DecoderNoAlloc{UserBuffer: make([]byte, tcpbufsize)},
 		OnPub: func(_ mqtt.Header, varPub mqtt.VariablesPublish, r io.Reader) error {
 			payload, err := io.ReadAll(r)
 			if err != nil {
@@ -128,25 +128,15 @@ func handleConn(conn *tcp.Conn, client *mqtt.Client) {
 	varconn.SetDefaultMQTT(clientID)
 
 	conn.SetDeadline(time.Now().Add(connTimeout))
-	err := client.StartConnect(conn, &varconn)
+	ctx, cancel := context.WithTimeout(context.Background(), connTimeout)
+	err := client.Connect(ctx, conn, &varconn)
+	cancel()
 	if err != nil {
 		logger.Error("mqtt:start-connect-failed", slog.String("err", err.Error()))
 		return
 	}
-
-	for retries := 50; retries > 0 && !client.IsConnected(); retries-- {
-		time.Sleep(100 * time.Millisecond)
-		if err = client.HandleNext(); err != nil {
-			println("mqtt:handle-next-failed", err.Error())
-		}
-	}
-	if !client.IsConnected() {
-		logger.Error("mqtt:connect-failed", slog.Any("reason", client.Err()))
-		return
-	}
 	logger.Info("mqtt:connected")
-
-	ctx, cancel := context.WithTimeout(context.Background(), connTimeout)
+	ctx, cancel = context.WithTimeout(context.Background(), connTimeout)
 	err = client.Subscribe(ctx, subVar)
 	cancel()
 	if err != nil {
@@ -159,7 +149,13 @@ func handleConn(conn *tcp.Conn, client *mqtt.Client) {
 	var lastPub time.Time
 	for client.IsConnected() {
 		now := time.Now()
-		if now.Sub(lastPub) > 5*time.Second {
+		switch { // Conditionless switch statements are evaluated in order. So put max priority top.
+		case conn.BufferedInput() > 0:
+			err = client.HandleNext()
+			if err != nil {
+				println("mqtt:handle-next-failed", err.Error())
+			}
+		case now.Sub(lastPub) > 5*time.Second:
 			lastPub = now
 			pubVar.PacketIdentifier = uint16(now.UnixNano())
 			err = client.PublishPayload(pubFlags, pubVar, []byte("hello world"))
@@ -167,11 +163,9 @@ func handleConn(conn *tcp.Conn, client *mqtt.Client) {
 				logger.Error("mqtt:publish-failed", slog.String("err", err.Error()))
 			}
 			logger.Info("published", slog.Uint64("pktID", uint64(pubVar.PacketIdentifier)))
+		default:
+			time.Sleep(100 * time.Millisecond)
 		}
-		if err = client.HandleNext(); err != nil {
-			println("mqtt:handle-next-failed", err.Error())
-		}
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 
