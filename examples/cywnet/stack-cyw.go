@@ -8,9 +8,13 @@ import (
 	"log/slog"
 	"machine"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/soypat/cyw43439"
+	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/dns"
+	"github.com/soypat/lneto/mdns"
 	"github.com/soypat/lneto/x/xnet"
 )
 
@@ -62,6 +66,17 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	err = dev.Join(ssid, cfg.WifiJoinOptions)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.AcceptMulticast {
+		// Register IPv4 mDNS multicast MAC (01:00:5e:00:00:fb) with the WiFi chip
+		// so it delivers multicast frames to the host instead of filtering them.
+		err = dev.SetMulticastList([][6]byte{
+			{0x01, 0x00, 0x5e, 0x00, 0x00, 0xfb}, // IPv4
+			// {0x33, 0x33, 0x00, 0x00, 0x00, 0xfb}, // IPv6 unsupported as of yet.
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 	mac, err := dev.HardwareAddr6()
 	if err != nil {
@@ -196,4 +211,48 @@ func serialWrite(b []byte) {
 			time.Sleep(sleep)
 		}
 	}
+}
+
+func DoMDNS(mdnsclient *mdns.Client, domain string, timeout time.Duration, retries int) (addr netip.Addr, err error) {
+	if !strings.HasSuffix(domain, ".local") {
+		return addr, lneto.ErrInvalidConfig
+	}
+	err = mdnsclient.StartResolve(mdns.ResolveConfig{
+		MaxResponseAnswers: 1,
+		Questions: []dns.Question{
+			{
+				Name:  dns.MustNewName(domain),
+				Type:  dns.TypeA,
+				Class: dns.ClassINET,
+			},
+		},
+	})
+	if err != nil {
+		return addr, err
+	}
+	var answer [1]dns.Resource
+	for i := 0; i < retries; i++ {
+		deadline := time.Now().Add(timeout)
+		for {
+			n, done, err := mdnsclient.AnswersCopyTo(answer[:])
+			if done {
+				if err != nil && n == 0 {
+					return addr, err
+				}
+				break
+			} else if time.Since(deadline) > 0 {
+				return addr, errors.New("mDNS timed out")
+			}
+			time.Sleep(2 * time.Millisecond)
+		}
+		var ok bool
+		addr, ok = netip.AddrFromSlice(answer[0].RawData())
+		if ok {
+			break
+		}
+	}
+	if !addr.IsValid() {
+		return addr, errors.New("retries exceeded")
+	}
+	return addr, nil
 }

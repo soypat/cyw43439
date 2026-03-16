@@ -547,3 +547,19 @@ func (d *Device) StartAP(ssid, pass string, channel uint8) error {
 
 	return nil
 }
+
+// SetMcastList configures the CYW43439 WiFi chip to accept multicast ethernet
+// frames for the given MAC addresses. This is required for receiving multicast
+// traffic (e.g. mDNS) over WiFi, since the chip filters multicast at the hardware level.
+// Up to 10 multicast MAC addresses can be registered.
+func (d *Device) SetMulticastList(macs [][6]byte) error {
+	if len(macs) > whd.MAX_MULTICAST_REGISTERED_ADDRESS {
+		return errors.New("too many multicast addresses")
+	}
+	var buf [4 + whd.MAX_MULTICAST_REGISTERED_ADDRESS*6]byte
+	binary.LittleEndian.PutUint32(buf[:4], uint32(len(macs)))
+	for i := range macs {
+		copy(buf[4+i*6:4+i*6+6], macs[i][:])
+	}
+	return d.set_iovar_n("mcast_list", whd.IF_STA, buf[:])
+}

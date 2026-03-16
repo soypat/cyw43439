@@ -77,37 +77,13 @@ func main() {
 	if err != nil {
 		panic("MDNS register failed: " + err.Error())
 	}
-	err = mdnsclient.StartResolve(mdns.ResolveConfig{
-		MaxResponseAnswers: 1,
-		Questions: []dns.Question{
-			{
-				Name:  dns.MustNewName(remoteHostname + ".local"),
-				Type:  dns.TypeA,
-				Class: dns.ClassINET,
-			},
-		},
-	})
+	const (
+		timeout = 2 * time.Second
+		retries = 2
+	)
+	addr, err = cywnet.DoMDNS(&mdnsclient, remoteHostname+".local", timeout, retries)
 	if err != nil {
-		panic("mdns start resolve failed:" + err.Error())
-	}
-	deadline := time.Now().Add(4 * time.Second)
-	var answer [1]dns.Resource
-	for {
-		n, done, err := mdnsclient.AnswersCopyTo(answer[:])
-		if done {
-			if err != nil && n == 0 {
-				panic("MDNS failed: " + err.Error())
-			}
-			break
-		} else if time.Since(deadline) > 0 {
-			panic("MDNS time out")
-		}
-		time.Sleep(pollTime)
-	}
-
-	addr, ok := netip.AddrFromSlice(answer[0].RawData())
-	if !ok {
-		panic("invalid MDNS address answer")
+		panic(err)
 	}
 	println("Address discovered for", remoteHostname, addr.String())
 	select {} // keep stack running serving MDNS hostname.
