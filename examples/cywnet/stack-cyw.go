@@ -32,6 +32,7 @@ type StackConfig struct {
 	NTPServer     netip.Addr
 	Hostname      string
 	MaxTCPPorts   int
+	MaxUDPPorts   int
 	RandSeed      int64
 	// WifiJoinOptions are used to join the wifi. Passphrase field is override by password argument to [NewConfiguredPicoWithStack].
 	WifiJoinOptions cyw43439.JoinOptions
@@ -39,6 +40,7 @@ type StackConfig struct {
 	EnableRxPacketCapture bool
 	// Enable printing of transmitted packets
 	EnableTxPacketCapture bool
+	AcceptMulticast       bool
 }
 
 func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, cfg StackConfig) (*Stack, error) {
@@ -78,6 +80,8 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		NTPServer:       cfg.NTPServer,
 		Hostname:        cfg.Hostname,
 		MaxTCPConns:     cfg.MaxTCPPorts,
+		MaxUDPConns:     cfg.MaxUDPPorts,
+		AcceptMulticast: cfg.AcceptMulticast,
 		RandSeed:        elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
 		HardwareAddress: mac,
 		MTU:             1500, // 1500 for compatibility with most nodes.
