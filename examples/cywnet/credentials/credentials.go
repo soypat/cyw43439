@@ -2,6 +2,7 @@ package credentials
 
 import (
 	_ "embed"
+	"strings"
 )
 
 var (
@@ -18,7 +19,7 @@ var (
 //
 // Deprecated: Marked as deprecated so IDE warns users agains its use. Your wifi password should be defined outside of this repo for security reasons!
 func SSID() string {
-	return ssid
+	return strings.TrimSpace(ssid)
 }
 
 // Password returns the contents of password.text file predefined by user in this package.
@@ -28,5 +29,5 @@ func SSID() string {
 //
 // Deprecated: Marked as deprecated so IDE warns users agains its use. Your wifi password should be defined outside of this repo for security reasons!
 func Password() string {
-	return pass
+	return strings.TrimSpace(pass)
 }
