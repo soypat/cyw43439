@@ -19,7 +19,7 @@ var (
 //
 // Deprecated: Marked as deprecated so IDE warns users agains its use. Your wifi password should be defined outside of this repo for security reasons!
 func SSID() string {
-	return strings.TrimSpace(ssid)
+	return strings.TrimRight(ssid, "\r\n")
 }
 
 // Password returns the contents of password.text file predefined by user in this package.
@@ -29,5 +29,5 @@ func SSID() string {
 //
 // Deprecated: Marked as deprecated so IDE warns users agains its use. Your wifi password should be defined outside of this repo for security reasons!
 func Password() string {
-	return strings.TrimSpace(pass)
+	return strings.TrimRight(pass, "\r\n")
 }
