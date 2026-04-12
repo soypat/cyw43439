@@ -55,7 +55,7 @@ func main() {
 	var err error
 	cystack, err = cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
 		Hostname:              hostname,
-		MaxTCPPorts:           numListeners,
+		MaxActiveTCPPorts:     numListeners,
 		EnableRxPacketCapture: true,
 		EnableTxPacketCapture: true,
 	})

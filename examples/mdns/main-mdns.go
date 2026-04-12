@@ -35,7 +35,7 @@ func main() {
 	devcfg.Logger = logger
 	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
 		Hostname:              hostname,
-		MaxUDPPorts:           1,    // MDNS client is external to Stack.
+		MaxActiveUDPPorts:     1,    // MDNS client is external to Stack.
 		AcceptMulticast:       true, // Required for MDNS to work.
 		EnableRxPacketCapture: true,
 		EnableTxPacketCapture: true,

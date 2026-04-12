@@ -54,8 +54,8 @@ func main() {
 	devcfg := cyw43439.DefaultWifiConfig()
 	devcfg.Logger = logger
 	cystack, err := cywnet.NewConfiguredPicoWithStack(credentials.SSID(), credentials.Password(), devcfg, cywnet.StackConfig{
-		Hostname:    string(clientID),
-		MaxTCPPorts: 1,
+		Hostname:          string(clientID),
+		MaxActiveTCPPorts: 1,
 	})
 	if err != nil {
 		panic("setup failed:" + err.Error())

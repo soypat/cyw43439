@@ -31,13 +31,13 @@ type Stack struct {
 }
 
 type StackConfig struct {
-	StaticAddress netip.Addr
-	DNSServer     netip.Addr
-	NTPServer     netip.Addr
-	Hostname      string
-	MaxTCPPorts   int
-	MaxUDPPorts   int
-	RandSeed      int64
+	StaticAddress     netip.Addr
+	DNSServer         netip.Addr
+	NTPServer         netip.Addr
+	Hostname          string
+	MaxActiveTCPPorts uint16
+	MaxActiveUDPPorts uint16
+	RandSeed          int64
 	// WifiJoinOptions are used to join the wifi. Passphrase field is override by password argument to [NewConfiguredPicoWithStack].
 	WifiJoinOptions cyw43439.JoinOptions
 	// Enables printing of received packets. Useful for debugging.
@@ -90,19 +90,19 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	stack.enableTxPcap = cfg.EnableTxPacketCapture
 	elapsed := time.Since(start)
 	err = stack.s.Reset(xnet.StackConfig{
-		StaticAddress:   cfg.StaticAddress,
-		DNSServer:       cfg.DNSServer,
-		NTPServer:       cfg.NTPServer,
-		Hostname:        cfg.Hostname,
-		MaxTCPConns:     cfg.MaxTCPPorts,
-		MaxUDPConns:     cfg.MaxUDPPorts,
-		AcceptMulticast: cfg.AcceptMulticast,
-		RandSeed:        elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
-		HardwareAddress: mac,
-		MTU:             1500, // 1500 for compatibility with most nodes.
+		StaticAddress:     cfg.StaticAddress,
+		DNSServer:         cfg.DNSServer,
+		NTPServer:         cfg.NTPServer,
+		Hostname:          cfg.Hostname,
+		MaxActiveTCPPorts: cfg.MaxActiveTCPPorts,
+		MaxActiveUDPPorts: cfg.MaxActiveUDPPorts,
+		AcceptMulticast:   cfg.AcceptMulticast,
+		RandSeed:          elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
+		HardwareAddress:   mac,
+		MTU:               1500, // 1500 for compatibility with most nodes.
 	})
 	dev.RecvEthHandle(func(pkt []byte) error {
-		err := stack.s.Demux(pkt, 0)
+		err := stack.s.IngressEthernet(pkt)
 		if stack.enableRxPcap && err == nil {
 			stack.printPacket("IN  ", pkt)
 		}
@@ -136,7 +136,7 @@ func (stack *Stack) RecvAndSend() (send, recv int, err error) {
 	if errrecv != nil {
 		stack.logerr("RecvAndSend:PollOne", slog.Int("plen", recv), slog.String("err", errrecv.Error()))
 	}
-	send, err = stack.s.Encapsulate(stack.sendbuf, -1, 0)
+	send, err = stack.s.EgressEthernet(stack.sendbuf)
 	if err != nil {
 		stack.logerr("RecvAndSend:Encapsulate", slog.Int("plen", send), slog.String("err", err.Error()))
 	} else {
