@@ -135,7 +135,7 @@
 				return r.arrayBuffer();
 			}).then(function(buf) {
 				var ms = performance.now() - start;
-				log('Received ' + formatBytes(buf.byteLength) + ' in ' + ms.toFixed(0) + ' ms');
+				log('Received ' + formatBytes(buf.byteLength) + ' in ' + ms.toFixed(0) + ' ms @ '+formatSpeed(buf.byteLength, ms));
 				setResult('Download: ' + formatSpeed(buf.byteLength, ms));
 				setBusy(false);
 			}).catch(function(e) {
@@ -161,7 +161,7 @@
 				return r.text();
 			}).then(function(text) {
 				var ms = performance.now() - start;
-				log('Sent ' + formatBytes(size) + ' in ' + ms.toFixed(0) + ' ms');
+				log('Sent ' + formatBytes(size) + ' in ' + ms.toFixed(0) + ' ms @ ' +formatSpeed(size, ms));
 				log('Server: ' + text);
 				setResult('Upload: ' + formatSpeed(size, ms));
 				setBusy(false);

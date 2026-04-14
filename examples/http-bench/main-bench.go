@@ -3,6 +3,7 @@ package main
 // WARNING: default -scheduler=cores unsupported, compile with -scheduler=tasks set!
 
 import (
+	"fmt"
 	"log/slog"
 	"machine"
 	"net"
@@ -15,6 +16,8 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/ethernet"
 	"github.com/soypat/lneto/http/httpraw"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
@@ -28,6 +31,7 @@ const hostname = "bench-pico"
 const listenPort = 80                  // HTTP server port.
 const loopSleep = 5 * time.Millisecond // Sleep between polls of network.
 const httpBuf = 512
+const maxTCPReadWrite = ethernet.MaxMTU - 20 - 20
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
@@ -70,10 +74,11 @@ func main() {
 	}
 
 	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
-		PoolSize:           maxConns,
-		QueueSize:          3,
-		TxBufSize:          len(webPage) + 256,
-		RxBufSize:          512,
+		PoolSize:  maxConns,
+		QueueSize: 10,
+		// Increasing buffers above x3 maxTCPReadWrite has diminishing returns.
+		TxBufSize:          3 * maxTCPReadWrite,
+		RxBufSize:          3 * maxTCPReadWrite,
 		EstablishedTimeout: 10 * time.Second,
 		ClosingTimeout:     5 * time.Second,
 		NewUserData: func() any {
@@ -81,6 +86,9 @@ func main() {
 			buf := make([]byte, httpBuf)
 			hdr.Reset(buf)
 			return &hdr
+		},
+		NewBackoff: func() lneto.BackoffStrategy {
+			return backoff
 		},
 	})
 	if err != nil {
@@ -321,9 +329,10 @@ func printThroughput(label string, bytes int, elapsed time.Duration) {
 	if ms == 0 {
 		ms = 1
 	}
-	// kbps = (bytes * 8) / (ms / 1000) = bytes * 8000 / ms
-	kbps := int64(bytes) * 8000 / ms
-	println("[BENCH]", label, ":", bytes, "bytes in", ms, "ms ->", kbps/1000, ".", kbps%1000, "Mbps")
+	Mbps := float32(bytes) * 8.0 / float32(ms) / 1000.0
+	kBps := 1000 * Mbps / 8
+	fmt.Fprintf(machine.Serial, "[BENCH] %s: %.2fMb/s = %.2fkBps, %db in %dms\n", label, Mbps, kBps, bytes, ms)
+	// println("[BENCH]", label, ":", bytes, "bytes in", ms, "ms ->", Mbps, "Mbps =", kBps, "kBps")
 }
 
 // queryValue extracts the value of a query parameter from a URI string.
@@ -371,10 +380,31 @@ func hasPrefix(s, prefix string) bool {
 }
 
 func loopForeverStack(stack *cywnet.Stack) {
+	backoffs := 0
 	for {
 		send, recv, _ := stack.RecvAndSend()
 		if send == 0 && recv == 0 {
-			time.Sleep(loopSleep)
+			backoffs++
+			sleep := backoff(backoffs)
+			time.Sleep(sleep)
+		} else {
+			backoffs = 0
 		}
 	}
+}
+
+// ConnRWBackoff implements exponential backoff suitable for TCP connection
+// read/write polling. It starts at 1us and caps at 5ms, doubling on each consecutive backoff.
+func backoff(consecutiveBackoffs int) time.Duration {
+	const (
+		minWait        = uint32(time.Microsecond) >> 1
+		maxWait        = 5 * uint32(time.Millisecond)
+		maxShift       = 23
+		_overflowCheck = minWait << maxShift
+	)
+	wait := minWait << min(consecutiveBackoffs, maxShift)
+	if wait > maxWait {
+		wait = maxWait
+	}
+	return time.Duration(wait)
 }
