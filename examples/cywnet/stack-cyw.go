@@ -169,8 +169,7 @@ func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (dhcpResults *xnet.DHCPResults
 	}
 
 	lstack := stack.LnetoStack()
-	const pollTime = 50 * time.Millisecond
-	rstack := lstack.StackRetrying(pollTime)
+	rstack := lstack.StackRetrying(DefaultStackBackoff)
 	dhcpResults, err = rstack.DoDHCPv4(reqaddr, 3*time.Second, 3)
 	if err != nil {
 		return dhcpResults, err
@@ -255,4 +254,22 @@ func DoMDNS(mdnsclient *mdns.Client, domain string, timeout time.Duration, retri
 		return addr, errors.New("retries exceeded")
 	}
 	return addr, nil
+}
+
+// DefaultStackBackoff returns a backoff duration for stack protocol retry loops.
+// This strategy is meant for DHCP,NTP- not for stream protocols like TCP.
+func DefaultStackBackoff(consecutiveBackoffs uint) time.Duration {
+	const (
+		// Stay in 32bit space for faster operations.
+		minWait = 100 * uint32(time.Microsecond)
+		maxWait = 20 * uint32(time.Millisecond)
+
+		maxShift       = 15
+		_overflowCheck = minWait << maxShift
+	)
+	sleep := minWait << min(consecutiveBackoffs, maxShift)
+	if sleep > maxWait {
+		sleep = maxWait
+	}
+	return time.Duration(sleep)
 }

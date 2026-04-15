@@ -75,8 +75,7 @@ func main() {
 	}
 
 	stack := cystack.LnetoStack()
-	const pollTime = 5 * time.Millisecond
-	rstack := stack.StackRetrying(pollTime)
+	rstack := stack.StackRetrying(cywnet.DefaultBackoffStrat)
 
 	client := mqtt.NewClient(mqtt.ClientConfig{
 		Decoder: mqtt.DecoderNoAlloc{UserBuffer: make([]byte, tcpbufsize)},

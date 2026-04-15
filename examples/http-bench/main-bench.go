@@ -380,13 +380,13 @@ func hasPrefix(s, prefix string) bool {
 }
 
 func loopForeverStack(stack *cywnet.Stack) {
-	backoffs := 0
+	var backoffs uint
 	for {
 		send, recv, _ := stack.RecvAndSend()
 		if send == 0 && recv == 0 {
-			backoffs++
 			sleep := backoff(backoffs)
 			time.Sleep(sleep)
+			backoffs++
 		} else {
 			backoffs = 0
 		}
@@ -395,11 +395,11 @@ func loopForeverStack(stack *cywnet.Stack) {
 
 // ConnRWBackoff implements exponential backoff suitable for TCP connection
 // read/write polling. It starts at 1us and caps at 5ms, doubling on each consecutive backoff.
-func backoff(consecutiveBackoffs int) time.Duration {
+func backoff(consecutiveBackoffs uint) time.Duration {
 	const (
-		minWait        = uint32(time.Microsecond) >> 1
+		minWait        = uint32(time.Microsecond)
 		maxWait        = 5 * uint32(time.Millisecond)
-		maxShift       = 23
+		maxShift       = 22
 		_overflowCheck = minWait << maxShift
 	)
 	wait := minWait << min(consecutiveBackoffs, maxShift)
