@@ -62,8 +62,7 @@ func main() {
 	}
 
 	stack := cystack.LnetoStack()
-	const pollTime = 5 * time.Millisecond
-	rstack := stack.StackRetrying(pollTime)
+	rstack := stack.StackRetrying(cywnet.DefaultBackoffStrat)
 
 	// Configure TCP connection.
 	var conn tcp.Conn

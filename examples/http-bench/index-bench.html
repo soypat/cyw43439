@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Pico W Benchmark</title>
+	<style>
+		body {
+			font-family: 'Arial', sans-serif;
+			background-color: #f4f4f4;
+			margin: 0;
+			padding: 0;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			height: 100vh;
+		}
+
+		.container {
+			text-align: center;
+			max-width: 520px;
+		}
+
+		h1 {
+			color: #333;
+		}
+
+		p {
+			color: #666;
+		}
+
+		button {
+			padding: 10px 18px;
+			margin: 6px;
+			font-size: 15px;
+			cursor: pointer;
+			border: none;
+			border-radius: 6px;
+			color: #fff;
+			background-color: #4a90d9;
+		}
+
+		button:disabled {
+			background-color: #aaa;
+			cursor: not-allowed;
+		}
+
+		button.small { background-color: #5cb85c; }
+		button.large { background-color: #d9534f; }
+
+		#result {
+			margin-top: 16px;
+			font-size: 20px;
+			font-weight: bold;
+			color: #333;
+			min-height: 30px;
+		}
+
+		#log {
+			margin-top: 10px;
+			text-align: left;
+			font-family: monospace;
+			font-size: 13px;
+			color: #555;
+			max-height: 180px;
+			overflow-y: auto;
+			background: #fff;
+			padding: 8px;
+			border-radius: 4px;
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>Pico W Speed Test</h1>
+		<p>Benchmark download and upload throughput over WiFi.</p>
+		<h3>Download</h3>
+		<div>
+			<button class="small" onclick="runDownload('small')">256 B</button>
+			<button onclick="runDownload('medium')">358 KB</button>
+			<button class="large" onclick="runDownload('large')">2 MB</button>
+		</div>
+		<h3>Upload</h3>
+		<div>
+			<button class="small" onclick="runUpload(256)">256 B</button>
+			<button onclick="runUpload(358*1024)">358 KB</button>
+			<button class="large" onclick="runUpload(2*1024*1024)">2 MB</button>
+		</div>
+		<div id="result"></div>
+		<div id="log"></div>
+		<p style="margin-top:20px">
+			<button id="toggleButton" style="background:#888;padding:8px 14px;font-size:13px">Toggle LED</button>
+		</p>
+		<p style="margin-top:8px;color:#999;font-size:small">🌐 Powered by <a href="https://github.com/soypat/lneto">lneto</a></p>
+	</div>
+	<script>
+		var busy = false;
+
+		function log(msg) {
+			var el = document.getElementById('log');
+			el.innerHTML += msg + '<br>';
+			el.scrollTop = el.scrollHeight;
+		}
+
+		function setResult(msg) {
+			document.getElementById('result').innerText = msg;
+		}
+
+		function setBusy(b) {
+			busy = b;
+			var btns = document.querySelectorAll('button');
+			for (var i = 0; i < btns.length; i++) btns[i].disabled = b;
+		}
+
+		function formatSpeed(bytes, ms) {
+			var bps = (bytes * 8) / (ms / 1000);
+			if (bps >= 1e6) return (bps / 1e6).toFixed(2) + ' Mbps';
+			if (bps >= 1e3) return (bps / 1e3).toFixed(1) + ' kbps';
+			return bps.toFixed(0) + ' bps';
+		}
+
+		function formatBytes(b) {
+			if (b >= 1024*1024) return (b/(1024*1024)).toFixed(1) + ' MB';
+			if (b >= 1024) return (b/1024).toFixed(1) + ' KB';
+			return b + ' B';
+		}
+
+		function runDownload(size) {
+			if (busy) return;
+			setBusy(true);
+			setResult('Downloading (' + size + ')...');
+			log('--- Download ' + size + ' ---');
+			var start = performance.now();
+			fetch('/download?size=' + size).then(function(r) {
+				return r.arrayBuffer();
+			}).then(function(buf) {
+				var ms = performance.now() - start;
+				log('Received ' + formatBytes(buf.byteLength) + ' in ' + ms.toFixed(0) + ' ms @ '+formatSpeed(buf.byteLength, ms));
+				setResult('Download: ' + formatSpeed(buf.byteLength, ms));
+				setBusy(false);
+			}).catch(function(e) {
+				log('Error: ' + e);
+				setResult('Download failed');
+				setBusy(false);
+			});
+		}
+
+		function runUpload(size) {
+			if (busy) return;
+			setBusy(true);
+			setResult('Uploading (' + formatBytes(size) + ')...');
+			log('--- Upload ' + formatBytes(size) + ' ---');
+			var payload = new Uint8Array(size);
+			for (var i = 0; i < size; i++) payload[i] = i & 0xff;
+			var start = performance.now();
+			fetch('/upload', {
+				method: 'POST',
+				headers: {'Content-Type': 'application/octet-stream'},
+				body: payload
+			}).then(function(r) {
+				return r.text();
+			}).then(function(text) {
+				var ms = performance.now() - start;
+				log('Sent ' + formatBytes(size) + ' in ' + ms.toFixed(0) + ' ms @ ' +formatSpeed(size, ms));
+				log('Server: ' + text);
+				setResult('Upload: ' + formatSpeed(size, ms));
+				setBusy(false);
+			}).catch(function(e) {
+				log('Error: ' + e);
+				setResult('Upload failed');
+				setBusy(false);
+			});
+		}
+
+		document.getElementById('toggleButton').addEventListener('click', function() {
+			fetch('/toggle-led');
+		});
+	</script>
+</body>
+</html>
