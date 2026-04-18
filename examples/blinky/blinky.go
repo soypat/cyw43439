@@ -8,7 +8,7 @@ import (
 
 func main() {
 	led := blink.LED
-	time.Sleep(2 * time.Second) // wait for USB to connect.
+	led.Configure()
 	for {
 		println("turn LED on")
 		led.High()
