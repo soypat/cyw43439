@@ -1,6 +1,6 @@
 module github.com/soypat/cyw43439
 
-go 1.23.8
+go 1.24
 
 toolchain go1.24.2
 
@@ -13,3 +13,5 @@ require (
 )
 
 require github.com/soypat/lneto v0.1.0
+
+replace github.com/soypat/lneto => ../lneto
