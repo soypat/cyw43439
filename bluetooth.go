@@ -225,21 +225,22 @@ func (d *Device) bt_upload_firmware(firmware string) error {
 	return nil
 }
 
-// hci_available_ringbuf what does this function return? Total bytes to end of ringbuffer??
-func (d *Device) hci_available_ringbuf() (uint32, error) {
+// hci_unread_bytes returns the number of bytes the chip has written to the
+// ring buffer that have not yet been consumed.
+func (d *Device) hci_unread_bytes() (uint32, error) {
 	newPtr, err := d.bp_read32(d.btaddr + whd.BTSDIO_OFFSET_BT2HOST_IN)
 	if err != nil {
 		return 0, err
 	}
-	available := (d.b2hReadPtr - newPtr) % whd.BTSDIO_FWBUF_SIZE
-	d.trace("hci_available_ringbuf", slog.Uint64("available", uint64(available)))
-	return available, nil
+	unread := (newPtr - d.b2hReadPtr) % whd.BTSDIO_FWBUF_SIZE
+	d.trace("hci_unread_bytes", slog.Uint64("unread", uint64(unread)))
+	return unread, nil
 }
 
 func (d *Device) hci_buffered() (uint32, error) {
 	// Check if buffer contains data.
-	available, err := d.hci_available_ringbuf()
-	if available < 4 {
+	unread, err := d.hci_unread_bytes()
+	if unread < 4 {
 		return 0, nil
 	}
 	// Read the HCI packet without advancing buffer.
@@ -250,7 +251,7 @@ func (d *Device) hci_buffered() (uint32, error) {
 	}
 	buffered := uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16
 	buffered += 4 // Add HCI header.
-	d.debug("hci_buffered", slog.Uint64("buffered", uint64(buffered)), slog.Uint64("avail", uint64(available)))
+	d.debug("hci_buffered", slog.Uint64("buffered", uint64(buffered)), slog.Uint64("unread", uint64(unread)))
 	d.hci_ringbuf_debug()
 	return buffered, nil
 }
@@ -290,9 +291,9 @@ func (d *Device) hci_read(b []byte) (uint32, error) {
 func (d *Device) hci_wait_read_buffered(n int) error {
 	d.trace("hci_wait_read_buffered", slog.Int("n", n))
 	for {
-		// Block on no data available.
-		available, err := d.hci_available_ringbuf()
-		if int(available) >= n {
+		// Block until at least n bytes are unread.
+		unread, err := d.hci_unread_bytes()
+		if int(unread) >= n {
 			break
 		} else if err != nil {
 			return err
