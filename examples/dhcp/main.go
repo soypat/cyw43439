@@ -44,7 +44,7 @@ func main() {
 		retries = 3
 	)
 	llstack := stack.LnetoStack()
-	rstack := llstack.StackRetrying(cywnet.DefaultBackoffStrat)
+	rstack := llstack.StackRetrying(cywnet.DefaultStackBackoff)
 	results, err := rstack.DoDHCPv4(requestedIP, timeout, retries)
 	if err != nil {
 		panic(err)

@@ -62,7 +62,7 @@ func main() {
 	}
 
 	stack := cystack.LnetoStack()
-	rstack := stack.StackRetrying(cywnet.DefaultBackoffStrat)
+	rstack := stack.StackRetrying(cywnet.DefaultStackBackoff)
 
 	// Configure TCP connection.
 	var conn tcp.Conn
