@@ -11,8 +11,9 @@ var _ netdev.Netlink[ConnectParams] = (*netlink)(nil)
 var _ netdev.DevEthernet = (*netlink)(nil)
 
 type netlink struct {
-	dev *cyw43439.Device
-	cb  func(connected bool) (reconnectNowRetries int, reconnectParams ConnectParams)
+	dev    *cyw43439.Device
+	cb     netdev.NotifyCallback[ConnectParams]
+	hndler func(rxEthframe []byte)
 }
 
 type ConnectParams struct {
@@ -35,7 +36,7 @@ func (nl *netlink) LinkDisconnect() {
 // changes for the Netlink. The callback can signal an immediate reconnect is desired
 // by setting reconnectNowRetries to a positive integer. The netlink should then retry connection
 // immediately with the given reconnectParams. reconnectParams should not be nil if reconnectNowRetries is positive.
-func (nl *netlink) LinkNotify(cb func(connected bool) (reconnectNowRetries int, reconnectParams ConnectParams)) {
+func (nl *netlink) LinkNotify(cb netdev.NotifyCallback[ConnectParams]) {
 	nl.cb = cb
 }
 
@@ -59,10 +60,20 @@ func (nl *netlink) SendOffsetEthFrame(offsetTxEthFrame []byte) error {
 // frame is received. Buffers needed by the device to operate efficiently
 // should be allocated on its side.
 func (nl *netlink) SetEthRecvHandler(handler func(rxEthframe []byte)) {
-	nl.dev.RecvEthHandle(func(pkt []byte) error {
-		handler(pkt)
-		return nil
-	})
+	// TODO: refactor CYW internals to use same interface.
+	nl.hndler = handler
+	if handler == nil {
+		nl.dev.RecvEthHandle(nil)
+	} else {
+		nl.dev.RecvEthHandle(nl.rxhandlecyw)
+	}
+}
+
+func (nl *netlink) rxhandlecyw(rxEthFrame []byte) error {
+	if nl.hndler != nil {
+		nl.hndler(rxEthFrame)
+	}
+	return nil
 }
 
 // EthPoll services the device. For poll-based devices (e.g. CYW43439
@@ -89,6 +100,11 @@ func (nl *netlink) MaxFrameSizeAndOffset() (maxFrameSize int, frameOff int) {
 	return cyw43439.MaxFrameSize, ethOffset
 }
 
-func (nl *netlink) ConfigurePico() {
+func (nl *netlink) ConfigurePico(cfg cyw43439.Config) error {
 	nl.dev = cyw43439.NewPicoWDevice()
+	err := nl.dev.Init(cfg)
+	if err != nil {
+		return err
+	}
+	return nil
 }
