@@ -51,7 +51,7 @@ func main() {
 	logger.Info("DHCP complete", slog.String("addr", dhcpResults.AssignedAddr.String()))
 
 	stack := cystack.LnetoStack()
-	rstack := stack.StackRetrying(cywnet.DefaultBackoffStrat)
+	rstack := stack.StackRetrying(cywnet.DefaultStackBackoff)
 	// DNS lookup for NTP server.
 	logger.Info("resolving NTP host", slog.String("host", ntpHost), slog.Any("dnssv", dhcpResults.DNSServers))
 	addrs, err := rstack.DoLookupIP(ntpHost, 5*time.Second, 3)
