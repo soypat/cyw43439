@@ -1,6 +1,6 @@
 module github.com/soypat/cyw43439
 
-go 1.23.8
+go 1.24
 
 toolchain go1.24.2
 
@@ -12,4 +12,4 @@ require (
 	golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa
 )
 
-require github.com/soypat/lneto v0.1.0
+require github.com/soypat/lneto v0.1.1-0.20260425023453-aa77403a2b32
