@@ -31,7 +31,7 @@ type Stack struct {
 }
 
 type StackConfig struct {
-	StaticAddress     netip.Addr
+	StaticAddress4    [4]byte
 	DNSServer         netip.Addr
 	NTPServer         netip.Addr
 	Hostname          string
@@ -95,7 +95,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	stack.enableTxPcap = cfg.EnableTxPacketCapture
 	elapsed := time.Since(start)
 	err = stack.s.Reset(xnet.StackConfig{
-		StaticAddress4:    cfg.StaticAddress.As4(),
+		StaticAddress4:    cfg.StaticAddress4,
 		DNSServer:         cfg.DNSServer,
 		NTPServer:         cfg.NTPServer,
 		Hostname:          cfg.Hostname,
@@ -105,6 +105,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		RandSeed:          elapsed.Nanoseconds() ^ int64(cfg.RandSeed),
 		HardwareAddress:   mac,
 		MTU:               1500, // 1500 for compatibility with most nodes.
+		ICMPQueueLimit:    1,
 	})
 	dev.RecvEthHandle(func(pkt []byte) {
 		err := stack.s.IngressEthernet(pkt)
@@ -115,6 +116,10 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	stack.sendbuf = make([]byte, cyw43439.MaxFrameSize)
 	if cfg.EnableRxPacketCapture || cfg.EnableTxPacketCapture {
 		err = stack.pcap.Configure(machine.Serial, xnet.CapturePrinterConfig{})
+	}
+	err = stack.s.EnableICMP(true)
+	if err != nil {
+		return stack, err
 	}
 	return stack, err
 }

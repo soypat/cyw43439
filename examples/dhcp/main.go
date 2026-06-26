@@ -70,6 +70,9 @@ func main() {
 		slog.Any("DNS-servers", results.DNSServers),
 	)
 	stack.Device().GPIOSet(0, true)
+
+	// Keep main alive. If main returns the program halts.
+	select {}
 }
 
 func loopForeverStack(stack *cywnet.Stack) {
