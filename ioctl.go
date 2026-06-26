@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"time"
 
 	"log/slog"
 
@@ -345,16 +344,14 @@ func (d *Device) waitForCredit(buf []uint32) error {
 	if d.has_credit() {
 		return nil
 	}
-	start := time.Now()
-	for retries := 0; retries < 10000; retries++ {
+	for retries := uint(0); retries < 10000; retries++ {
 		_, _, _, err := d.tryPoll(buf)
 		if err != nil && err != errNoF2Avail {
 			return err
 		} else if d.has_credit() {
 			return nil
 		}
-		println("waitForCredit ", retries, time.Since(start).String())
-		time.Sleep(1 * time.Microsecond)
+		d.pollBackoff.Do(retries)
 	}
 	return errWaitForCreditTimeout
 }
@@ -362,16 +359,14 @@ func (d *Device) waitForCredit(buf []uint32) error {
 // pollForIoctl polls until a control/ioctl/cdc packet is received.
 func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 	d.trace("pollForIoctl:start")
-	start := time.Now()
-	for retries := 0; retries < 10000; retries++ {
+	for retries := uint(0); retries < 10000; retries++ {
 		off, plen, hdr, err := d.tryPoll(buf)
 		if err != nil && err != errNoF2Avail {
 			return nil, err
 		} else if hdr == whd.CONTROL_HEADER {
 			return u32AsU8(buf)[off : off+plen], nil
 		}
-		println("pollForIoctl ", retries, time.Since(start).String())
-		time.Sleep(1 * time.Microsecond)
+		d.pollBackoff.Do(retries)
 	}
 	return nil, errors.New("pollForIoctl timeout")
 }

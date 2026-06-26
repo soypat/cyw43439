@@ -50,6 +50,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// Apply the DHCP-assigned address, subnet and DNS server to the stack.
+	// Without this the IP/ARP layers keep their zero address and the device
+	// won't answer ARP or ICMP for the assigned IP.
+	err = llstack.AssimilateDHCPResults(results)
+	if err != nil {
+		panic(err)
+	}
 	gatewayHW, err := rstack.DoResolveHardwareAddress6(results.Router, 500*time.Millisecond, 4)
 	if err != nil {
 		panic(err)
