@@ -14,6 +14,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
 )
 
@@ -57,8 +58,8 @@ func main() {
 		panic("while performing DHCP: " + err.Error())
 	}
 	stack := cystack.LnetoStack()
-	gatewayHW := stack.Gateway6()
-	println("dhcp addr:", dhcpResults.AssignedAddr.String(), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
+	gatewayHW := stack.GatewayHardwareAddr()
+	println("dhcp addr:", string(ipv4.AppendFormatAddr(nil, dhcpResults.AssignedAddr4)), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
 	var buf [512]byte
 	var conn tcp.Conn
 	connlogger := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
@@ -74,9 +75,9 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	println("listening on:", netip.AddrPortFrom(stack.Addr(), ourPort).String())
+	println("listening on:", netip.AddrPortFrom(netip.AddrFrom4(stack.Addr4()), ourPort).String())
 	for {
-		err = stack.ListenTCP(&conn, ourPort)
+		err = stack.ListenTCP4(&conn, ourPort)
 		if err != nil {
 			println("listen failed:", err.Error())
 			time.Sleep(3 * time.Second)

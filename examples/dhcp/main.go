@@ -12,6 +12,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/ipv4"
 )
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
@@ -53,10 +54,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	llstack.SetGateway6(gatewayHW)
+	llstack.SetGatewayHardwareAddr(gatewayHW)
 	logger.Info("DHCP complete",
 		slog.String("hostname", stack.Hostname()),
-		slog.String("ourIP", results.AssignedAddr.String()),
+		slog.String("ourIP", string(ipv4.AppendFormatAddr(nil, results.AssignedAddr4))),
 		slog.String("subnet", results.Subnet.String()),
 		slog.String("router", results.Router.String()),
 		slog.String("server", results.ServerAddr.String()),
@@ -68,6 +69,7 @@ func main() {
 		slog.Uint64("renew[seconds]", uint64(results.TRenewal)),
 		slog.Any("DNS-servers", results.DNSServers),
 	)
+	stack.Device().GPIOSet(0, true)
 }
 
 func loopForeverStack(stack *cywnet.Stack) {

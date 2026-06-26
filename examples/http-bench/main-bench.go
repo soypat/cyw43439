@@ -96,14 +96,14 @@ func main() {
 	}
 
 	stack := cystack.LnetoStack()
-	listenAddr := netip.AddrPortFrom(dhcpResults.AssignedAddr, listenPort)
+	listenAddr := netip.AddrPortFrom(netip.AddrFrom4(dhcpResults.AssignedAddr4), listenPort)
 
 	var listener tcp.Listener
 	err = listener.Reset(listenPort, tcpPool)
 	if err != nil {
 		panic("listener reset:" + err.Error())
 	}
-	err = stack.RegisterListener(&listener)
+	err = stack.RegisterListenerTCP(&listener)
 	if err != nil {
 		panic("listener register:" + err.Error())
 	}

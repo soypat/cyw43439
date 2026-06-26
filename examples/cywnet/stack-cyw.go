@@ -14,7 +14,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/dns"
-	"github.com/soypat/lneto/mdns"
+	"github.com/soypat/lneto/dns/mdns"
 	"github.com/soypat/lneto/x/xnet"
 )
 
@@ -50,6 +50,11 @@ type StackConfig struct {
 func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, cfg StackConfig) (*Stack, error) {
 	if cfg.Hostname == "" {
 		return nil, errors.New("empty hostname")
+	}
+	if cfgDev.PollBackoff == nil {
+		cfgDev.PollBackoff = func(consecutiveBackoffs uint) (sleepOrFlag time.Duration) {
+			return time.Millisecond
+		}
 	}
 	cfg.WifiJoinOptions.Passphrase = password
 	start := time.Now()
@@ -90,7 +95,7 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	stack.enableTxPcap = cfg.EnableTxPacketCapture
 	elapsed := time.Since(start)
 	err = stack.s.Reset(xnet.StackConfig{
-		StaticAddress:     cfg.StaticAddress,
+		StaticAddress4:    cfg.StaticAddress.As4(),
 		DNSServer:         cfg.DNSServer,
 		NTPServer:         cfg.NTPServer,
 		Hostname:          cfg.Hostname,
@@ -101,12 +106,11 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 		HardwareAddress:   mac,
 		MTU:               1500, // 1500 for compatibility with most nodes.
 	})
-	dev.RecvEthHandle(func(pkt []byte) error {
+	dev.RecvEthHandle(func(pkt []byte) {
 		err := stack.s.IngressEthernet(pkt)
 		if stack.enableRxPcap && err == nil {
 			stack.printPacket("IN  ", pkt)
 		}
-		return err
 	})
 	stack.sendbuf = make([]byte, cyw43439.MaxFrameSize)
 	if cfg.EnableRxPacketCapture || cfg.EnableTxPacketCapture {
@@ -184,7 +188,7 @@ func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (dhcpResults *xnet.DHCPResults
 	if err != nil {
 		panic(err)
 	}
-	lstack.SetGateway6(gatewayHW)
+	lstack.SetGatewayHardwareAddr(gatewayHW)
 	return dhcpResults, nil
 }
 
@@ -195,7 +199,7 @@ func (stack *Stack) logerr(msg string, attrs ...slog.Attr) {
 }
 
 func (stack *Stack) printPacket(prefix string, pkt []byte) {
-	stack.pcap.PrintPacket(prefix, pkt)
+	stack.pcap.PrintEthernet(prefix, pkt)
 }
 
 // circumvents pico issue on tinygo https://github.com/tinygo-org/tinygo/issues/5188

@@ -93,7 +93,9 @@ func SetupWithDHCP(cfg SetupConfig) (*stacks.DHCPClient, *stacks.PortStack, *cyw
 		Logger:          logger,
 	})
 
-	dev.RecvEthHandle(stack.RecvEth)
+	dev.RecvEthHandle(func(pkt []byte) {
+		stack.RecvEth(pkt)
+	})
 
 	// Begin asynchronous packet handling.
 	go nicLoop(dev, stack)

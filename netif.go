@@ -36,16 +36,40 @@ func (d *Device) PollOne() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, cmd, err := d.tryPoll(d._rxBuf[:])
+	_, _, cmd, err := d.tryPoll(d._rxBuf[:])
 	if err == errNoF2Avail {
 		return false, nil
 	}
 	return cmd == whd.CONTROL_HEADER && err == nil, err
 }
 
+// EthPoll services the device once, polling for a single packet. If an Ethernet
+// data frame was available it is copied into buf at offset ethFrameOff and its length
+// returned in ethernetBytes. Control and async-event packets are processed internally
+// and return ethernetBytes==0. buf must be at least [MaxFrameSize] bytes. EthPoll is the
+// poll-based counterpart to [Device.RecvEthHandle]: it receives data without a callback.
+func (d *Device) EthPoll(buf []byte) (ethFrameOff, ethernetBytes int, err error) {
+	err = d.acquire(modeWifi)
+	defer d.release()
+	if err != nil {
+		return 0, 0, err
+	}
+	off, plen, hdrType, err := d.tryPoll(d._rxBuf[:])
+	if err == errNoF2Avail {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	if hdrType == whd.DATA_HEADER {
+		ethernetBytes = copy(buf, u32AsU8(d._rxBuf[:])[off:off+plen])
+	}
+	return 0, ethernetBytes, nil
+}
+
 // RecvEthHandle sets handler for receiving Ethernet pkt
 // If set to nil then incoming packets are ignored.
-func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
+func (d *Device) RecvEthHandle(handler func(pkt []byte)) {
 	err := d.acquire(modeWifi)
 	defer d.release()
 	if err != nil {
