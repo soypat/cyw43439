@@ -10,6 +10,7 @@ import (
 	"log/slog"
 
 	"github.com/soypat/cyw43439/whd"
+	"github.com/soypat/lneto"
 	"golang.org/x/exp/constraints"
 )
 
@@ -29,8 +30,8 @@ const (
 type linkState uint8
 
 const (
-	linkStateDown   linkState = iota
-	_                         // unused (was linkStateUpWaitForSSID)
+	linkStateDown linkState = iota
+	_                       // unused (was linkStateUpWaitForSSID)
 	linkStateUp
 	linkStateFailed
 )
@@ -55,10 +56,22 @@ func DefaultWifiBluetoothConfig() Config {
 
 func DefaultWifiConfig() Config {
 	return Config{
-		Firmware: wifiFW2,
-		CLM:      clmFW,
-		mode:     modeInit | modeWifi,
+		Firmware:    wifiFW2,
+		CLM:         clmFW,
+		mode:        modeInit | modeWifi,
+		PollBackoff: defaultBackoff,
 	}
+}
+
+func defaultBackoff(consecutiveBackoffs uint) (sleepOrFlag time.Duration) {
+	const (
+		start     = 100 * time.Microsecond
+		max       = 10 * time.Millisecond
+		maxConsec = 7
+		_maxSleep = start << maxConsec
+	)
+	sleepOrFlag = start << min(maxConsec, consecutiveBackoffs)
+	return sleepOrFlag
 }
 
 // type OutputPin func(bool)
@@ -87,7 +100,7 @@ type Device struct {
 	lastSDPCMHeader whd.SDPCMHeader
 	auxCDCHeader    whd.CDCHeader
 	auxBDCHeader    whd.BDCHeader
-	rcvEth          func([]byte) error
+	rcvEth          func([]byte)
 	rcvHCI          func([]byte) error
 	logger          *slog.Logger
 	_traceenabled   bool
@@ -96,12 +109,14 @@ type Device struct {
 	authOK          bool // AUTH event succeeded. ref: runner.rs:90
 	joinOK          bool // JOIN event succeeded. ref: runner.rs:88
 	keyExchangeOK   bool // PSK_SUP key exchange succeeded. ref: runner.rs:89
+	pollBackoff     lneto.BackoffStrategy
 }
 
 type Config struct {
-	Firmware string
-	CLM      string
-	Logger   *slog.Logger
+	Firmware    string
+	CLM         string
+	Logger      *slog.Logger
+	PollBackoff lneto.BackoffStrategy
 	// mode selects the enabled operation modes of the CYW43439.
 	mode opMode
 }
@@ -109,6 +124,8 @@ type Config struct {
 func (d *Device) Init(cfg Config) (err error) {
 	if cfg.mode&(modeBluetooth|modeWifi) == 0 {
 		return errors.New("no operation mode selected")
+	} else if cfg.PollBackoff == nil {
+		return errors.New("polling backoff not set")
 	}
 	err = d.acquire(0)
 	defer d.release()
@@ -120,7 +137,7 @@ func (d *Device) Init(cfg Config) (err error) {
 	// Reference: https://github.com/embassy-rs/embassy/blob/6babd5752e439b234151104d8d20bae32e41d714/cyw43/src/runner.rs#L76
 	d.logger = cfg.Logger
 	d._traceenabled = d.logger != nil && d.logger.Handler().Enabled(context.Background(), levelTrace)
-
+	d.pollBackoff = cfg.PollBackoff
 	d.backplaneWindow = 0xaaaa_aaaa
 
 	err = d.initBus(cfg.mode)

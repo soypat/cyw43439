@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"time"
 
 	"log/slog"
 
@@ -312,24 +311,6 @@ func (d *Device) handle_irq(buf []uint32) (err error) {
 	return err
 }
 
-// poll services any F2 packets.
-//
-// This is the moral equivalent of an ISR to service hw interrupts.  In this
-// case,  we'll run poll() as a go function to simulate real hw interrupts.
-//
-// TODO get real hw interrupts working and ditch polling
-func (d *Device) irqPoll() {
-	for {
-		d.acquire(0)
-		d.log_read()
-		d.handle_irq(d._rxBuf[:])
-		d.release()
-		// Avoid busy waiting on idle.  Trade off here is time sleeping
-		// is time added to receive latency.
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // f2PacketAvail checks if a packet is available, and if so, returns
 // the packet length.
 func (d *Device) f2PacketAvail() (bool, uint16) {
@@ -363,14 +344,14 @@ func (d *Device) waitForCredit(buf []uint32) error {
 	if d.has_credit() {
 		return nil
 	}
-	for retries := 0; retries < 10; retries++ {
-		_, _, err := d.tryPoll(buf)
+	for retries := uint(0); retries < 10000; retries++ {
+		_, _, _, err := d.tryPoll(buf)
 		if err != nil && err != errNoF2Avail {
 			return err
 		} else if d.has_credit() {
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		d.pollBackoff.Do(retries)
 	}
 	return errWaitForCreditTimeout
 }
@@ -378,14 +359,14 @@ func (d *Device) waitForCredit(buf []uint32) error {
 // pollForIoctl polls until a control/ioctl/cdc packet is received.
 func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 	d.trace("pollForIoctl:start")
-	for retries := 0; retries < 10; retries++ {
-		buf8, hdr, err := d.tryPoll(buf)
+	for retries := uint(0); retries < 10000; retries++ {
+		off, plen, hdr, err := d.tryPoll(buf)
 		if err != nil && err != errNoF2Avail {
 			return nil, err
 		} else if hdr == whd.CONTROL_HEADER {
-			return buf8, nil
+			return u32AsU8(buf)[off : off+plen], nil
 		}
-		time.Sleep(10 * time.Millisecond)
+		d.pollBackoff.Do(retries)
 	}
 	return nil, errors.New("pollForIoctl timeout")
 }
@@ -394,7 +375,7 @@ func (d *Device) pollForIoctl(buf []uint32) ([]byte, error) {
 func (d *Device) check_status(buf []uint32) error {
 	d.trace("check_status:start")
 	for {
-		_, _, err := d.tryPoll(buf)
+		_, _, _, err := d.tryPoll(buf)
 		if err == errNoF2Avail {
 			return nil
 		} else if err != nil {
@@ -407,17 +388,17 @@ func (d *Device) check_status(buf []uint32) error {
 // If a packet is received then it is processed by rx and a nil error is returned.
 // If no packet is available then it returns errNoPacketAvail as the error.
 // If an error is returned it will return whd.UNKNOWN_HEADER as the header type.
-func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
+func (d *Device) tryPoll(buf []uint32) (dataOffBytes, plenBytes uint16, _ whd.SDPCMHeaderType, _ error) {
 	if d._traceenabled {
 		d.logattrs(levelTrace-1, "tryPoll:start") // Very spammy message, log one below trace.
 	}
 	avail, length := d.f2PacketAvail()
 	if !avail {
-		return nil, whd.UNKNOWN_HEADER, errNoF2Avail
+		return 0, 0, whd.UNKNOWN_HEADER, errNoF2Avail
 	}
 	err := d.wlan_read(buf[:], int(length))
 	if err != nil {
-		return nil, whd.UNKNOWN_HEADER, err
+		return 0, 0, whd.UNKNOWN_HEADER, err
 	}
 	buf8 := u32AsU8(buf[:])
 	offset, plen, hdrType, err := d.rx(buf8[:length])
@@ -436,7 +417,7 @@ func (d *Device) tryPoll(buf []uint32) ([]byte, whd.SDPCMHeaderType, error) {
 			d.logerr("tryPoll:rx", slog.Uint64("plen", uint64(plen)), slog.String("err", err.Error()))
 		}
 	}
-	return buf8[offset : offset+plen], hdrType, err
+	return offset, plen, hdrType, err
 }
 
 func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, err error) {
@@ -463,7 +444,7 @@ func (d *Device) rx(packet []byte) (offset, plen uint16, _ whd.SDPCMHeaderType, 
 	case whd.ASYNCEVENT_HEADER:
 		err = d.rxEvent(payload)
 	case whd.DATA_HEADER:
-		err = d.rxData(payload)
+		offset, plen, err = d.rxData(payload)
 	default:
 		err = errInvalidIoctlCmdOrKind
 	}
@@ -624,16 +605,22 @@ func (d *Device) rxEvent(packet []byte) (err error) {
 	return nil
 }
 
-func (d *Device) rxData(packet []byte) (err error) {
+// rxData decodes an incoming Ethernet data frame. It returns the offset and length
+// of the Ethernet frame within the SDPCM read buffer (absolute, so that tryPoll can
+// return buf8[offset:offset+plen]) mirroring rxControl. The registered rcvEth handler,
+// if any, is still invoked so callback-based consumers keep working alongside PollEth.
+func (d *Device) rxData(packet []byte) (offset, plen uint16, err error) {
 	d.trace("rxData:start")
-	if d.rcvEth != nil {
-		bdcHdr := whd.DecodeBDCHeader(packet)
-		packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
-		if packetStart > len(packet) {
-			return errInvalidRxBDCHeaderLen
-		}
-		payload := packet[packetStart:]
-		return d.rcvEth(payload)
+	bdcHdr := whd.DecodeBDCHeader(packet)
+	packetStart := whd.BDC_HEADER_LEN + 4*int(bdcHdr.DataOffset)
+	if packetStart > len(packet) {
+		return 0, 0, errInvalidRxBDCHeaderLen
 	}
-	return nil
+	payload := packet[packetStart:]
+	if rcv := d.rcvEth; rcv != nil {
+		rcv(payload)
+	}
+	offset = uint16(int(d.lastSDPCMHeader.HeaderLength) + packetStart)
+	plen = uint16(len(payload))
+	return offset, plen, err
 }

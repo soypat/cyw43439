@@ -15,6 +15,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
 )
 
@@ -61,8 +62,8 @@ func main() {
 		panic("while performing DHCP: " + err.Error())
 	}
 	stack := cystack.LnetoStack()
-	gatewayHW := stack.Gateway6()
-	println("dhcp addr:", dhcpResults.AssignedAddr.String(), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
+	gatewayHW := stack.GatewayHardwareAddr()
+	println("dhcp addr:", string(ipv4.AppendFormatAddr(nil, dhcpResults.AssignedAddr4)), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
 	var buf [512]byte
 	var conn tcp.Conn
 	err = conn.Configure(tcp.ConnConfig{

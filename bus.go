@@ -485,6 +485,9 @@ func (d *Device) write32_swapped(fn Function, addr uint32, value uint32) {
 func u32AsU8(buf []uint32) []byte {
 	return unsafeAsSlice[uint32, byte](buf)
 }
+func u8AsU32(buf []byte) []uint32 {
+	return unsafeAsSlice[byte, uint32](buf)
+}
 
 func u32PtrTo4U8(buf *uint32) *[4]byte {
 	return (*[4]byte)(unsafe.Pointer(buf))
