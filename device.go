@@ -56,10 +56,22 @@ func DefaultWifiBluetoothConfig() Config {
 
 func DefaultWifiConfig() Config {
 	return Config{
-		Firmware: wifiFW2,
-		CLM:      clmFW,
-		mode:     modeInit | modeWifi,
+		Firmware:    wifiFW2,
+		CLM:         clmFW,
+		mode:        modeInit | modeWifi,
+		PollBackoff: defaultBackoff,
 	}
+}
+
+func defaultBackoff(consecutiveBackoffs uint) (sleepOrFlag time.Duration) {
+	const (
+		start     = 100 * time.Microsecond
+		max       = 10 * time.Millisecond
+		maxConsec = 7
+		_maxSleep = start << maxConsec
+	)
+	sleepOrFlag = start << min(maxConsec, consecutiveBackoffs)
+	return sleepOrFlag
 }
 
 // type OutputPin func(bool)

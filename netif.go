@@ -54,17 +54,20 @@ func (d *Device) EthPoll(buf []byte) (ethFrameOff, ethernetBytes int, err error)
 	if err != nil {
 		return 0, 0, err
 	}
-	off, plen, hdrType, err := d.tryPoll(d._rxBuf[:])
+	var buf32 []uint32
+	if len(buf) > 0 {
+		buf32 = u8AsU32(buf)
+	} else {
+		buf32 = d._rxBuf[:]
+	}
+	off, plen, hdrType, err := d.tryPoll(buf32)
+	if hdrType == whd.DATA_HEADER {
+		ethFrameOff, ethernetBytes = int(off), int(plen)
+	}
 	if err == errNoF2Avail {
 		return 0, 0, nil
 	}
-	if err != nil {
-		return 0, 0, err
-	}
-	if hdrType == whd.DATA_HEADER {
-		ethernetBytes = copy(buf, u32AsU8(d._rxBuf[:])[off:off+plen])
-	}
-	return 0, ethernetBytes, nil
+	return ethFrameOff, ethernetBytes, err
 }
 
 // RecvEthHandle sets handler for receiving Ethernet pkt

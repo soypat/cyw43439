@@ -51,18 +51,6 @@ func NewConfiguredPicoWithStack(ssid, password string, cfgDev cyw43439.Config, c
 	if cfg.Hostname == "" {
 		return nil, errors.New("empty hostname")
 	}
-	if cfgDev.PollBackoff == nil {
-		cfgDev.PollBackoff = func(consecutiveBackoffs uint) (sleepOrFlag time.Duration) {
-			const (
-				start     = 100 * time.Microsecond
-				max       = 10 * time.Millisecond
-				maxConsec = 7
-				_maxSleep = start << maxConsec
-			)
-			sleepOrFlag = start << min(maxConsec, consecutiveBackoffs)
-			return sleepOrFlag
-		}
-	}
 	cfg.WifiJoinOptions.Passphrase = password
 	start := time.Now()
 	dev := cyw43439.NewPicoWDevice()
