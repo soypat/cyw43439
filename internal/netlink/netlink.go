@@ -99,5 +99,5 @@ type Netlinker interface {
 
 	// RecvEthHandle sets handler for receiving Ethernet pkt
 	// TODO describe content of pkt
-	RecvEthHandle(handler func(pkt []byte) error)
+	RecvEthHandle(handler func(pkt []byte))
 }

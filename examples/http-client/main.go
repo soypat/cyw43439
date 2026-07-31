@@ -12,6 +12,7 @@ import (
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
 	"github.com/soypat/lneto/http/httpraw"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
 )
 
@@ -54,7 +55,7 @@ func main() {
 	if err != nil {
 		panic("DHCP failed:" + err.Error())
 	}
-	logger.Info("DHCP complete", slog.String("addr", dhcpResults.AssignedAddr.String()))
+	logger.Info("DHCP complete", slog.String("addr", ipv4.String(dhcpResults.AssignedAddr4)))
 
 	svAddr, err := netip.ParseAddrPort(serverAddrStr)
 	if err != nil {
@@ -75,10 +76,10 @@ func main() {
 		panic("conn configure:" + err.Error())
 	}
 
-	// Build HTTP request using httpraw.Header.
-	var hdr httpraw.Header
+	// Build HTTP request using httpraw.HeaderV1.
+	var hdr httpraw.HeaderV1
 	hdr.SetMethod("GET")
-	hdr.SetRequestURI("/")
+	hdr.SetRequestTarget("/")
 	hdr.SetProtocol("HTTP/1.1")
 	hdr.Set("Host", svAddr.Addr().String())
 	hdr.Set("Connection", "close")

@@ -5,7 +5,6 @@ package main
 import (
 	"log/slog"
 	"machine"
-	"net"
 	"net/netip"
 	"strconv"
 	"time"
@@ -15,19 +14,26 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
-	"github.com/soypat/lneto/http/httpraw"
+	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/http/httphi"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 )
 
-const connTimeout = 3 * time.Second
 const numListeners = 1 // Just one listener.
 const maxConns = 3     // Max amount of concurrent connections.
-const tcpbufsize = 512 // MTU - ethhdr - iphdr - tcphdr
 const hostname = "http-pico"
 const listenPort = 80                  // HTTP server port.
 const loopSleep = 5 * time.Millisecond // Sleep between polls of network.
-const httpBuf = 512
+
+// httphi.Router memory. All of it is allocated during Configure, serving
+// requests afterwards allocates nothing.
+const (
+	httpRequestBuf  = 1024 // Chrome tends to send ~700 bytes on a landing page request.
+	httpResponseBuf = 128  // Shares leftover request memory, so not a hard limit.
+	httpNumHeaderKV = httpRequestBuf / 32
+)
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
@@ -84,12 +90,7 @@ func main() {
 		RxBufSize:          256,
 		EstablishedTimeout: 5 * time.Second,
 		ClosingTimeout:     5 * time.Second,
-		NewUserData: func() any {
-			var hdr httpraw.Header
-			buf := make([]byte, httpBuf)
-			hdr.Reset(buf)
-			return &hdr
-		},
+		NewBackoff:         func() lneto.BackoffStrategy { return backoff },
 		// Logger:             traceLog.WithGroup("tcppool"),
 		// ConnLogger:         traceLog,
 	})
@@ -97,8 +98,27 @@ func main() {
 		panic("tcppool create:" + err.Error())
 	}
 
+	// Routes are registered before Configure: the router sizes its path value
+	// storage from the http.
+	var http httphi.MuxSlice
+	http.Handle("GET /", handleLanding)
+	http.Handle("GET /toggle-led", handleToggleLED)
+
+	var router httphi.Router
+	err = router.Configure(httphi.RouterConfig{
+		FixedNumGoroutines:          maxConns, // Workers and exchanges allocated here and never again.
+		RequestHeaderBufferSize:     httpRequestBuf,
+		ResponseHeaderMinBufferSize: httpResponseBuf,
+		RequestNumHeaderKVCap:       httpNumHeaderKV,
+		NormalizeOutgoingKeys:       true,
+		Mux:                         &http,
+		Logger:                      logger,
+	})
+	if err != nil {
+		panic("router configure:" + err.Error())
+	}
+
 	stack := cystack.LnetoStack()
-	listenAddr := netip.AddrPortFrom(dhcpResults.AssignedAddr, listenPort)
 
 	// Create and register TCP listener.
 	var listener tcp.Listener
@@ -106,114 +126,50 @@ func main() {
 	if err != nil {
 		panic("listener reset:" + err.Error())
 	}
-	err = stack.RegisterListener(&listener)
+	err = stack.RegisterListenerTCP(&listener)
 	if err != nil {
 		panic("listener register:" + err.Error())
 	}
 
+	addr := ipv4.String(dhcpResults.AssignedAddr4)
 	logger.Info("listening",
-		slog.String("addr", "http://"+listenAddr.String()),
+		slog.String("addr", "http://"+addr+":"+strconv.Itoa(listenPort)),
 	)
 
 	for {
 		if listener.NumberOfReadyToAccept() == 0 {
-			time.Sleep(5 * time.Millisecond)
+			time.Sleep(loopSleep)
 			tcpPool.CheckTimeouts()
 			continue
 		}
 
-		conn, httpBuf, err := listener.TryAccept()
+		conn, _, err := listener.TryAccept()
 		if err != nil {
 			logger.Error("listener accept:", slog.String("err", err.Error()))
 			time.Sleep(time.Second)
 			continue
 		}
-		go handleConn(conn, httpBuf.(*httpraw.Header))
+		// Handle does not block: it hands the connection to a router goroutine.
+		// The router closes the connection once the exchange is done.
+		err = router.Handle(conn)
+		if err != nil {
+			// No exchange free: refusing is how fixed memory applies backpressure.
+			logger.Error("router refused connection:", slog.String("err", err.Error()))
+			conn.Close()
+		}
 	}
 }
 
-type page uint8
+func handleLanding(ex *httphi.Exchange) {
+	println("Got webpage request!")
+	ex.Respond(httphi.StatusOK, "text/html", webPage)
+}
 
-const (
-	pageNotExits  page = iota
-	pageLanding        // /
-	pageToggleLED      // /toggle-led
-)
-
-func handleConn(conn *tcp.Conn, hdr *httpraw.Header) {
-	defer conn.Close()
-	const AsRequest = false
-	var buf [64]byte
-	hdr.Reset(nil)
-
-	remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
-	println("incoming connection:", remoteAddr.String(), "from port", conn.RemotePort())
-
-	for {
-		n, err := conn.Read(buf[:])
-		if n > 0 {
-			hdr.ReadFromBytes(buf[:n])
-			needMoreData, err := hdr.TryParse(AsRequest)
-			if err != nil && !needMoreData {
-				println("parsing HTTP request:", err.Error())
-				return
-			}
-			if !needMoreData {
-				break
-			}
-		}
-		closed := err == net.ErrClosed || conn.State() != tcp.StateEstablished
-		if closed {
-			break
-		} else if hdr.BufferReceived() >= httpBuf {
-			println("too much HTTP data")
-			return
-		}
-	}
-	// Check requested requestedPage URI.
-	var requestedPage page
-	uri := hdr.RequestURI()
-	switch string(uri) {
-	case "/":
-		println("Got webpage request!")
-		requestedPage = pageLanding
-	case "/toggle-led":
-		println("got toggle led request")
-		requestedPage = pageToggleLED
-		lastLedState = !lastLedState
-		cystack.Device().GPIOSet(0, lastLedState)
-	}
-
-	// Prepare response with same buffer.
-	hdr.Reset(nil)
-	hdr.SetProtocol("HTTP/1.1")
-	if requestedPage == pageNotExits {
-		hdr.SetStatus("404", "Not Found")
-	} else {
-		hdr.SetStatus("200", "OK")
-	}
-	var body []byte
-	switch requestedPage {
-	case pageLanding:
-		body = webPage
-		hdr.Set("Content-Type", "text/html")
-	}
-	if len(body) > 0 {
-		hdr.Set("Content-Length", strconv.Itoa(len(body)))
-	}
-	responseHeader, err := hdr.AppendResponse(buf[:0])
-	if err != nil {
-		println("error appending:", err.Error())
-	}
-	conn.Write(responseHeader)
-	if len(body) > 0 {
-		_, err := conn.Write(body)
-		if err != nil {
-			println("writing body:", err.Error())
-		}
-		time.Sleep(loopSleep)
-	}
-	// connection closed automatically by defer.
+func handleToggleLED(ex *httphi.Exchange) {
+	println("got toggle led request")
+	lastLedState = !lastLedState
+	cystack.Device().GPIOSet(0, lastLedState)
+	ex.Respond(httphi.StatusOK, "", nil)
 }
 
 func loopForeverStack(stack *cywnet.Stack) {
@@ -223,4 +179,19 @@ func loopForeverStack(stack *cywnet.Stack) {
 			time.Sleep(loopSleep)
 		}
 	}
+}
+
+// backoff implements exponential backoff suitable for TCP connection read/write
+// polling. It starts at 1us and caps at 5ms, doubling on each consecutive backoff.
+func backoff(consecutiveBackoffs uint) time.Duration {
+	const (
+		minWait  = uint32(time.Microsecond)
+		maxWait  = 5 * uint32(time.Millisecond)
+		maxShift = 22
+	)
+	wait := minWait << min(consecutiveBackoffs, maxShift)
+	if wait > maxWait {
+		wait = maxWait
+	}
+	return time.Duration(wait)
 }

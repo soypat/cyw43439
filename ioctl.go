@@ -633,7 +633,7 @@ func (d *Device) rxData(packet []byte) (err error) {
 			return errInvalidRxBDCHeaderLen
 		}
 		payload := packet[packetStart:]
-		return d.rcvEth(payload)
+		d.rcvEth(payload)
 	}
 	return nil
 }

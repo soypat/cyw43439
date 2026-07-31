@@ -29,8 +29,8 @@ const (
 type linkState uint8
 
 const (
-	linkStateDown   linkState = iota
-	_                         // unused (was linkStateUpWaitForSSID)
+	linkStateDown linkState = iota
+	_                       // unused (was linkStateUpWaitForSSID)
 	linkStateUp
 	linkStateFailed
 )
@@ -87,7 +87,7 @@ type Device struct {
 	lastSDPCMHeader whd.SDPCMHeader
 	auxCDCHeader    whd.CDCHeader
 	auxBDCHeader    whd.BDCHeader
-	rcvEth          func([]byte) error
+	rcvEth          func([]byte)
 	rcvHCI          func([]byte) error
 	logger          *slog.Logger
 	_traceenabled   bool

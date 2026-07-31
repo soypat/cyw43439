@@ -12,6 +12,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/ipv4"
 )
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
@@ -48,7 +49,7 @@ func main() {
 	if err != nil {
 		panic("DHCP failed:" + err.Error())
 	}
-	logger.Info("DHCP complete", slog.String("addr", dhcpResults.AssignedAddr.String()))
+	logger.Info("DHCP complete", slog.String("addr", ipv4.String(dhcpResults.AssignedAddr4)))
 
 	stack := cystack.LnetoStack()
 	rstack := stack.StackRetrying(cywnet.DefaultStackBackoff)

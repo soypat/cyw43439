@@ -14,6 +14,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
 	mqtt "github.com/soypat/natiu-mqtt"
 )
@@ -67,7 +68,7 @@ func main() {
 	if err != nil {
 		panic("DHCP failed:" + err.Error())
 	}
-	logger.Info("DHCP complete", slog.String("addr", dhcpResults.AssignedAddr.String()))
+	logger.Info("DHCP complete", slog.String("addr", ipv4.String(dhcpResults.AssignedAddr4)))
 
 	svAddr, err := netip.ParseAddrPort(serverAddrStr)
 	if err != nil {

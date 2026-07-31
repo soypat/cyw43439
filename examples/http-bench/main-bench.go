@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"machine"
-	"net"
 	"net/netip"
 	"strconv"
 	"time"
@@ -18,20 +17,27 @@ import (
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
 	"github.com/soypat/lneto"
 	"github.com/soypat/lneto/ethernet"
-	"github.com/soypat/lneto/http/httpraw"
+	"github.com/soypat/lneto/http/httphi"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 )
 
-const connTimeout = 3 * time.Second
 const numListeners = 1 // Just one listener.
 const maxConns = 3     // Max amount of concurrent connections.
-const tcpbufsize = 512 // MTU - ethhdr - iphdr - tcphdr
 const hostname = "bench-pico"
 const listenPort = 80                  // HTTP server port.
 const loopSleep = 5 * time.Millisecond // Sleep between polls of network.
-const httpBuf = 512
 const maxTCPReadWrite = ethernet.MaxMTU - 20 - 20
+
+// httphi.Router memory. All of it is allocated during Configure, serving
+// requests afterwards allocates nothing.
+const (
+	httpRequestBuf  = 1024 // Chrome tends to send ~700 bytes on a landing page request.
+	httpResponseBuf = 128  // Shares leftover request memory, so not a hard limit.
+	httpNumHeaderKV = httpRequestBuf / 32
+	uploadBufSize   = 512 // Discard buffer the upload benchmark reads into.
+)
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
@@ -45,6 +51,16 @@ var (
 	requestedIP  = [4]byte{192, 168, 1, 99}
 	cystack      *cywnet.Stack
 )
+
+// uploadBufs hands out the upload handler's discard buffers, one per router
+// goroutine. Filled once at startup so a request never allocates.
+var uploadBufs = make(chan []byte, maxConns)
+
+func init() {
+	for range maxConns {
+		uploadBufs <- make([]byte, uploadBufSize)
+	}
+}
 
 func main() {
 	time.Sleep(2 * time.Second) // Give time to connect to USB and monitor output.
@@ -81,185 +97,94 @@ func main() {
 		RxBufSize:          3 * maxTCPReadWrite,
 		EstablishedTimeout: 10 * time.Second,
 		ClosingTimeout:     5 * time.Second,
-		NewUserData: func() any {
-			var hdr httpraw.Header
-			buf := make([]byte, httpBuf)
-			hdr.Reset(buf)
-			return &hdr
-		},
-		NewBackoff: func() lneto.BackoffStrategy {
-			return backoff
-		},
+		NewBackoff:         func() lneto.BackoffStrategy { return backoff },
 	})
 	if err != nil {
 		panic("tcppool create:" + err.Error())
 	}
 
+	// Routes are registered before Configure: the router sizes its path value
+	// storage from the mux.
+	var mux httphi.MuxSlice
+	mux.Handle("GET /", handleLanding)
+	mux.Handle("GET /toggle-led", handleToggleLED)
+	mux.Handle("GET /download", handleDownload)
+	mux.Handle("POST /upload", handleUpload)
+
+	var router httphi.Router
+	err = router.Configure(httphi.RouterConfig{
+		FixedNumGoroutines:          maxConns, // Workers and exchanges allocated here and never again.
+		RequestHeaderBufferSize:     httpRequestBuf,
+		ResponseHeaderMinBufferSize: httpResponseBuf,
+		RequestNumHeaderKVCap:       httpNumHeaderKV,
+		NormalizeOutgoingKeys:       true,
+		Mux:                         &mux,
+		Logger:                      logger,
+	})
+	if err != nil {
+		panic("router configure:" + err.Error())
+	}
+
 	stack := cystack.LnetoStack()
-	listenAddr := netip.AddrPortFrom(dhcpResults.AssignedAddr, listenPort)
 
 	var listener tcp.Listener
 	err = listener.Reset(listenPort, tcpPool)
 	if err != nil {
 		panic("listener reset:" + err.Error())
 	}
-	err = stack.RegisterListener(&listener)
+	err = stack.RegisterListenerTCP(&listener)
 	if err != nil {
 		panic("listener register:" + err.Error())
 	}
 
+	addr := ipv4.String(dhcpResults.AssignedAddr4)
 	logger.Info("listening",
-		slog.String("addr", "http://"+listenAddr.String()),
+		slog.String("addr", "http://"+addr+":"+strconv.Itoa(listenPort)),
 	)
 
 	for {
 		if listener.NumberOfReadyToAccept() == 0 {
-			time.Sleep(5 * time.Millisecond)
 			tcpPool.CheckTimeouts()
+			time.Sleep(loopSleep)
 			continue
 		}
 
-		conn, httpBuf, err := listener.TryAccept()
+		conn, _, err := listener.TryAccept()
 		if err != nil {
 			logger.Error("listener accept:", slog.String("err", err.Error()))
 			time.Sleep(time.Second)
 			continue
 		}
-		go handleConn(conn, httpBuf.(*httpraw.Header))
-	}
-}
-
-type page uint8
-
-const (
-	pageNotExists page = iota
-	pageLanding        // /
-	pageToggleLED      // /toggle-led
-	pageDownload       // /download?size=small|medium|large
-	pageUpload         // /upload
-)
-
-func handleConn(conn *tcp.Conn, hdr *httpraw.Header) {
-	defer conn.Close()
-	const AsRequest = false
-	var buf [512]byte
-	hdr.Reset(nil)
-
-	remoteAddr, _ := netip.AddrFromSlice(conn.RemoteAddr())
-	println("incoming connection:", remoteAddr.String(), "from port", conn.RemotePort())
-
-	// Read HTTP request headers.
-	for {
-		n, err := conn.Read(buf[:])
-		if n > 0 {
-			hdr.ReadFromBytes(buf[:n])
-			needMoreData, err := hdr.TryParse(AsRequest)
-			if err != nil && !needMoreData {
-				println("parsing HTTP request:", err.Error())
-				return
-			}
-			if !needMoreData {
-				break
-			}
-		}
-		closed := err == net.ErrClosed || conn.State() != tcp.StateEstablished
-		if closed {
-			break
-		} else if hdr.BufferReceived() >= httpBuf {
-			println("too much HTTP data")
-			return
+		err = router.Handle(conn)
+		if err != nil {
+			// No exchange free: refusing is how fixed memory applies backpressure.
+			logger.Error("router refused connection:", slog.String("err", err.Error()))
+			conn.Close()
 		}
 	}
-
-	uri := hdr.RequestURI()
-	method := hdr.Method()
-	var requestedPage page
-	// Parse URI path and query string. We look for "/download" prefix
-	// since the URI may include "?size=..." query parameters.
-	uriStr := string(uri)
-	switch {
-	case uriStr == "/":
-		requestedPage = pageLanding
-	case uriStr == "/toggle-led":
-		requestedPage = pageToggleLED
-		lastLedState = !lastLedState
-		cystack.Device().GPIOSet(0, lastLedState)
-	case hasPrefix(uriStr, "/download"):
-		requestedPage = pageDownload
-	case uriStr == "/upload" && string(method) == "POST":
-		requestedPage = pageUpload
-	}
-
-	switch requestedPage {
-	case pageDownload:
-		handleDownload(conn, hdr, buf[:], uriStr)
-		return
-	case pageUpload:
-		handleUpload(conn, hdr, buf[:])
-		return
-	}
-
-	// Serve normal pages.
-	hdr.Reset(nil)
-	hdr.SetProtocol("HTTP/1.1")
-	if requestedPage == pageNotExists {
-		hdr.SetStatus("404", "Not Found")
-	} else {
-		hdr.SetStatus("200", "OK")
-	}
-	var body []byte
-	switch requestedPage {
-	case pageLanding:
-		body = webPage
-		hdr.Set("Content-Type", "text/html")
-	}
-	if len(body) > 0 {
-		hdr.Set("Content-Length", strconv.Itoa(len(body)))
-	}
-	responseHeader, err := hdr.AppendResponse(buf[:0])
-	if err != nil {
-		println("error appending:", err.Error())
-	}
-	conn.Write(responseHeader)
-	if len(body) > 0 {
-		conn.Write(body)
-		time.Sleep(loopSleep)
-	}
 }
 
-// downloadSize returns the total number of bytes to send based on the
-// "size" query parameter: small=256B, medium=~358KB, large=~2MB.
-func downloadSize(uri string) (totalBytes int, label string) {
-	q := queryValue(uri, "size")
-	switch q {
-	case "small":
-		return 256, "small(256B)"
-	case "large":
-		return 2 * 1024 * 1024, "large(2MB)"
-	default:
-		return len(ipsum) * 256, "medium(358KB)"
-	}
+func handleLanding(ex *httphi.Exchange) {
+	ex.Respond(httphi.StatusOK, "text/html", webPage)
 }
 
-func handleDownload(conn *tcp.Conn, hdr *httpraw.Header, buf []byte, uri string) {
-	totalSize, label := downloadSize(uri)
+func handleToggleLED(ex *httphi.Exchange) {
+	lastLedState = !lastLedState
+	cystack.Device().GPIOSet(0, lastLedState)
+	ex.Respond(httphi.StatusOK, "", nil)
+}
+
+// handleDownload sends "size" query worth of bytes and reports the throughput
+// it managed over serial. size=small|medium|large.
+func handleDownload(ex *httphi.Exchange) {
+	sizeArg, _ := ex.RequestQueryValue("size")
+	totalSize, label := downloadSize(string(sizeArg))
 	println("download benchmark [", label, "]: sending", totalSize, "bytes")
 
-	hdr.Reset(nil)
-	hdr.SetProtocol("HTTP/1.1")
-	hdr.SetStatus("200", "OK")
-	hdr.Set("Content-Type", "application/octet-stream")
-	hdr.Set("Content-Length", strconv.Itoa(totalSize))
-	responseHeader, err := hdr.AppendResponse(buf[:0])
-	if err != nil {
-		println("error building download response:", err.Error())
-		return
-	}
-	_, err = conn.Write(responseHeader)
-	if err != nil {
-		println("error writing download header:", err.Error())
-		return
-	}
+	ex.StageHeader("Content-Type", "application/octet-stream")
+	ex.StageHeaderInt("Content-Length", int64(totalSize))
+	ex.StageHeader("Connection", "close")
+	ex.StageStatus(httphi.StatusOK)
 
 	start := time.Now()
 	remaining := totalSize
@@ -268,60 +193,58 @@ func handleDownload(conn *tcp.Conn, hdr *httpraw.Header, buf []byte, uri string)
 		if remaining < len(chunk) {
 			chunk = chunk[:remaining]
 		}
-		n, err := conn.Write(chunk)
+		n, err := ex.WriteBody(chunk)
 		remaining -= n
 		if err != nil {
 			println("download write error:", err.Error())
 			break
 		}
 	}
-	elapsed := time.Since(start)
-	sent := totalSize - remaining
-
-	printThroughput("DOWNLOAD "+label, sent, elapsed)
+	printThroughput("DOWNLOAD "+label, totalSize-remaining, time.Since(start))
 }
 
-func handleUpload(conn *tcp.Conn, hdr *httpraw.Header, buf []byte) {
-	clStr := hdr.Get("Content-Length")
-	contentLength := 0
-	if len(clStr) > 0 {
-		contentLength, _ = strconv.Atoi(string(clStr))
+// handleUpload drains the request body, discarding it, and answers with the
+// throughput measured server side.
+func handleUpload(ex *httphi.Exchange) {
+	contentLength, _, err := ex.RequestContentLength()
+	if err != nil {
+		ex.RespondString(httphi.StatusBadRequest, "text/plain", "bad Content-Length")
+		return
 	}
-	println("upload benchmark: expecting", contentLength, "bytes")
+	println("upload benchmark: expecting", int(contentLength), "bytes")
 
-	// Body bytes that arrived in the same segment as the headers
-	// are already consumed by the parser — retrieve them before reading more.
-	bodyPrefix, _ := hdr.Body()
-	totalRecv := len(bodyPrefix)
+	buf := <-uploadBufs
+	defer func() { uploadBufs <- buf }()
 
 	start := time.Now()
+	var totalRecv int64
 	for totalRecv < contentLength {
-		n, err := conn.Read(buf)
-		totalRecv += n
-		if err != nil || conn.State() != tcp.StateEstablished {
+		// ReadBody starts with the body bytes that arrived in the same read as
+		// the header, then continues from the connection.
+		n, err := ex.ReadBody(buf)
+		totalRecv += int64(n)
+		if err != nil {
 			break
 		}
 	}
 	elapsed := time.Since(start)
+	printThroughput("UPLOAD", int(totalRecv), elapsed)
 
-	printThroughput("UPLOAD", totalRecv, elapsed)
+	body := "received " + strconv.FormatInt(totalRecv, 10) + " bytes in " + elapsed.String()
+	ex.RespondString(httphi.StatusOK, "text/plain", body)
+}
 
-	// Send response with server-side measurement.
-	hdr.Reset(nil)
-	hdr.SetProtocol("HTTP/1.1")
-	hdr.SetStatus("200", "OK")
-	hdr.Set("Content-Type", "text/plain")
-
-	body := "received " + strconv.Itoa(totalRecv) + " bytes in " + elapsed.String()
-	hdr.Set("Content-Length", strconv.Itoa(len(body)))
-	responseHeader, err := hdr.AppendResponse(buf[:0])
-	if err != nil {
-		println("error building upload response:", err.Error())
-		return
+// downloadSize returns the total number of bytes to send based on the
+// "size" query parameter: small=256B, medium=~358KB, large=~2MB.
+func downloadSize(size string) (totalBytes int, label string) {
+	switch size {
+	case "small":
+		return 256, "small(256B)"
+	case "large":
+		return 2 * 1024 * 1024, "large(2MB)"
+	default:
+		return len(ipsum) * 256, "medium(358KB)"
 	}
-	conn.Write(responseHeader)
-	conn.Write([]byte(body))
-	time.Sleep(loopSleep)
 }
 
 func printThroughput(label string, bytes int, elapsed time.Duration) {
@@ -332,51 +255,6 @@ func printThroughput(label string, bytes int, elapsed time.Duration) {
 	Mbps := float32(bytes) * 8.0 / float32(ms) / 1000.0
 	kBps := 1000 * Mbps / 8
 	fmt.Fprintf(machine.Serial, "[BENCH] %s: %.2fMb/s = %.2fkBps, %db in %dms\n", label, Mbps, kBps, bytes, ms)
-	// println("[BENCH]", label, ":", bytes, "bytes in", ms, "ms ->", Mbps, "Mbps =", kBps, "kBps")
-}
-
-// queryValue extracts the value of a query parameter from a URI string.
-// Returns empty string if not found.
-func queryValue(uri, key string) string {
-	qIdx := -1
-	for i := 0; i < len(uri); i++ {
-		if uri[i] == '?' {
-			qIdx = i
-			break
-		}
-	}
-	if qIdx < 0 {
-		return ""
-	}
-	query := uri[qIdx+1:]
-	for len(query) > 0 {
-		k := query
-		eqIdx := -1
-		ampIdx := -1
-		for i := 0; i < len(query); i++ {
-			if query[i] == '=' && eqIdx < 0 {
-				eqIdx = i
-			}
-			if query[i] == '&' {
-				ampIdx = i
-				break
-			}
-		}
-		if ampIdx >= 0 {
-			k = query[:ampIdx]
-			query = query[ampIdx+1:]
-		} else {
-			query = ""
-		}
-		if eqIdx >= 0 && k[:eqIdx] == key {
-			return k[eqIdx+1:]
-		}
-	}
-	return ""
-}
-
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
 func loopForeverStack(stack *cywnet.Stack) {

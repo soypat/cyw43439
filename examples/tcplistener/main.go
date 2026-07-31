@@ -12,6 +12,9 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto"
+	"github.com/soypat/lneto/ethernet"
+	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
 	"github.com/soypat/lneto/x/xnet"
 )
@@ -58,8 +61,8 @@ func main() {
 		panic("while performing DHCP: " + err.Error())
 	}
 	stack := cystack.LnetoStack()
-	gatewayHW := stack.Gateway6()
-	println("dhcp addr:", dhcpResults.AssignedAddr.String(), "routerhw:", net.HardwareAddr(gatewayHW[:]).String())
+	gatewayHW := stack.GatewayHardwareAddr()
+	println("dhcp addr:", ipv4.String(dhcpResults.AssignedAddr4), "routerhw:", ethernet.String(gatewayHW))
 	// tracelog can log very verbose output to debug low level bugs in lneto.
 	// traceLog := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 	// 	Level: slog.LevelDebug - 2,
@@ -71,6 +74,7 @@ func main() {
 		RxBufSize:          512,
 		EstablishedTimeout: 5 * time.Second,
 		ClosingTimeout:     5 * time.Second,
+		NewBackoff:         func() lneto.BackoffStrategy { return cywnet.DefaultStackBackoff },
 		// Logger:             traceLog.WithGroup("tcppool"),
 		// ConnLogger:         traceLog,
 	})
@@ -84,11 +88,11 @@ func main() {
 	}
 	// listener.SetLogger(traceLog)
 	// attach listener to stack so as to begin receiving packets.
-	err = stack.RegisterListener(&listener)
+	err = stack.RegisterListenerTCP(&listener)
 	if err != nil {
 		panic(err)
 	}
-	println("listening on:", netip.AddrPortFrom(stack.Addr(), ourPort).String())
+	println("listening on:", ipv4.String(stack.Addr4()), "port", ourPort)
 	for {
 		if listener.NumberOfReadyToAccept() == 0 {
 			time.Sleep(loopSleep)

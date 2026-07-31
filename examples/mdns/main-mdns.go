@@ -12,7 +12,8 @@ import (
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
 	"github.com/soypat/lneto/dns"
-	"github.com/soypat/lneto/mdns"
+	"github.com/soypat/lneto/dns/mdns"
+	"github.com/soypat/lneto/ipv4"
 )
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
@@ -53,10 +54,10 @@ func main() {
 	if err != nil {
 		panic("DHCP failed:" + err.Error())
 	}
-	logger.Info("DHCP complete", slog.String("addr", dhcpResults.AssignedAddr.String()))
+	logger.Info("DHCP complete", slog.String("addr", ipv4.String(dhcpResults.AssignedAddr4)))
 
 	stack := cystack.LnetoStack()
-	addr := stack.Addr()
+	addr := stack.Addr4()
 	// MDNS for locating local domains.
 	var mdnsclient mdns.Client
 	multicast := [4]byte{224, 0, 0, 251}
@@ -66,14 +67,14 @@ func main() {
 		Services: []mdns.Service{
 			{
 				Host: dns.MustNewName(hostname + ".local"),
-				Addr: addr.AsSlice(),
+				Addr: addr[:],
 			},
 		},
 	})
 	if err != nil {
 		panic("MDNS config failed: " + err.Error())
 	}
-	err = stack.RegisterUDP(&mdnsclient, nil, mdns.Port)
+	err = stack.RegisterUDP4(&mdnsclient, ipv4.UnspecifiedAddr(), mdns.Port)
 	if err != nil {
 		panic("MDNS register failed: " + err.Error())
 	}
@@ -81,11 +82,11 @@ func main() {
 		timeout = 2 * time.Second
 		retries = 2
 	)
-	addr, err = cywnet.DoMDNS(&mdnsclient, remoteHostname+".local", timeout, retries)
+	mdnsAddr, err := cywnet.DoMDNS(&mdnsclient, remoteHostname+".local", timeout, retries)
 	if err != nil {
 		panic(err)
 	}
-	println("Address discovered for", remoteHostname, addr.String())
+	println("Address discovered for", remoteHostname, mdnsAddr.String())
 	select {} // keep stack running serving MDNS hostname.
 }
 

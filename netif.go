@@ -45,7 +45,7 @@ func (d *Device) PollOne() (bool, error) {
 
 // RecvEthHandle sets handler for receiving Ethernet pkt
 // If set to nil then incoming packets are ignored.
-func (d *Device) RecvEthHandle(handler func(pkt []byte) error) {
+func (d *Device) RecvEthHandle(handler func(pkt []byte)) {
 	err := d.acquire(modeWifi)
 	defer d.release()
 	if err != nil {
