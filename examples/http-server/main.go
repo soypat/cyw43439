@@ -22,18 +22,11 @@ import (
 )
 
 const numListeners = 1 // Just one listener.
-const maxConns = 3     // Max amount of concurrent connections.
 const hostname = "http-pico"
 const listenPort = 80                  // HTTP server port.
 const loopSleep = 5 * time.Millisecond // Sleep between polls of network.
-
-// httphi.Router memory. All of it is allocated during Configure, serving
-// requests afterwards allocates nothing.
-const (
-	httpRequestBuf  = 1024 // Chrome tends to send ~700 bytes on a landing page request.
-	httpResponseBuf = 128  // Shares leftover request memory, so not a hard limit.
-	httpNumHeaderKV = httpRequestBuf / 32
-)
+const httpConns = 3                    // Amount of goroutines spawned to deal with connections concurrently.
+const httpConnPerMemory = 2048         // Memory allocated on init per connection.
 
 // Setup Wifi Password and SSID by creating ssid.text and password.text files in
 // ../cywnet/credentials/ directory. Credentials are used for examples in this repo.
@@ -84,7 +77,7 @@ func main() {
 	// 	Level: slog.LevelDebug - 2,
 	// }))
 	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
-		PoolSize:           maxConns,
+		PoolSize:           httpConns,
 		QueueSize:          3,
 		TxBufSize:          len(webPage) + 128,
 		RxBufSize:          256,
@@ -103,17 +96,9 @@ func main() {
 	var http httphi.MuxSlice
 	http.Handle("GET /", handleLanding)
 	http.Handle("GET /toggle-led", handleToggleLED)
-
+	cfg := httphi.DefaultRouterConfig(httpConns, httpConnPerMemory, http.MaxPathValues())
 	var router httphi.Router
-	err = router.Configure(httphi.RouterConfig{
-		FixedNumGoroutines:          maxConns, // Workers and exchanges allocated here and never again.
-		RequestHeaderBufferSize:     httpRequestBuf,
-		ResponseHeaderMinBufferSize: httpResponseBuf,
-		RequestNumHeaderKVCap:       httpNumHeaderKV,
-		NormalizeOutgoingKeys:       true,
-		Mux:                         &http,
-		Logger:                      logger,
-	})
+	err = router.Configure(&http, cfg)
 	if err != nil {
 		panic("router configure:" + err.Error())
 	}

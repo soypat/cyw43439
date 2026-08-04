@@ -1,5 +1,5 @@
-github.com/soypat/lneto v0.3.0 h1:P9PPYejdkuvcG9z7HE47zDtEEXrWXDnSkxOn1hEPmEc=
-github.com/soypat/lneto v0.3.0/go.mod h1:Be5PjwoYukvHFiUXxpYi8+ppH2F/gw/vjGBvFdv+Ti8=
+github.com/soypat/lneto v0.3.2 h1:iUFeRSq2czT7Db6MMOsAnMCBlKCqvIr941zsNf9dcu0=
+github.com/soypat/lneto v0.3.2/go.mod h1:Be5PjwoYukvHFiUXxpYi8+ppH2F/gw/vjGBvFdv+Ti8=
 github.com/soypat/natiu-mqtt v0.6.0 h1:ddrem9iAqFYtQOx2C7AhCizhPXXmGZs1T5fkvLroPO4=
 github.com/soypat/natiu-mqtt v0.6.0/go.mod h1:xEta+cwop9izVCW7xOx2W+ct9PRMqr0gNVkvBPnQTc4=
 github.com/soypat/saleae v0.0.0-20230607000858-72cbd6ef4f23 h1:oxtjmxCkdYGMwo/VSt3+zllqB117yxwH4oUC8unTbqs=

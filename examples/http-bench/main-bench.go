@@ -112,13 +112,12 @@ func main() {
 	mux.Handle("POST /upload", handleUpload)
 
 	var router httphi.Router
-	err = router.Configure(httphi.RouterConfig{
+	err = router.Configure(&mux, httphi.RouterConfig{
 		FixedNumGoroutines:          maxConns, // Workers and exchanges allocated here and never again.
 		RequestHeaderBufferSize:     httpRequestBuf,
 		ResponseHeaderMinBufferSize: httpResponseBuf,
 		RequestNumHeaderKVCap:       httpNumHeaderKV,
 		NormalizeOutgoingKeys:       true,
-		Mux:                         &mux,
 		Logger:                      logger,
 	})
 	if err != nil {
