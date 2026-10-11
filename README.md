@@ -14,7 +14,7 @@ tinygo flash -target=pico -stack-size=8kb -scheduler=tasks -monitor  ./examples/
 
 1. Clone this repository
 
-2. Create ssid.text and password.text files in the [`examples/common`](examples/common) directory. Write your SSID into ssid.text and WiFi password into password.text. Do not add final newlines to the files. If the password is empty then an open network is assumed.
+2. Create ssid.text and password.text files in the [`examples/cywnet/credentials`](examples/cywnet/credentials) directory. Write your SSID into ssid.text and WiFi password into password.text. Do not add final newlines to the files. If the password file is empty then an open network is assumed.
 
 3. Run any of the examples in the [`examples`](./examples) directory
 
