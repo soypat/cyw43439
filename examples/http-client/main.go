@@ -3,6 +3,7 @@ package main
 // WARNING: default -scheduler=cores unsupported, compile with -scheduler=tasks set!
 
 import (
+	"context"
 	"log/slog"
 	"machine"
 	"net/netip"
@@ -62,7 +63,7 @@ func main() {
 		panic("parsing server address:" + err.Error())
 	}
 
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 	rstack := stack.StackRetrying(cywnet.DefaultStackBackoff)
 
 	// Configure TCP connection.
@@ -99,7 +100,7 @@ func main() {
 		logger.Info("dialing", slog.String("serveraddr", serverAddrStr), slog.Uint64("localport", uint64(lport)))
 
 		// Dial TCP with retries.
-		err = rstack.DoDialTCP(&conn, lport, svAddr, connTimeout, 3)
+		err = rstack.DoDialTCP(context.Background(), &conn, lport, svAddr, connTimeout, 3)
 		if err != nil {
 			logger.Error("tcp dial failed", slog.String("err", err.Error()))
 			closeConn(&conn)

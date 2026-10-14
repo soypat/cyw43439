@@ -58,7 +58,7 @@ func main() {
 	if err != nil {
 		panic("while performing DHCP: " + err.Error())
 	}
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 	gatewayHW := stack.GatewayHardwareAddr()
 	println("dhcp addr:", ipv4.String(dhcpResults.AssignedAddr4), "routerhw:", ethernet.String(gatewayHW))
 	var buf [512]byte

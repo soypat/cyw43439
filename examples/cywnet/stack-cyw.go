@@ -125,7 +125,7 @@ func (stack *Stack) Device() *cyw43439.Device {
 	return stack.dev
 }
 
-func (stack *Stack) LnetoStack() *xnet.StackAsync {
+func (stack *Stack) StackAsync() *xnet.StackAsync {
 	return &stack.s
 }
 
@@ -170,7 +170,7 @@ func (stack *Stack) SetupWithDHCP(cfg DHCPConfig) (dhcpResults *xnet.DHCPResults
 		reqaddr = cfg.RequestedAddr.As4()
 	}
 
-	lstack := stack.LnetoStack()
+	lstack := stack.StackAsync()
 	rstack := lstack.StackRetrying(DefaultStackBackoff)
 	dhcpResults, err = rstack.DoDHCPv4(reqaddr, 3*time.Second, 3)
 	if err != nil {

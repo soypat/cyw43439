@@ -76,7 +76,7 @@ func main() {
 	// traceLog := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 	// 	Level: slog.LevelDebug - 2,
 	// }))
-	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
+	tcpPool, err := cystack.StackAsync().NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:           httpConns,
 		QueueSize:          3,
 		TxBufSize:          len(webPage) + 128,
@@ -103,7 +103,7 @@ func main() {
 		panic("router configure:" + err.Error())
 	}
 
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 
 	// Create and register TCP listener.
 	var listener tcp.Listener
@@ -128,7 +128,7 @@ func main() {
 			continue
 		}
 
-		conn, _, err := listener.TryAccept()
+		conn, err := listener.TryAccept()
 		if err != nil {
 			logger.Error("listener accept:", slog.String("err", err.Error()))
 			time.Sleep(time.Second)
