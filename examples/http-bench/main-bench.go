@@ -20,6 +20,7 @@ import (
 	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
+	"github.com/soypat/lneto/tcp/rto"
 	"github.com/soypat/lneto/x/xnet"
 )
 
@@ -98,7 +99,13 @@ func main() {
 		EstablishedTimeout: 10 * time.Second,
 		ClosingTimeout:     5 * time.Second,
 		NewBackoff:         func() lneto.BackoffStrategy { return backoff },
+		NewPolicy: func() tcp.Policy {
+			var t rto.Timer
+			t.Configure(nanotime)
+			return &t
+		},
 	})
+
 	if err != nil {
 		panic("tcppool create:" + err.Error())
 	}
@@ -284,4 +291,10 @@ func backoff(consecutiveBackoffs uint) time.Duration {
 		wait = maxWait
 	}
 	return time.Duration(wait)
+}
+
+var start = time.Now()
+
+func nanotime() int64 {
+	return time.Since(start).Nanoseconds()
 }
