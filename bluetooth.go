@@ -20,6 +20,8 @@ var (
 	errBTInvalidVersionLength = errors.New("invalid bt version length")
 	errBTWatermark            = errors.New("bt watermark set failed")
 	errLargeHCIPacket         = errors.New("cyw: HCI packet too large for buffer")
+	errHCIWriteBufferFull     = errors.New("cyw: HCI write ring buffer full")
+	errHCIRingIndex           = errors.New("cyw: HCI ring index out of range")
 )
 
 type deviceHCI struct {
@@ -382,7 +384,7 @@ func (d *Device) hci_write(b []byte) error {
 	alignBuflen := alignup(uint32(cmdlen)+4, 4)
 
 	bufWithCmd := u32AsU8(d._sendIoctlBuf[:])[:256]
-	if cmdlen > len(bufWithCmd)-3 {
+	if int(alignBuflen) > len(bufWithCmd) {
 		return errHCIPacketTooLarge
 	}
 	bufWithCmd[0] = byte(cmdlen)
@@ -395,12 +397,27 @@ func (d *Device) hci_write(b []byte) error {
 	if err != nil {
 		return err
 	}
-	addr := d.btaddr + whd.BTSDIO_OFFSET_HOST_WRITE_BUF + d.h2bWritePtr
-	err = d.bp_write(addr, paddedBufWithCmd)
+	// host→BT ring: check space, split on wrap.
+	n := uint32(len(paddedBufWithCmd))
+	err = d.hci_check_write_space(n)
 	if err != nil {
 		return err
 	}
-	d.h2bWritePtr += uint32(len(paddedBufWithCmd))
+	addr := d.btaddr + whd.BTSDIO_OFFSET_HOST_WRITE_BUF + d.h2bWritePtr
+	if d.h2bWritePtr+n > whd.BTSDIO_FWBUF_SIZE {
+		// Both parts stay 4-byte aligned: h2bWritePtr and n always are.
+		first := whd.BTSDIO_FWBUF_SIZE - d.h2bWritePtr
+		err = d.bp_write(addr, paddedBufWithCmd[:first])
+		if err == nil {
+			err = d.bp_write(d.btaddr+whd.BTSDIO_OFFSET_HOST_WRITE_BUF, paddedBufWithCmd[first:])
+		}
+	} else {
+		err = d.bp_write(addr, paddedBufWithCmd)
+	}
+	if err != nil {
+		return err
+	}
+	d.h2bWritePtr = (d.h2bWritePtr + n) % whd.BTSDIO_FWBUF_SIZE
 	err = d.bp_write32(d.btaddr+whd.BTSDIO_OFFSET_HOST2BT_IN, d.h2bWritePtr)
 	if err != nil {
 		return err
@@ -410,6 +427,27 @@ func (d *Device) hci_write(b []byte) error {
 		return err
 	}
 	return d.bt_bus_release()
+}
+
+// hci_check_write_space reports whether the host-to-BT ring has room for n
+// more bytes, going by the controller's read pointer (HOST2BT_OUT). Like
+// pico-sdk's cybt_hci_write_buf it checks once and does not wait: the caller
+// holds the bus, so the controller's events can only be drained (freeing it
+// to consume more of the ring) after returning. One word always stays free,
+// so a full ring is never mistaken for an empty one.
+func (d *Device) hci_check_write_space(n uint32) error {
+	out, err := d.bp_read32(d.btaddr + whd.BTSDIO_OFFSET_HOST2BT_OUT)
+	if err != nil {
+		return err
+	}
+	if out >= whd.BTSDIO_FWBUF_SIZE {
+		return errHCIRingIndex
+	}
+	used := (d.h2bWritePtr - out) % whd.BTSDIO_FWBUF_SIZE
+	if used+n >= whd.BTSDIO_FWBUF_SIZE {
+		return errHCIWriteBufferFull
+	}
+	return nil
 }
 
 func (d *Device) bt_wait_ready() error {
@@ -499,6 +537,7 @@ func (d *Device) bt_init_buffers() error {
 		return errZeroBTAddr
 	}
 	d.btaddr = btaddr
+	d.h2bWritePtr, d.b2hReadPtr = 0, 0
 	d.bp_write32(btaddr+whd.BTSDIO_OFFSET_HOST2BT_IN, 0)
 	d.bp_write32(btaddr+whd.BTSDIO_OFFSET_HOST2BT_OUT, 0)
 	d.bp_write32(btaddr+whd.BTSDIO_OFFSET_BT2HOST_IN, 0)
