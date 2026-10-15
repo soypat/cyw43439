@@ -75,7 +75,7 @@ func main() {
 		panic("parsing server address:" + err.Error())
 	}
 
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 	rstack := stack.StackRetrying(cywnet.DefaultStackBackoff)
 
 	client := mqtt.NewClient(mqtt.ClientConfig{
@@ -107,7 +107,7 @@ func main() {
 			conn.Abort()
 		}
 		lport := uint16(stack.Prand32()>>17) + 1024
-		err = rstack.DoDialTCP(&conn, lport, svAddr, connTimeout, 3)
+		err = rstack.DoDialTCP(context.Background(), &conn, lport, svAddr, connTimeout, 3)
 		if err != nil {
 			logger.Error("tcp dial failed", slog.String("err", err.Error()))
 			time.Sleep(2 * time.Second)

@@ -20,6 +20,7 @@ import (
 	"github.com/soypat/lneto/http/httphi"
 	"github.com/soypat/lneto/ipv4"
 	"github.com/soypat/lneto/tcp"
+	"github.com/soypat/lneto/tcp/rto"
 	"github.com/soypat/lneto/x/xnet"
 )
 
@@ -89,7 +90,7 @@ func main() {
 		panic("DHCP failed:" + err.Error())
 	}
 
-	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
+	tcpPool, err := cystack.StackAsync().NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:  maxConns,
 		QueueSize: 10,
 		// Increasing buffers above x3 maxTCPReadWrite has diminishing returns.
@@ -98,7 +99,13 @@ func main() {
 		EstablishedTimeout: 10 * time.Second,
 		ClosingTimeout:     5 * time.Second,
 		NewBackoff:         func() lneto.BackoffStrategy { return backoff },
+		NewPolicy: func() tcp.Policy {
+			var t rto.Timer
+			t.Configure(nanotime)
+			return &t
+		},
 	})
+
 	if err != nil {
 		panic("tcppool create:" + err.Error())
 	}
@@ -124,7 +131,7 @@ func main() {
 		panic("router configure:" + err.Error())
 	}
 
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 
 	var listener tcp.Listener
 	err = listener.Reset(listenPort, tcpPool)
@@ -148,7 +155,7 @@ func main() {
 			continue
 		}
 
-		conn, _, err := listener.TryAccept()
+		conn, err := listener.TryAccept()
 		if err != nil {
 			logger.Error("listener accept:", slog.String("err", err.Error()))
 			time.Sleep(time.Second)
@@ -284,4 +291,10 @@ func backoff(consecutiveBackoffs uint) time.Duration {
 		wait = maxWait
 	}
 	return time.Duration(wait)
+}
+
+var start = time.Now()
+
+func nanotime() int64 {
+	return time.Since(start).Nanoseconds()
 }
