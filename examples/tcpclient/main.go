@@ -3,6 +3,7 @@ package main
 // WARNING: default -scheduler=cores unsupported, compile with -scheduler=tasks set!
 
 import (
+	"context"
 	"errors"
 	"io"
 	"machine"
@@ -62,7 +63,7 @@ func main() {
 	if err != nil {
 		panic("while performing DHCP: " + err.Error())
 	}
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 	gatewayHW := stack.GatewayHardwareAddr()
 	println("dhcp addr:", ipv4.String(dhcpResults.AssignedAddr4), "routerhw:", ethernet.String(gatewayHW))
 	var buf [512]byte
@@ -80,7 +81,8 @@ func main() {
 	for {
 		lport := uint16(stack.Prand32()>>17) + 1 // Ensure non-zero local port.
 		println("attempting TCP connection with port", lport)
-		err := rstack.DoDialTCP(&conn, lport, targetIPPort, tcpTimeout, tcpRetries)
+		ctx := context.Background()
+		err := rstack.DoDialTCP(ctx, &conn, lport, targetIPPort, tcpTimeout, tcpRetries)
 		if err != nil {
 			conn.Close()
 			println("failed TCP:", err.Error())

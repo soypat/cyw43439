@@ -60,14 +60,14 @@ func main() {
 	if err != nil {
 		panic("while performing DHCP: " + err.Error())
 	}
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 	gatewayHW := stack.GatewayHardwareAddr()
 	println("dhcp addr:", ipv4.String(dhcpResults.AssignedAddr4), "routerhw:", ethernet.String(gatewayHW))
 	// tracelog can log very verbose output to debug low level bugs in lneto.
 	// traceLog := slog.New(slog.NewTextHandler(machine.Serial, &slog.HandlerOptions{
 	// 	Level: slog.LevelDebug - 2,
 	// }))
-	tcpPool, err := xnet.NewTCPPool(xnet.TCPPoolConfig{
+	tcpPool, err := stack.NewTCPPool(xnet.TCPPoolConfig{
 		PoolSize:           4,
 		QueueSize:          3,
 		TxBufSize:          512,
@@ -99,7 +99,7 @@ func main() {
 			tcpPool.CheckTimeouts()
 			continue
 		}
-		conn, _, err := listener.TryAccept()
+		conn, err := listener.TryAccept()
 		if err != nil {
 			panic(err)
 		}
@@ -107,25 +107,25 @@ func main() {
 	}
 }
 
-func handleConn(conn *tcp.Conn) {
+func handleConn(conn tcp.ConnHandle) {
 	// Do simple echo of data received.
 	var buf [64]byte
 	start := time.Now()
 	ntot := 0
 	// Cache address/port at start to avoid repeated mutex locks during println.
 	// On multicore, frequent lock/unlock + slow Serial can cause issues.
-	addr, _ := netip.AddrFromSlice(conn.RemoteAddr())
-	addrs := addr.String()
-	port := conn.RemotePort()
-	println("conn address:", addrs, "port", port)
+	addrp := conn.RemoteAddrPort()
+	addrps := addrp.String()
+	println("conn address:", addrps)
+
 	for {
-		println("read port", port)
+		println("read port", addrp.Port())
 		n, err := conn.Read(buf[:])
 		ntot += n
 		state := conn.State()
 		if err == net.ErrClosed || state != tcp.StateEstablished {
 			conn.Close()
-			println("connection closed:", addrs, "written:", ntot)
+			println("connection closed:", addrps, "written:", ntot)
 			return
 		} else if n == 0 {
 			if time.Since(start) > 10*time.Second {
@@ -134,7 +134,7 @@ func handleConn(conn *tcp.Conn) {
 			time.Sleep(loopSleep)
 			continue
 		}
-		println("write port", port, "data", n)
+		println("write port", addrp.Port(), "data", n)
 		conn.Write(buf[:n])
 	}
 }

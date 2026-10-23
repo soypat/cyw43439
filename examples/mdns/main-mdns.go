@@ -56,7 +56,7 @@ func main() {
 	}
 	logger.Info("DHCP complete", slog.String("addr", ipv4.String(dhcpResults.AssignedAddr4)))
 
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 	addr := stack.Addr4()
 	// MDNS for locating local domains.
 	var mdnsclient mdns.Client

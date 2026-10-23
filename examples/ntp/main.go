@@ -12,6 +12,7 @@ import (
 	"github.com/soypat/cyw43439"
 	"github.com/soypat/cyw43439/examples/cywnet"
 	"github.com/soypat/cyw43439/examples/cywnet/credentials"
+	"github.com/soypat/lneto/dns"
 	"github.com/soypat/lneto/ipv4"
 )
 
@@ -22,6 +23,7 @@ const hostname = "ntp-pico"
 const ntpHost = "pool.ntp.org"
 const pollTime = 5 * time.Millisecond
 
+var ntpName = dns.MustNewName(ntpHost)
 var requestedIP = [4]byte{192, 168, 1, 145}
 
 func main() {
@@ -51,11 +53,12 @@ func main() {
 	}
 	logger.Info("DHCP complete", slog.String("addr", ipv4.String(dhcpResults.AssignedAddr4)))
 
-	stack := cystack.LnetoStack()
+	stack := cystack.StackAsync()
 	rstack := stack.StackRetrying(cywnet.DefaultStackBackoff)
 	// DNS lookup for NTP server.
 	logger.Info("resolving NTP host", slog.String("host", ntpHost), slog.Any("dnssv", dhcpResults.DNSServers))
-	addrs, err := rstack.DoLookupIP(ntpHost, 5*time.Second, 3)
+	var addrs [1]netip.Addr
+	_, err = rstack.DoLookupIP(addrs[:], ntpName, 5*time.Second, 3)
 	if err != nil {
 		panic("DNS lookup failed:" + err.Error())
 	}
