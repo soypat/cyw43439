@@ -57,9 +57,9 @@ func main() {
 	rstack := stack.StackRetrying(cywnet.DefaultStackBackoff)
 	// DNS lookup for NTP server.
 	logger.Info("resolving NTP host", slog.String("host", ntpHost), slog.Any("dnssv", dhcpResults.DNSServers))
-	var addrs [1]netip.Addr
-	_, err = rstack.DoLookupIP(addrs[:], ntpName, 5*time.Second, 3)
-	if err != nil {
+	var addrs [1]netip.Addr // we only get first address.
+	n, err := rstack.DoLookupIP(addrs[:], ntpName, 5*time.Second, 3)
+	if err != nil && n == 0 { // Do not fail on address written! We only need 1 address.
 		panic("DNS lookup failed:" + err.Error())
 	}
 	logger.Info("DNS resolved", slog.String("addr", addrs[0].String()))
@@ -80,6 +80,29 @@ func main() {
 	println("ntp done newtime=", now.String())
 	runtime.AdjustTimeOffset(int64(offset))
 	logger.Info("time-update")
+	const timeLayout = "Jan _2 15:04:05 MST" // Will be UTC.
+	var timebuf [len(timeLayout)]byte
+	for {
+		nowUTC := time.Now()
+		for _, zone := range zones {
+			t := nowUTC.In(zone.Zone)
+			buf := t.AppendFormat(timebuf[:], timeLayout)
+			println(string(buf), zone.City)
+		}
+		println("------------\n")
+		time.Sleep(5 * time.Second)
+	}
+}
+
+var zones = []struct {
+	City string
+	Zone *time.Location
+}{
+	{City: "La Plata", Zone: time.FixedZone("ART", -3*3600)},
+	{City: "Hanoi", Zone: time.FixedZone("ICT", 7*3600)},
+	{City: "Oviedo", Zone: time.FixedZone("CET", 1*3600)},
+	{City: "Ouagadougou", Zone: time.FixedZone("GMT", 0)},
+	{City: "Seattle", Zone: time.FixedZone("PST", -8*3600)},
 }
 
 func loopForeverStack(stack *cywnet.Stack) {
