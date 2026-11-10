@@ -55,5 +55,29 @@ func NewPicoWDevice() *Device {
 	if err != nil {
 		panic(err)
 	}
-	return New(WL_REG_ON.Set, CS.Set, cmd)
+	resetting := false
+	setPower := func(on bool) {
+		WL_REG_ON.Set(on)
+		if !on {
+			CS.High()
+			// Detach PIO so its previous transaction cannot affect the boot pins.
+			// Like pico-sdk, drive DATA low throughout the chip's power-cycle.
+			DATA_OUT.Configure(machine.PinConfig{Mode: machine.PinOutput})
+			CLK.Configure(machine.PinConfig{Mode: machine.PinOutput})
+			DATA_OUT.Low()
+			CLK.Low()
+			resetting = true
+		}
+	}
+	setCS := func(high bool) {
+		if !high && resetting {
+			// Init has now waited 250 ms after power-on. Restore the same PIO0
+			// bus before selecting the chip; SPI3w resets its SM/FIFOs per transfer.
+			DATA_OUT.Configure(machine.PinConfig{Mode: machine.PinPIO0})
+			CLK.Configure(machine.PinConfig{Mode: machine.PinPIO0})
+			resetting = false
+		}
+		CS.Set(high)
+	}
+	return New(setPower, setCS, bus), nil
 }
